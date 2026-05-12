@@ -1,0 +1,19 @@
+import path from "path";
+import type { RequestHandler } from "express";
+import { backendMiddlewarePath, backendModelPath } from "../legacy/legacy.paths";
+
+type AuthMiddleware = { protect: RequestHandler };
+type NotificationModelType = {
+  find: (...args: unknown[]) => any;
+  findOne: (...args: unknown[]) => any;
+  countDocuments: (...args: unknown[]) => Promise<number>;
+  updateMany: (...args: unknown[]) => Promise<unknown>;
+};
+
+const loadModule = <T>(modulePath: string): T => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require(modulePath) as T;
+};
+
+export const { protect } = loadModule<AuthMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
+export const Notification = loadModule<NotificationModelType>(path.join(backendModelPath, "Notification.js"));

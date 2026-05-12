@@ -1,0 +1,10 @@
+{
+  "google": {
+    "daily": 7,
+    "lastReset": "2025-11-29"
+  },
+  "serpapi": {
+    "monthly": 0,
+    "lastReset": "2025-11"
+  }
+}
