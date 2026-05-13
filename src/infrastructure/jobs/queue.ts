@@ -8,14 +8,13 @@ export const QUEUE_NAMES = {
   NOTIFICATION: "notification"
 } as const;
 
-// ── Connection config (reuses the same Redis as caching/sockets) ──────────
+// ── Connection config — BullMQ uses ioredis format (flat host/port, not node-redis socket object) ──
 const connection = {
-  socket: {
-    host: env.REDIS_HOST,
-    port: env.REDIS_PORT
-  },
+  host: env.REDIS_HOST,
+  port: env.REDIS_PORT,
   username: env.REDIS_USERNAME,
-  password: env.REDIS_PASSWORD
+  password: env.REDIS_PASSWORD,
+  maxRetriesPerRequest: null // required by BullMQ for blocking commands
 };
 
 // ── Queues ─────────────────────────────────────────────────────────────────
