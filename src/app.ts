@@ -14,7 +14,9 @@ export const createApp = () => {
   app.set("trust proxy", 1);
   const allowedOrigins = env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean);
 
-  app.use(helmet());
+  app.use(helmet({
+    crossOriginOpenerPolicy: { policy: "unsafe-none" }
+  }));
   app.use(compression());
   app.use(
     cors({

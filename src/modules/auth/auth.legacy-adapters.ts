@@ -21,6 +21,7 @@ type LegacyAuthController = {
   resetPasswordWithOtp: RequestHandler;
   checkPasswordSame: RequestHandler;
   generateGuestToken: RequestHandler;
+  googleTokenLogin: RequestHandler;
 };
 
 type ProgressiveAuthLimiter = {

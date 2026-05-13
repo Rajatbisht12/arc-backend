@@ -103,6 +103,8 @@ router.delete("/account", protect, deleteAccountValidation, legacyAuthController
 router.post("/logout", legacyAuthController.logout);
 router.post("/complete-google-profile", protect, legacyAuthController.completeGoogleProfile);
 
+router.post("/google/token", legacyAuthController.googleTokenLogin);
+
 router.get("/google", passport.authenticate("google", { scope: ["profile", "email"] }));
 router.get(
   "/google/callback",
