@@ -11,6 +11,7 @@ const { formatUserDTO, formatPostDTO } = require('../utils/dto');
 const { getJson, setJson, del } = require('../utils/redisCache');
 const { invalidateUserCache } = require('../middleware/auth');
 const log = require('../utils/logger');
+const { normalizeQuerySearch, escapeRegex } = require('../utils/searchQuery');
 
 // ── Redis Profile Cache helpers ──
 const PROFILE_CACHE_TTL = 300; // 5 minutes
@@ -25,15 +26,20 @@ const getUsers = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const { search, userType, skillLevel, lookingForTeam, recruiting, followers } = req.query;
+    const { userType, skillLevel, lookingForTeam, recruiting, followers } = req.query;
+    const search = normalizeQuerySearch(
+      req.query.search !== undefined ? req.query.search : req.query.q
+    );
 
     // Build filter object
-    const filter = { 
-      isActive: true, 
+    const filter = {
+      isActive: true,
       isSuperUser: { $ne: true },
-      // Exclude duo teams (temporary teams created for tournaments)
-      username: { $not: /^duo_/ }
     };
+    const andConditions = [
+      // Exclude duo teams (temporary teams created for tournaments)
+      { username: { $not: /^duo_/ } },
+    ];
 
     if (userType) filter.userType = userType;
     if (skillLevel) filter['playerInfo.skillLevel'] = skillLevel;
@@ -62,16 +68,20 @@ const getUsers = async (req, res) => {
       }
     }
 
-    // Search functionality
     if (search) {
-      filter.$or = [
-        { username: { $regex: search, $options: 'i' } },
-        { 'profile.displayName': { $regex: search, $options: 'i' } },
-        { 'profile.bio': { $regex: search, $options: 'i' } },
-        { 'playerInfo.games.name': { $regex: search, $options: 'i' } },
-        { 'teamInfo.recruitingFor': { $regex: search, $options: 'i' } }
-      ];
+      const pattern = escapeRegex(search);
+      andConditions.push({
+        $or: [
+          { username: { $regex: pattern, $options: 'i' } },
+          { 'profile.displayName': { $regex: pattern, $options: 'i' } },
+          { 'profile.bio': { $regex: pattern, $options: 'i' } },
+          { 'playerInfo.games.name': { $regex: pattern, $options: 'i' } },
+          { 'teamInfo.recruitingFor': { $regex: pattern, $options: 'i' } },
+        ],
+      });
     }
+
+    filter.$and = andConditions;
 
     const users = await User.find(filter)
       .select('-password -email')
@@ -609,7 +619,9 @@ const getFollowers = async (req, res) => {
     const userId = req.params.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
-    const search = req.query.search;
+    const search = normalizeQuerySearch(
+      req.query.search !== undefined ? req.query.search : req.query.q
+    );
 
     // Use Follow model for efficient paginated query
     const result = await Follow.getFollowers(userId, { page, limit });

@@ -6,6 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const log = require('../utils/logger');
+const { normalizeQuerySearch, escapeRegex } = require('../utils/searchQuery');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -529,7 +530,10 @@ const getTournaments = async (req, res) => {
     const limit = parseInt(req.query.limit) || 100; // Increased default limit to show more tournaments
     const skip = (page - 1) * limit;
 
-    const { status, game, format, search, filter } = req.query;
+    const { status, game, format, filter } = req.query;
+    const search = normalizeQuerySearch(
+      req.query.search !== undefined ? req.query.search : req.query.q
+    );
 
     // Build filter object
     const queryFilter = {};
@@ -595,11 +599,12 @@ const getTournaments = async (req, res) => {
     if (format) queryFilter.format = format;
 
     if (search) {
+      const pattern = escapeRegex(search);
       const searchCondition = {
         $or: [
-          { name: { $regex: search, $options: 'i' } },
-          { description: { $regex: search, $options: 'i' } }
-        ]
+          { name: { $regex: pattern, $options: 'i' } },
+          { description: { $regex: pattern, $options: 'i' } },
+        ],
       };
       // If $or already exists from filter, merge using $and
       if (queryFilter.$or) {
