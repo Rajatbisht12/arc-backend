@@ -2,7 +2,16 @@ import { createClient } from "redis";
 import { env } from "../../config/env";
 import { logger } from "../../config/logger";
 
-export const redisPubClient = createClient({ url: env.REDIS_URL });
+const redisConfig = {
+  username: env.REDIS_USERNAME,
+  password: env.REDIS_PASSWORD,
+  socket: {
+    host: env.REDIS_HOST,
+    port: env.REDIS_PORT
+  }
+};
+
+export const redisPubClient = createClient(redisConfig);
 export const redisSubClient = redisPubClient.duplicate();
 export const redisCacheClient = redisPubClient.duplicate();
 

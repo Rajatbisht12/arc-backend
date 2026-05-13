@@ -6,7 +6,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(5001),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   MONGODB_URI: z.string().min(1),
-  REDIS_URL: z.string().min(1),
+  REDIS_HOST: z.string().min(1),
+  REDIS_PORT: z.coerce.number().default(6379),
+  REDIS_USERNAME: z.string().min(1),
+  REDIS_PASSWORD: z.string().min(1),
   JWT_SECRET: z.string().min(16)
 });
 
