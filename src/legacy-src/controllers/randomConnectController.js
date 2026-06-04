@@ -436,15 +436,13 @@ const emitConnectionMatched = async (io, userId1Str, userId2Str, connectionData,
     
     // Try multiple ways to match userId
     const userSockets1 = allSockets.filter(s => {
-      if (!s.userId) return false;
-      const socketUserId = String(s.userId).trim();
-      return socketUserId === userId1Normalized;
+      const socketUserId = String(s.authUser?.userId ?? '').trim();
+      return socketUserId !== '' && socketUserId === userId1Normalized;
     });
-    
+
     const userSockets2 = allSockets.filter(s => {
-      if (!s.userId) return false;
-      const socketUserId = String(s.userId).trim();
-      return socketUserId === userId2Normalized;
+      const socketUserId = String(s.authUser?.userId ?? '').trim();
+      return socketUserId !== '' && socketUserId === userId2Normalized;
     });
     
     // Also check user rooms for sockets
@@ -833,7 +831,7 @@ const sendMessage = async (req, res) => {
       const allSockets = Array.from(io.sockets.sockets.values());
       otherParticipants.forEach(participant => {
         const participantUserIdStr = getParticipantId(participant);
-        const userSockets = allSockets.filter(s => s.userId && String(s.userId) === participantUserIdStr);
+        const userSockets = allSockets.filter(s => String(s.authUser?.userId ?? '') === participantUserIdStr);
         userSockets.forEach(sock => {
           sock.emit('random-connection-message', messageData);
           if (process.env.NODE_ENV === 'development') { console.log(`📤 Direct message emit to socket ${sock.id}`);}

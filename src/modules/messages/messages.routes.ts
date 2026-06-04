@@ -64,6 +64,7 @@ router.post("/:messageId/invite-response", protect, messageController.handleInvi
 router.get("/preferences", protect, messageController.getChatPreferences);
 router.post("/chat/:userId/mute", protect, messageController.toggleMuteChat);
 router.post("/chat/:userId/pin", protect, messageController.togglePinChat);
+router.post("/group/:chatRoomId/pin", protect, messageController.togglePinGroup);
 // Report a message
 router.post("/report", protect, messageController.reportMessage);
 // Pin a message (message-level bookmark — stored per-user client-side; backend acknowledges)

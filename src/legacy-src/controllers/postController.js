@@ -56,12 +56,11 @@ const createPost = async (req, res) => {
     let mediaData = [];
     if (req.files && req.files.length > 0) {
       try {
-        // Check if Cloudinary is configured
-        if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+        if (!process.env.AWS_S3_BUCKET) {
           return res.status(500).json({
             success: false,
-            message: 'Media upload is not configured. Please setup Cloudinary credentials in .env file.',
-            error: 'Cloudinary configuration missing'
+            message: 'Media upload is not configured. Please set AWS_S3_BUCKET in environment.',
+            error: 'S3 configuration missing'
           });
         }
         
@@ -299,7 +298,7 @@ const getPosts = async (req, res) => {
     // If user is not authenticated, only show public posts
     const isGuest = req.user && req.user.userType === 'guest';
     
-    if (visibility === 'public' || isGuest) {
+    if (!req.user || visibility === 'public' || isGuest) {
       filter.visibility = 'public';
     } else {
       // If user is authenticated, show public posts and their own posts

@@ -2,22 +2,48 @@ import { createClient } from "redis";
 import { env } from "../../config/env";
 import { logger } from "../../config/logger";
 
+const reconnectStrategy = (retries: number): number | Error => {
+  // Stop retrying after 10 attempts; otherwise exponential backoff capped at 5 s
+  if (retries > 10) return new Error("Redis max retries reached");
+  return Math.min(retries * 200, 5000);
+};
+
 const redisConfig = {
-  username: env.REDIS_USERNAME,
-  password: env.REDIS_PASSWORD,
+  ...(env.REDIS_USERNAME ? { username: env.REDIS_USERNAME } : {}),
+  ...(env.REDIS_PASSWORD ? { password: env.REDIS_PASSWORD } : {}),
   socket: {
     host: env.REDIS_HOST,
-    port: env.REDIS_PORT
-  }
+    port: env.REDIS_PORT,
+    // ElastiCache requires TLS; toggle via REDIS_TLS=true
+    tls: env.REDIS_TLS ?? false,
+    reconnectStrategy,
+    connectTimeout: 10000,
+  },
 };
 
 export const redisPubClient = createClient(redisConfig);
 export const redisSubClient = redisPubClient.duplicate();
 export const redisCacheClient = redisPubClient.duplicate();
 
+// Deduplicate noisy startup errors — only log once per client until it connects
 const registerRedisLogging = (name: string, client: ReturnType<typeof createClient>) => {
-  client.on("error", (error) => logger.error(`${name} redis error`, { error: String(error) }));
-  client.on("connect", () => logger.info(`${name} redis connected`));
+  let connected = false;
+  let errorCount = 0;
+  client.on("error", (error) => {
+    if (connected) {
+      // Post-connect errors are always worth logging
+      logger.error(`${name} redis error`, { error: String(error) });
+    } else if (errorCount === 0) {
+      // Log the first startup failure only
+      logger.error(`${name} redis error`, { error: String(error) });
+    }
+    errorCount++;
+  });
+  client.on("connect", () => {
+    connected = true;
+    errorCount = 0;
+    logger.info(`${name} redis connected`);
+  });
 };
 
 registerRedisLogging("pub", redisPubClient);

@@ -115,7 +115,7 @@ const checkEmailAvailability = async (req, res) => {
 // Register new user
 const register = async (req, res) => {
   try {
-    let { username, email, password, userType, displayName, bio, gender, location, website, otp } = req.body;
+    let { username, email, password, userType, displayName, bio, gender, dob, location, website, otp } = req.body;
     
     // Remove spaces from username
     if (username) {
@@ -185,6 +185,7 @@ const register = async (req, res) => {
         displayName,
         bio: bio || '',
         gender: gender || '',
+        dob: dob ? new Date(dob) : null,
         location: location || '',
         website: website || '',
         ...avatarData

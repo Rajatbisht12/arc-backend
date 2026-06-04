@@ -1,0 +1,11 @@
+# After changing any secret — just force new tasks to start
+aws ecs update-service `
+  --cluster arc-cluster `
+  --service arc-backend `
+  --force-new-deployment
+
+# Watch rollout
+aws ecs describe-services `
+  --cluster arc-cluster `
+  --services arc-backend `
+  --query 'services[0].{running:runningCount,desired:desiredCount,pending:pendingCount}'

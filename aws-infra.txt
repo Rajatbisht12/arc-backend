@@ -1,0 +1,58 @@
+﻿========================================
+ARC Backend — AWS Infrastructure Details
+Saved: 2026-05-18 14:46:51
+========================================
+
+ACCOUNT
+-------
+Account ID    : 906446637180
+Region        : us-east-1
+
+VPC & NETWORKING
+----------------
+VPC ID        : vpc-086175da7de8387b6
+IGW ID        : igw-031e0010bc3530c56
+Public Sub 1  : subnet-0cbc135aa12fe862e  (us-east-1a)
+Public Sub 2  : subnet-057a5622e4ba1a11d  (us-east-1b)
+Private Sub 1 : subnet-06fb84aa845192232 (us-east-1a)
+Private Sub 2 : subnet-085740aa38ed2d5af (us-east-1b)
+Route Table (pub)  : rtb-088f03ac3d55830a2
+Route Table (priv) : rtb-01d210ab22dda7a34
+
+SECURITY GROUPS
+---------------
+ALB SG   : sg-053968381e033dc29
+ECS SG   : sg-08094c692a658ebb9
+DocDB SG : sg-034800d27b0ff6ec3
+Redis SG : sg-0928a6e5f6da4a952
+Secret ARN: arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk
+
+DATABASES
+---------
+DocumentDB Endpoint : arc-db.cluster-ce1iqeycqt5o.us-east-1.docdb.amazonaws.com
+DocumentDB Port     : 27017
+DocumentDB User     : arcadmin
+DocumentDB Pass     : ArcDbPass123!
+DocumentDB DB Name  : gaming-social-platform
+DocumentDB URI      : mongodb://arcadmin:ArcDbPass123!@arc-db.cluster-ce1iqeycqt5o.us-east-1.docdb.amazonaws.com:27017/gaming-social-platform?replicaSet=rs0&readPreference=secondaryPreferred
+
+Redis Endpoint : arc-redis-ym9krl.serverless.use1.cache.amazonaws.com
+Redis Port     : 6379
+Redis TLS      : true
+
+STORAGE
+-------
+S3 Bucket : arc-gaming-media-906446637180
+
+
+CONTAINER REGISTRY
+------------------
+ECR URI : 906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend
+
+REMAINING STEPS (not yet done)
+-------------------------------
+[ ] Secrets Manager  — create arc/prod/backend secret
+[ ] IAM Roles        — arc-ecs-exec-role, arc-ecs-task-role
+[ ] ECS Cluster      — arc-cluster
+[ ] ALB              — arc-alb
+[ ] ECS Service      — arc-backend

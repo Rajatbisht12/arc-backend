@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { body, validationResult } from "express-validator";
-import { feedbackController, requireAdmin } from "./feedback.legacy-adapters";
+import { feedbackController } from "./feedback.legacy-adapters";
+import { requireHardcodedAdminAuth } from "../admin/admin-auth.middleware";
 
 const router = Router();
 
@@ -29,9 +30,9 @@ router.post("/", [
 ], feedbackController.submitFeedback);
 
 // Admin routes
-router.get("/", requireAdmin, feedbackController.getAllFeedback);
-router.get("/stats", requireAdmin, feedbackController.getFeedbackStats);
-router.put("/:id/status", requireAdmin, [
+router.get("/", requireHardcodedAdminAuth, feedbackController.getAllFeedback);
+router.get("/stats", requireHardcodedAdminAuth, feedbackController.getFeedbackStats);
+router.put("/:id/status", requireHardcodedAdminAuth, [
   body("status")
     .isIn(["pending", "reviewed", "addressed"])
     .withMessage("Status must be pending, reviewed, or addressed"),
@@ -41,6 +42,6 @@ router.put("/:id/status", requireAdmin, [
     .withMessage("Admin notes must be less than 500 characters"),
   handleValidationErrors
 ], feedbackController.updateFeedbackStatus);
-router.delete("/:id", requireAdmin, feedbackController.deleteFeedback);
+router.delete("/:id", requireHardcodedAdminAuth, feedbackController.deleteFeedback);
 
 export default router;

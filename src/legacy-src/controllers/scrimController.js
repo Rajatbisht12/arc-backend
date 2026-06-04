@@ -3,12 +3,12 @@ const User = require('../models/User'); // Required for populate()
 const Notification = require('../models/Notification');
 const { emitNotification } = require('../utils/notificationEmitter');
 const { calculateBGMIPoints } = require('../utils/bgmiPoints');
+const mongoose = require('mongoose');
+const log = require('../utils/logger');
 
 // Helper to find scrim by ObjectId or Scrim Code
 const findScrimByIdOrCode = async (idOrCode) => {
   if (!idOrCode) return null;
-  const mongoose = require('mongoose');
-const log = require('../utils/logger');
   if (mongoose.Types.ObjectId.isValid(idOrCode)) {
     return await Scrim.findById(idOrCode);
   }

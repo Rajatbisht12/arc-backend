@@ -106,6 +106,8 @@ router.post("/complete-google-profile", protect, legacyAuthController.completeGo
 router.post("/google/token", legacyAuthController.googleTokenLogin);
 
 router.get("/google", passport.authenticate("google", { scope: ["profile", "email"] }));
+// Mobile entry point — passes state=mobile so callback can redirect to deep link
+router.get("/google/mobile", passport.authenticate("google", { scope: ["profile", "email"], state: "mobile" } as object));
 router.get(
   "/google/callback",
   passport.authenticate("google", { session: false, failureRedirect: `${process.env.CLIENT_URL}/login?error=google_auth_failed` }),
@@ -113,6 +115,10 @@ router.get(
     try {
       const authReq = req as unknown as { user?: { token?: string } };
       const token = authReq.user?.token ?? "";
+      const isMobile = req.query.state === "mobile";
+      if (isMobile) {
+        return res.redirect(`arcmobile://google-auth?token=${encodeURIComponent(token)}`);
+      }
       return res.redirect(`${process.env.CLIENT_URL}/login#token=${encodeURIComponent(token)}`);
     } catch (err) {
       console.error("Google OAuth callback error:", err);

@@ -2,6 +2,7 @@ import { createServer } from "http";
 import { createApp } from "./app";
 import { env } from "./config/env";
 import { logger } from "./config/logger";
+import { loadSecretsManagerEnv } from "./config/secrets";
 import { connectMongo } from "./infrastructure/database/mongodb";
 import { connectRedis, redisCacheClient } from "./infrastructure/cache/redis";
 import { createSocketServer } from "./infrastructure/websocket/socket";
@@ -20,7 +21,15 @@ const safeRequire = <T>(modulePath: string): T | null => {
 };
 
 const bootstrap = async () => {
-  await Promise.all([connectMongo(), connectRedis()]);
+  // Load secrets from AWS Secrets Manager into process.env before anything else
+  await loadSecretsManagerEnv();
+
+  await connectMongo();
+  try {
+    await connectRedis();
+  } catch (redisErr) {
+    logger.warn("Redis unavailable — caching disabled for this session", { error: String(redisErr) });
+  }
 
   // Inject shared Redis client into legacy JS bridge
   const redisCache = safeRequire<{ setRedisClient?: (client: unknown) => void }>(

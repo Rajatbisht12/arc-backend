@@ -23,6 +23,7 @@ const {
   createCallSummary,
   toggleMuteChat,
   togglePinChat,
+  togglePinGroup,
   getChatPreferences,
   getGroupInviteLink,
   resetGroupInviteLink,
@@ -133,6 +134,7 @@ router.post('/:messageId/invite-response', protect, handleInviteResponse);
 router.get('/preferences', protect, getChatPreferences);
 router.post('/chat/:userId/mute', protect, toggleMuteChat);
 router.post('/chat/:userId/pin', protect, togglePinChat);
+router.post('/group/:chatRoomId/pin', protect, togglePinGroup);
 // Report a message
 router.post('/report', protect, reportMessage);
 // Pin a message — client-side bookmark; backend acknowledges only

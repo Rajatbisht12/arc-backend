@@ -111,6 +111,10 @@ const userSchema = new mongoose.Schema({
       enum: ['', 'male', 'female', 'other', 'prefer_not_to_say'],
       default: ''
     },
+    dob: {
+      type: Date,
+      default: null
+    },
     location: {
       type: String,
       default: ''
@@ -461,6 +465,10 @@ const userSchema = new mongoose.Schema({
   pinnedChats: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  }],
+  pinnedGroups: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ChatRoom'
   }]
 }, {
   timestamps: true

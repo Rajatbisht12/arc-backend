@@ -416,6 +416,14 @@ const createTournament = async (req, res) => {
     // Get total rounds
     const totalRounds = parseInt(req.body.totalRounds) || 1;
 
+    // Normalize prizePoolType: mobile sends 'no_prize', schema expects 'without_prize'
+    const normalizedPrizePoolType = prizePoolType === 'no_prize' ? 'without_prize' : (prizePoolType || 'without_prize');
+
+    // Compute teamsPerGroup / numberOfGroups with sane fallbacks
+    const parsedTotalSlots = parseInt(totalSlots) || 16;
+    const parsedTeamsPerGroup = parseInt(teamsPerGroup) || parsedTotalSlots;
+    const parsedNumberOfGroups = parseInt(numberOfGroups) || Math.ceil(parsedTotalSlots / parsedTeamsPerGroup);
+
     // Create tournament
     const tournamentData = {
       name,
@@ -432,13 +440,13 @@ const createTournament = async (req, res) => {
       registrationDeadline: regEnd,
       location: location || 'Online',
       timezone: timezone || 'UTC',
-      prizePool: prizePoolType === 'with_prize' ? (prizePool || 0) : 0,
+      prizePool: normalizedPrizePoolType === 'with_prize' ? (prizePool || 0) : 0,
       entryFee: entryFee || 0,
-      totalSlots: parseInt(totalSlots),
-      teamsPerGroup: parseInt(teamsPerGroup),
-      numberOfGroups: parseInt(numberOfGroups),
+      totalSlots: parsedTotalSlots,
+      teamsPerGroup: parsedTeamsPerGroup,
+      numberOfGroups: parsedNumberOfGroups,
       totalRounds: totalRounds,
-      prizePoolType,
+      prizePoolType: normalizedPrizePoolType,
       prizePoolCurrency: prizePoolCurrency || 'INR',
       prizeDistribution: prizeDistribution || [],
       specialPrizes: specialPrizes || [],
@@ -451,7 +459,7 @@ const createTournament = async (req, res) => {
     const tournament = await Tournament.create(tournamentData);
     
     // Calculate number of groups based on totalSlots and teamsPerGroup
-    const calculatedGroups = Math.ceil(parseInt(totalSlots) / parseInt(teamsPerGroup));
+    const calculatedGroups = parsedNumberOfGroups;
     if (process.env.NODE_ENV === 'development') { console.log('Creating tournament with:', { totalSlots, teamsPerGroup, calculatedGroups, totalRounds });
     }
     // Create groups only for Round 1 initially
@@ -1088,7 +1096,10 @@ const joinTournament = async (req, res) => {
       username: req.user.username
     });
 
-    const tournament = await Tournament.findById(req.params.id);
+    const id = req.params.id;
+    const tournament = (id && (id.includes('-') || id.length > 20))
+      ? await Tournament.findOne({ tournamentCode: id.toUpperCase() })
+      : await Tournament.findById(id);
 
     if (!tournament) {
       return res.status(404).json({

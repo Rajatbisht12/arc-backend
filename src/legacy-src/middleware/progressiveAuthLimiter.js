@@ -16,12 +16,12 @@ function getIdentifier(req, kind) {
 }
 
 function computeCooldownSeconds(fails) {
-  if (fails <= 3) return 0;
-  if (fails <= 5) return 60; // 4-5 failures -> 1 min
-  if (fails <= 8) return 3 * 60; // 6-8 failures -> 3 min
-  if (fails <= 10) return 15 * 60; // 9-10 failures -> 15 min
-  if (fails <= 14) return 30 * 60; // 11-14 failures -> 30 min
-  return 60 * 60; // 15+ failures -> 60 min
+  if (fails <= 5) return 0;          // 5 free attempts before any lock
+  if (fails <= 8) return 30;         // 6-8  failures → 30 sec
+  if (fails <= 12) return 2 * 60;    // 9-12 failures → 2 min
+  if (fails <= 16) return 10 * 60;   // 13-16 failures → 10 min
+  if (fails <= 20) return 30 * 60;   // 17-20 failures → 30 min
+  return 60 * 60;                    // 21+  failures → 60 min
 }
 
 // In-memory fallback when Redis is unavailable
@@ -45,7 +45,11 @@ async function getEntry(key) {
  */
 async function setEntry(key, entry) {
   localStore.set(key, entry);
-  await setJson(`pal:${key}`, entry, 24 * 60 * 60); // 24h TTL
+  // TTL = remaining block time + 1 hour buffer so entries auto-expire after block lifts.
+  // Minimum 1 hour so short-block state doesn't persist for a full day.
+  const blockRemainingMs = Math.max(0, (entry.blockedUntilMs || 0) - Date.now());
+  const ttlSec = Math.ceil(blockRemainingMs / 1000) + 60 * 60;
+  await setJson(`pal:${key}`, entry, ttlSec);
 }
 
 /**
@@ -68,7 +72,16 @@ function createProgressiveAuthLimiter(options) {
     const identifier = getIdentifier(req, kind);
     const key = `${name}|${ip}|${identifier || 'no_identifier'}`;
 
-    const entry = await getEntry(key);
+    let entry = await getEntry(key);
+
+    // If a previous block has now expired, decay the fail count so the user
+    // gets a partial reset rather than immediately hitting the next threshold.
+    if (entry?.blockedUntilMs && entry.blockedUntilMs <= nowMs && entry.blockedUntilMs > 0) {
+      entry.fails = Math.max(0, entry.fails - 3);
+      entry.blockedUntilMs = 0;
+      await setEntry(key, entry);
+    }
+
     if (entry?.blockedUntilMs && entry.blockedUntilMs > nowMs) {
       // Important UX/security behavior:
       // Even during cooldown, allow a "correct password" login to go through (genuine user),

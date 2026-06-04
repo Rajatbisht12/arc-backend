@@ -12,20 +12,16 @@ const createStory = async (req, res) => {
     if (!mediaFile) {
       return res.status(400).json({ success: false, message: 'Image or video is required' });
     }
-    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    if (!process.env.AWS_S3_BUCKET) {
       return res.status(500).json({
         success: false,
-        message: 'Media upload is not configured.'
+        message: 'Media upload is not configured. Please set AWS_S3_BUCKET in environment.'
       });
     }
     const isVideo = mediaFile.mimetype.startsWith('video/');
     const results = await uploadMultipleFiles([mediaFile], 'gaming-social/stories');
-    let mediaUrl = results[0].url;
+    const mediaUrl = results[0].url;
     const rawDuration = isVideo && results[0].duration ? results[0].duration : 30;
-    if (isVideo && rawDuration > 30) {
-      // Deliver only first 30 seconds via Cloudinary transformation (so=start offset, eo=end offset in seconds)
-      mediaUrl = mediaUrl.replace('/upload/', '/upload/so_0,eo_30/');
-    }
     const media = {
       type: isVideo ? 'video' : 'image',
       url: mediaUrl,

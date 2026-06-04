@@ -5,15 +5,21 @@ const User = require('../models/User');
 const Tournament = require('../models/Tournament');
 const { PLAYER_PLANS, TEAM_PLANS } = require('./membershipController');
 
-// Initialize Razorpay
+// Lazily initialise Razorpay so a missing key doesn't crash module load
 const Razorpay = require('razorpay');
-if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-  throw new Error('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set in .env');
-}
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET
-});
+let _razorpay = null;
+const getRazorpay = () => {
+  if (!_razorpay) {
+    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+      throw new Error('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set in environment');
+    }
+    _razorpay = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+  }
+  return _razorpay;
+};
 
 /**
  * Helper: Get plan by ID and user type
@@ -103,7 +109,7 @@ async function createOrder(req, res) {
       return res.status(400).json({ success: false, message: 'Amount must be at least ₹1' });
     }
 
-    const order = await razorpay.orders.create({
+    const order = await getRazorpay().orders.create({
       amount: amountPaise,
       currency: 'INR',
       payment_capture: 1,
@@ -159,7 +165,7 @@ async function verifyPayment(req, res) {
       return res.status(400).json({ success: false, message: 'Invalid payment signature' });
     }
 
-    const payment = await razorpay.payments.fetch(razorpay_payment_id);
+    const payment = await getRazorpay().payments.fetch(razorpay_payment_id);
     if (!payment || !['authorized', 'captured'].includes(payment.status)) {
       return res.status(400).json({ success: false, message: 'Payment not confirmed by Razorpay' });
     }
@@ -272,7 +278,7 @@ async function createTournamentOrder(req, res) {
       }
     };
 
-    const order = await razorpay.orders.create(options);
+    const order = await getRazorpay().orders.create(options);
 
     res.status(200).json({
       success: true,
@@ -322,7 +328,7 @@ async function verifyTournamentPayment(req, res) {
       });
     }
 
-    const payment = await razorpay.payments.fetch(razorpay_payment_id);
+    const payment = await getRazorpay().payments.fetch(razorpay_payment_id);
     if (!payment || !['authorized', 'captured'].includes(payment.status)) {
       return res.status(400).json({ success: false, message: 'Payment not confirmed by Razorpay' });
     }
@@ -404,7 +410,7 @@ async function createBoostOrder(req, res) {
     }
 
     const amountPaise = Math.round(amount * 100);
-    const order = await razorpay.orders.create({
+    const order = await getRazorpay().orders.create({
       amount: amountPaise,
       currency: 'INR',
       payment_capture: 1,
@@ -441,7 +447,7 @@ async function verifyBoostPayment(req, res) {
       return res.status(400).json({ success: false, message: 'Payment verification failed' });
     }
 
-    const payment = await razorpay.payments.fetch(razorpay_payment_id);
+    const payment = await getRazorpay().payments.fetch(razorpay_payment_id);
     if (!payment || !['authorized', 'captured'].includes(payment.status)) {
       return res.status(400).json({ success: false, message: 'Payment not confirmed by Razorpay' });
     }

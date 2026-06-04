@@ -13,6 +13,7 @@ import scrimsRoutes from "./scrims/scrims.routes";
 import recruitmentRoutes from "./recruitment/recruitment.routes";
 import challengesRoutes from "./challenges/challenges.routes";
 import adminRoutes from "./admin/admin.routes";
+import adminLoginRoutes from "./admin/admin-login.routes";
 import leaveRequestsRoutes from "./leave-requests/leave-requests.routes";
 import randomConnectionsRoutes from "./random-connections/random-connections.routes";
 import monetizationRoutes from "./monetization/monetization.routes";
@@ -41,6 +42,9 @@ export const registerModules = (app: Express): void => {
   app.use("/api/scrims", scrimsRoutes);
   app.use("/api/recruitment", recruitmentRoutes);
   app.use("/api/challenges", challengesRoutes);
+  // Admin login (public – no auth required)
+  app.use("/api/admin/auth", adminLoginRoutes);
+  // Admin panel routes (protected by hardcoded-admin JWT)
   app.use("/api/admin", adminRoutes);
   app.use("/api/health", healthRoutes);
   app.use("/api/chat", chatRoutes);

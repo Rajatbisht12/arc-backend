@@ -1018,6 +1018,23 @@ const markMessagesAsRead = async (req, res) => {
       }
     });
 
+    // Also mark related notifications as read so the notification bell clears
+    if (messageType === 'direct') {
+      const otherUserId = chatId.replace('direct_', '');
+      await Notification.updateMany(
+        { recipient: userId, sender: otherUserId, type: 'message', isRead: false },
+        { $set: { isRead: true, readAt: new Date() } }
+      );
+    } else {
+      // For group chats, mark all unread message/mention notifications for this room
+      const roomMessages = await Message.find({ messageType: 'group', chatRoom: chatId }, '_id').lean();
+      const roomMessageIds = roomMessages.map(m => m._id);
+      await Notification.updateMany(
+        { recipient: userId, type: { $in: ['message', 'mention'] }, isRead: false, 'data.messageId': { $in: roomMessageIds } },
+        { $set: { isRead: true, readAt: new Date() } }
+      );
+    }
+
     res.status(200).json({
       success: true,
       message: 'Messages marked as read',
@@ -2198,12 +2215,40 @@ const togglePinChat = async (req, res) => {
   }
 };
 
+// Toggle pin for a group chat
+const togglePinGroup = async (req, res) => {
+  try {
+    const { chatRoomId } = req.params;
+    const currentUser = await User.findById(req.user._id);
+    if (!currentUser) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const pinnedSet = new Set((currentUser.pinnedGroups || []).map(id => id.toString()));
+    if (pinnedSet.has(chatRoomId)) {
+      pinnedSet.delete(chatRoomId);
+    } else {
+      pinnedSet.add(chatRoomId);
+    }
+    currentUser.pinnedGroups = Array.from(pinnedSet);
+    await currentUser.save();
+
+    res.json({ success: true, pinned: pinnedSet.has(chatRoomId), pinnedGroups: currentUser.pinnedGroups });
+  } catch (error) {
+    log.error('togglePinGroup error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to toggle group pin' });
+  }
+};
+
 // Get muted/pinned chat preferences
 const getChatPreferences = async (req, res) => {
   try {
-    const currentUser = await User.findById(req.user._id).select('mutedChats pinnedChats');
+    const currentUser = await User.findById(req.user._id).select('mutedChats pinnedChats pinnedGroups');
     if (!currentUser) return res.status(404).json({ success: false, message: 'User not found' });
-    res.json({ success: true, mutedChats: currentUser.mutedChats || [], pinnedChats: currentUser.pinnedChats || [] });
+    res.json({
+      success: true,
+      mutedChats: currentUser.mutedChats || [],
+      pinnedChats: currentUser.pinnedChats || [],
+      pinnedGroups: currentUser.pinnedGroups || []
+    });
   } catch (error) {
     log.error('getChatPreferences error:', { error: String(error) });
     res.status(500).json({ success: false, message: 'Failed to get preferences' });
@@ -2545,6 +2590,7 @@ module.exports = {
   createCallSummary,
   toggleMuteChat,
   togglePinChat,
+  togglePinGroup,
   getChatPreferences,
   getGroupInviteLink,
   resetGroupInviteLink,

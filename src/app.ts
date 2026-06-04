@@ -47,6 +47,9 @@ export const createApp = () => {
     return next();
   });
 
+  app.get("/", (_req, res) => res.json({ success: true, message: "ARC Backend running" }));
+  app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
   registerModules(app);
   registerLegacyErrorHandlers(app);
 

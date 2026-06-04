@@ -73,8 +73,19 @@ const createFollowNotification = async (recipientId, senderId) => {
 // Create message notification
 const createMessageNotification = async (recipientId, senderId, messageId) => {
   try {
+    const Notification = require('../models/Notification');
     const sender = await require('../models/User').findById(senderId).select('username profile.displayName profile.avatar');
-    
+
+    // If an unread message notification from this sender already exists, just update it
+    // instead of stacking a new one per message. This prevents notification spam and
+    // ensures marking-read clears all messages from that sender in one shot.
+    const existing = await Notification.findOneAndUpdate(
+      { recipient: recipientId, sender: senderId, type: 'message', isRead: false },
+      { $set: { 'data.messageId': messageId, updatedAt: new Date() } },
+      { new: true }
+    );
+    if (existing) return existing;
+
     const notificationData = {
       recipient: recipientId,
       sender: senderId,

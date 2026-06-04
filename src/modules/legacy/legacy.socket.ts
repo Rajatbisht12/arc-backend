@@ -133,14 +133,17 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     });
   });
 
-  socket.on("call-request", (data: { callId?: string; targetUserId?: string; callType?: "voice" | "video" }) => {
+  socket.on("call-request", (data: { callId?: string; targetUserId?: string; callType?: "voice" | "video"; fromUsername?: string; fromDisplayName?: string; fromAvatar?: string }) => {
     if (!data?.callId || !data?.targetUserId || !data?.callType) {
       return;
     }
     io.to(`user-${String(data.targetUserId)}`).emit("call-request", {
       callId: data.callId,
       fromUserId: userIdStr,
-      callType: data.callType
+      callType: data.callType,
+      fromUsername: data.fromUsername,
+      fromDisplayName: data.fromDisplayName,
+      fromAvatar: data.fromAvatar,
     });
   });
 
@@ -251,7 +254,11 @@ export const startLegacyBackgroundJobs = (io: Server): void => {
 
   if (randomConnectController?.matchUsersFromQueue) {
     setInterval(async () => {
-      await randomConnectController.matchUsersFromQueue?.(io);
+      try {
+        await randomConnectController.matchUsersFromQueue?.(io);
+      } catch {
+        // Swallow transient DB/network errors — the next tick will retry
+      }
     }, 3000);
   }
 };

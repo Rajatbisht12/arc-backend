@@ -581,12 +581,19 @@ const toggleFollow = async (req, res) => {
       createFollowNotification(targetUserId, currentUserId).catch(() => {});
     }
 
-    // Invalidate caches
+    // Invalidate caches — delete both ObjectId-keyed AND username-keyed entries
+    // because clients can request profiles by either identifier and they cache separately
+    const [cuUser, tuUser] = await Promise.all([
+      User.findById(currentUserId).select('username').lean(),
+      User.findById(targetUserId).select('username').lean(),
+    ]);
     await Promise.all([
       invalidateUserCache(currentUserId),
       invalidateUserCache(targetUserId),
-      del(profileCacheKey(currentUserId)),
-      del(profileCacheKey(targetUserId))
+      del(profileCacheKey(String(currentUserId))),
+      del(profileCacheKey(String(targetUserId))),
+      cuUser?.username ? del(profileCacheKey(cuUser.username)) : Promise.resolve(),
+      tuUser?.username ? del(profileCacheKey(tuUser.username)) : Promise.resolve(),
     ]);
 
     // Get updated count from Follow collection (cheap indexed count)

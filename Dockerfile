@@ -20,6 +20,13 @@ RUN addgroup -S appgrp && adduser -S appusr -G appgrp
 
 ENV NODE_ENV=production
 
+# Download Amazon DocumentDB / RDS CA bundle for TLS connections
+# (no-op if MONGODB_TLS is not set — the file is simply present but unused)
+RUN apk add --no-cache curl ca-certificates && \
+    curl -fsSL https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+      -o /app/rds-ca-bundle.pem && \
+    chmod 444 /app/rds-ca-bundle.pem
+
 # Only production deps
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
@@ -27,8 +34,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Compiled output
 COPY --from=build /app/dist ./dist
 
-# Legacy JS source is required at runtime (loaded via safeRequire)
-COPY --from=build /app/src/legacy-src ./dist/legacy-src
+# Legacy JS source — copied to src/legacy-src because runtime require paths
+# resolve relative to dist/ going 3 levels up, landing at /app/src/legacy-src/
+COPY --from=build /app/src/legacy-src ./src/legacy-src
 
 # Security: drop to non-root
 USER appusr

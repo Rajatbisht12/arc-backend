@@ -1,0 +1,62 @@
+{
+  "family": "arc-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::906446637180:role/arc-ecs-exec-role",
+  "taskRoleArn": "arn:aws:iam::906446637180:role/arc-ecs-task-role",
+  "containerDefinitions": [
+    {
+      "name": "arc-backend",
+      "image": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend:latest",
+      "portMappings": [{ "containerPort": 5001, "protocol": "tcp" }],
+      "essential": true,
+      "secrets": [
+        { "name": "NODE_ENV",            "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:NODE_ENV::" },
+        { "name": "PORT",                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:PORT::" },
+        { "name": "CORS_ORIGIN",         "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:CORS_ORIGIN::" },
+        { "name": "MONGODB_URI",         "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:MONGODB_URI::" },
+        { "name": "MONGODB_TLS",         "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:MONGODB_TLS::" },
+        { "name": "MONGODB_TLS_CA_FILE", "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:MONGODB_TLS_CA_FILE::" },
+        { "name": "REDIS_HOST",          "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:REDIS_HOST::" },
+        { "name": "REDIS_PORT",          "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:REDIS_PORT::" },
+        { "name": "REDIS_TLS",           "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:REDIS_TLS::" },
+        { "name": "REDIS_PASSWORD",      "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:REDIS_PASSWORD::" },
+        { "name": "AWS_REGION",          "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:AWS_REGION::" },
+        { "name": "AWS_S3_BUCKET",       "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:AWS_S3_BUCKET::" },
+        { "name": "JWT_SECRET",          "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:JWT_SECRET::" },
+        { "name": "JWT_REFRESH_SECRET",  "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:JWT_REFRESH_SECRET::" },
+        { "name": "GOOGLE_CLIENT_ID",        "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GOOGLE_CLIENT_ID::" },
+        { "name": "GOOGLE_CLIENT_SECRET",    "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GOOGLE_CLIENT_SECRET::" },
+        { "name": "GOOGLE_CALLBACK_URL",     "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GOOGLE_CALLBACK_URL::" },
+        { "name": "CLIENT_URL",              "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:CLIENT_URL::" },
+        { "name": "SMTP_HOST",           "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_HOST::" },
+        { "name": "SMTP_PORT",           "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_PORT::" },
+        { "name": "SMTP_SECURE",         "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_SECURE::" },
+        { "name": "SMTP_USER",           "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_USER::" },
+        { "name": "SMTP_PASS",           "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_PASS::" },
+        { "name": "SMTP_FROM",           "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_FROM::" },
+        { "name": "RAZORPAY_KEY_ID",     "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:RAZORPAY_KEY_ID::" },
+        { "name": "RAZORPAY_KEY_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:RAZORPAY_KEY_SECRET::" },
+        { "name": "GEMINI_API_KEY",      "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GEMINI_API_KEY::" },
+        { "name": "GROQ_API_KEY",        "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GROQ_API_KEY::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/arc-backend",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:5001/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

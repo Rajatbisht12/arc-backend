@@ -1,10 +1,8 @@
 import type { Server as HttpServer } from "http";
-import { createAdapter } from "@socket.io/redis-adapter";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import { env } from "../../config/env";
 import { logger } from "../../config/logger";
-import { redisPubClient, redisSubClient } from "../cache/redis";
 import { registerChatSocketHandlers } from "../../modules/chat/chat.socket";
 import { registerCallSocketHandlers } from "../../modules/calls/calls.socket";
 import { registerLegacySocketHandlers } from "../../modules/legacy/legacy.socket";
@@ -34,8 +32,6 @@ export const createSocketServer = (httpServer: HttpServer): Server => {
     upgradeTimeout: 30000,
     maxHttpBufferSize: 1e6
   });
-
-  io.adapter(createAdapter(redisPubClient, redisSubClient));
 
   io.use((socket, next) => {
     try {

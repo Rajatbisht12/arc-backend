@@ -1,9 +1,11 @@
 import { Router } from "express";
-import { adminController, auditLog, requireAdminWithAuth, requireSuperAdmin } from "./admin.legacy-adapters";
+import { adminController, auditLog, requireSuperAdmin } from "./admin.legacy-adapters";
+import { requireHardcodedAdminAuth } from "./admin-auth.middleware";
 
 const router = Router();
 
-router.use(requireAdminWithAuth);
+// All admin routes are protected by the hardcoded-admin JWT check
+router.use(requireHardcodedAdminAuth);
 
 router.get("/dashboard", auditLog("VIEW_DASHBOARD"), adminController.getDashboardStats);
 router.get("/analytics/users", auditLog("VIEW_USER_ANALYTICS"), adminController.getUserAnalytics);

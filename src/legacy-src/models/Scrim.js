@@ -264,7 +264,7 @@ const scrimSchema = new mongoose.Schema({
   prizePool: { type: Number, default: 0 },
   prizePoolType: {
     type: String,
-    enum: ['with_prize', 'without_prize'],
+    enum: ['with_prize', 'without_prize', 'no_prize'],
     default: 'without_prize'
   },
   prizePoolCurrency: {
