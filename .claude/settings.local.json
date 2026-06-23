@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\acer\\\\Desktop\\\\vortica-labs\\\\ARC-SQUAD-HUNT-CLIENT\\\\arc_-main\\\\modular-backend\" -Recurse -Depth 2)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(npm install *)"
+    ]
+  }
+}
