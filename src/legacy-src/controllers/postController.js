@@ -52,9 +52,13 @@ const createPost = async (req, res) => {
       }
     }
 
+    const mediaFiles = Array.isArray(req.files) ? req.files : (req.files?.media || []);
+    const coverFile = Array.isArray(req.files) ? null : req.files?.cover?.[0];
+
     // Handle media uploads
     let mediaData = [];
-    if (req.files && req.files.length > 0) {
+    let coverData = null;
+    if (mediaFiles.length > 0 || coverFile) {
       try {
         if (!process.env.AWS_S3_BUCKET) {
           return res.status(500).json({
@@ -64,18 +68,35 @@ const createPost = async (req, res) => {
           });
         }
         
-        const uploadResults = await uploadMultipleFiles(req.files, 'gaming-social/posts');
+        const uploadResults = mediaFiles.length > 0
+          ? await uploadMultipleFiles(mediaFiles, 'gaming-social/posts')
+          : [];
         mediaData = uploadResults.map(result => ({
           type: result.type,
           url: result.url,
           publicId: result.publicId
         }));
+        if (coverFile) {
+          const [coverUpload] = await uploadMultipleFiles([coverFile], 'gaming-social/post-covers');
+          coverData = coverUpload ? {
+            url: coverUpload.url,
+            publicId: coverUpload.publicId
+          } : null;
+        }
       } catch (uploadError) {
         return res.status(400).json({
           success: false,
           message: 'Failed to upload media files',
           error: uploadError.message
         });
+      }
+    }
+
+    if (coverData) {
+      const videoMedia = mediaData.find(item => item.type === 'video');
+      if (videoMedia) {
+        videoMedia.coverUrl = coverData.url;
+        videoMedia.coverPublicId = coverData.publicId;
       }
     }
 

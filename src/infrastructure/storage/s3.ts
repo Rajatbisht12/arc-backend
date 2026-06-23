@@ -75,7 +75,13 @@ export async function uploadVideo(
   const key = `${folder}/${uuidv4()}.mp4`;
   const upload = new Upload({
     client: s3,
-    params: { Bucket: BUCKET, Key: key, Body: file.buffer, ContentType: "video/mp4" },
+    params: {
+      Bucket: BUCKET,
+      Key: key,
+      Body: file.buffer,
+      ContentType: "video/mp4",
+      CacheControl: "public, max-age=31536000, immutable",
+    },
   });
   await upload.done();
   return { url: publicUrl(key), publicId: key };

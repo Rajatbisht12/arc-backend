@@ -7,7 +7,7 @@ const storage = multer.memoryStorage();
 // File filter function
 const fileFilter = (req, file, cb) => {
   // Check file type
-  if (file.fieldname === 'avatar' || file.fieldname === 'images' || file.fieldname === 'image') {
+  if (file.fieldname === 'avatar' || file.fieldname === 'images' || file.fieldname === 'image' || file.fieldname === 'cover') {
     // Allow images
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);

@@ -4,7 +4,9 @@ import { backendControllerPath, backendMiddlewarePath } from "../legacy/legacy.p
 
 type PostController = Record<string, RequestHandler>;
 type AuthMiddleware = { protect: RequestHandler; optionalAuth: RequestHandler };
-type UploadMiddleware = { uploadMultiple: (fieldName: string, maxCount: number) => RequestHandler };
+type UploadMiddleware = {
+  uploadFields: (fields: { name: string; maxCount: number }[]) => RequestHandler;
+};
 type ValidationMiddleware = { handleValidationErrors: RequestHandler };
 
 const loadModule = <T>(modulePath: string): T => {
@@ -14,5 +16,5 @@ const loadModule = <T>(modulePath: string): T => {
 
 export const postController = loadModule<PostController>(path.join(backendControllerPath, "postController.js"));
 export const { protect, optionalAuth } = loadModule<AuthMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
-export const { uploadMultiple } = loadModule<UploadMiddleware>(path.join(backendMiddlewarePath, "upload.js"));
+export const { uploadFields } = loadModule<UploadMiddleware>(path.join(backendMiddlewarePath, "upload.js"));
 export const { handleValidationErrors } = loadModule<ValidationMiddleware>(path.join(backendMiddlewarePath, "validation.js"));
