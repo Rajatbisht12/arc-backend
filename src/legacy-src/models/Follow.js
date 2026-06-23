@@ -75,34 +75,47 @@ followSchema.statics.isFollowing = async function(followerId, followingId) {
  * Static: Get follower count
  */
 followSchema.statics.getFollowerCount = async function(userId) {
-  return this.countDocuments({ following: userId });
+  const ids = await this.distinct('follower', { following: userId });
+  return ids.length;
 };
 
 /**
  * Static: Get following count
  */
 followSchema.statics.getFollowingCount = async function(userId) {
-  return this.countDocuments({ follower: userId });
+  const ids = await this.distinct('following', { follower: userId });
+  return ids.length;
 };
+
+function uniqueUsersById(users) {
+  const seen = new Set();
+  return users.filter((user) => {
+    const id = user?._id?.toString();
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
 
 /**
  * Static: Get followers with pagination
  */
 followSchema.statics.getFollowers = async function(userId, { page = 1, limit = 20 } = {}) {
   const skip = (page - 1) * limit;
-  const [docs, total] = await Promise.all([
+  const [docs, totalIds] = await Promise.all([
     this.find({ following: userId })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .populate('follower', 'username profile.displayName profile.avatar profile.bio profile.location userType createdAt')
       .lean(),
-    this.countDocuments({ following: userId })
+    this.distinct('follower', { following: userId })
   ]);
+  const users = uniqueUsersById(docs.map(d => d.follower).filter(Boolean));
   return {
-    users: docs.map(d => d.follower).filter(Boolean),
-    total,
-    pages: Math.ceil(total / limit),
+    users,
+    total: totalIds.length,
+    pages: Math.ceil(totalIds.length / limit),
     current: page
   };
 };
@@ -112,19 +125,20 @@ followSchema.statics.getFollowers = async function(userId, { page = 1, limit = 2
  */
 followSchema.statics.getFollowing = async function(userId, { page = 1, limit = 20 } = {}) {
   const skip = (page - 1) * limit;
-  const [docs, total] = await Promise.all([
+  const [docs, totalIds] = await Promise.all([
     this.find({ follower: userId })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .populate('following', 'username profile.displayName profile.avatar profile.bio profile.location userType createdAt')
       .lean(),
-    this.countDocuments({ follower: userId })
+    this.distinct('following', { follower: userId })
   ]);
+  const users = uniqueUsersById(docs.map(d => d.following).filter(Boolean));
   return {
-    users: docs.map(d => d.following).filter(Boolean),
-    total,
-    pages: Math.ceil(total / limit),
+    users,
+    total: totalIds.length,
+    pages: Math.ceil(totalIds.length / limit),
     current: page
   };
 };

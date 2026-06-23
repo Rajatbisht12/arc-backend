@@ -467,6 +467,29 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
+  pushTokens: [{
+    token: {
+      type: String,
+      required: true
+    },
+    platform: {
+      type: String,
+      enum: ['ios', 'android', 'web', 'unknown'],
+      default: 'unknown'
+    },
+    deviceName: {
+      type: String,
+      default: ''
+    },
+    lastUsedAt: {
+      type: Date,
+      default: Date.now
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   pinnedChats: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'

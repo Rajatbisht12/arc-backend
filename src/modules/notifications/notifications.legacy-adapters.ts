@@ -9,6 +9,9 @@ type NotificationModelType = {
   countDocuments: (...args: unknown[]) => Promise<number>;
   updateMany: (...args: unknown[]) => Promise<unknown>;
 };
+type UserModelType = {
+  updateOne: (...args: unknown[]) => Promise<unknown>;
+};
 
 const loadModule = <T>(modulePath: string): T => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -17,3 +20,4 @@ const loadModule = <T>(modulePath: string): T => {
 
 export const { protect } = loadModule<AuthMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
 export const Notification = loadModule<NotificationModelType>(path.join(backendModelPath, "Notification.js"));
+export const User = loadModule<UserModelType>(path.join(backendModelPath, "User.js"));

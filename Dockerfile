@@ -22,7 +22,7 @@ ENV NODE_ENV=production
 
 # Download Amazon DocumentDB / RDS CA bundle for TLS connections
 # (no-op if MONGODB_TLS is not set — the file is simply present but unused)
-RUN apk add --no-cache curl ca-certificates && \
+RUN apk add --no-cache curl ca-certificates ffmpeg && \
     curl -fsSL https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
       -o /app/rds-ca-bundle.pem && \
     chmod 444 /app/rds-ca-bundle.pem

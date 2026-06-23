@@ -1,7 +1,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const { protect, optionalAuth } = require('../middleware/auth');
-const { uploadMultiple } = require('../middleware/upload');
+const { uploadFields } = require('../middleware/upload');
 const { handleValidationErrors } = require('../middleware/validation');
 const {
   createPost,
@@ -29,7 +29,9 @@ const createPostValidation = [
   body()
     .custom((value, { req }) => {
       const hasText = req.body.text != null && String(req.body.text).trim().length > 0;
-      const hasMedia = req.files && req.files.length > 0;
+      const hasMedia = Array.isArray(req.files)
+        ? req.files.length > 0
+        : Boolean(req.files?.media?.length);
       if (!hasText && !hasMedia) {
         throw new Error('Post must have some text or at least one image/video');
       }
@@ -63,7 +65,7 @@ const addCommentValidation = [
 ];
 
 // Routes
-router.post('/', protect, uploadMultiple('media', 5), createPostValidation, handleValidationErrors, createPost);
+router.post('/', protect, uploadFields([{ name: 'media', maxCount: 5 }, { name: 'cover', maxCount: 1 }]), createPostValidation, handleValidationErrors, createPost);
 router.get('/', optionalAuth, getPosts);
 router.get('/clips', optionalAuth, getClips);
 router.get('/:id', optionalAuth, getPost);

@@ -1,6 +1,7 @@
 const Story = require('../models/Story');
 const User = require('../models/User');
 const { uploadMultipleFiles } = require('../utils/cloudinary');
+const { STORY_MAX_SECONDS, processStoryVideo } = require('../utils/videoProcessing');
 const log = require('../utils/logger');
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
@@ -19,15 +20,15 @@ const createStory = async (req, res) => {
       });
     }
     const isVideo = mediaFile.mimetype.startsWith('video/');
-    const results = await uploadMultipleFiles([mediaFile], 'gaming-social/stories');
+    const uploadFile = isVideo ? await processStoryVideo(mediaFile) : mediaFile;
+    const results = await uploadMultipleFiles([uploadFile], 'gaming-social/stories');
     const mediaUrl = results[0].url;
-    const rawDuration = isVideo && results[0].duration ? results[0].duration : 30;
     const media = {
       type: isVideo ? 'video' : 'image',
       url: mediaUrl,
       publicId: results[0].publicId
     };
-    const duration = isVideo ? Math.min(30, Math.ceil(rawDuration)) : 30;
+    const duration = isVideo ? STORY_MAX_SECONDS : 30;
     let musicData;
     const musicFile = req.files?.music?.[0];
     if (musicFile) {
