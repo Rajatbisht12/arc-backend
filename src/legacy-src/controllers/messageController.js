@@ -27,7 +27,8 @@ function formatActivityStatus(lastSeen, showActivityStatus) {
 // Send direct message
 const sendDirectMessage = async (req, res) => {
   try {
-    let { recipientId, recipientUsername, text, replyTo, forwardedFrom, sharedPostId, sharedPostCaption, sharedProfileUsername } = req.body || {};
+    let { recipientId, recipientUsername, text, replyTo, replyToId, forwardedFrom, sharedPostId, sharedPostCaption, sharedProfileUsername } = req.body || {};
+    replyTo = replyTo || replyToId;
     text = text != null ? String(text) : '';
     sharedPostId = sharedPostId != null ? (typeof sharedPostId === 'string' ? sharedPostId.trim() : String(sharedPostId)) : null;
     sharedProfileUsername = sharedProfileUsername != null && typeof sharedProfileUsername === 'string' ? sharedProfileUsername.trim() : null;
@@ -254,6 +255,7 @@ const getDirectMessages = async (req, res) => {
 
     const messages = await Message.find({
       messageType: 'direct',
+      deletedForEveryone: { $ne: true },
       $or: [
         { sender: currentUserId, recipient: userId },
         { sender: userId, recipient: currentUserId }
@@ -261,16 +263,9 @@ const getDirectMessages = async (req, res) => {
       $and: [
         {
           $or: [
-            { isDeleted: false },
-            { 
-              isDeleted: true, 
-              deletedForEveryone: false,
-              $or: [
-                { deletedForUsers: { $exists: false } },
-                { deletedForUsers: { $size: 0 } },
-                { deletedForUsers: { $not: { $elemMatch: { user: currentUserId } } } }
-              ]
-            }
+            { deletedForUsers: { $exists: false } },
+            { deletedForUsers: { $size: 0 } },
+            { deletedForUsers: { $not: { $elemMatch: { user: currentUserId } } } }
           ]
         }
       ]
@@ -292,6 +287,7 @@ const getDirectMessages = async (req, res) => {
 
     const total = await Message.countDocuments({
       messageType: 'direct',
+      deletedForEveryone: { $ne: true },
       $or: [
         { sender: currentUserId, recipient: userId },
         { sender: userId, recipient: currentUserId }
@@ -299,12 +295,9 @@ const getDirectMessages = async (req, res) => {
       $and: [
         {
           $or: [
-            { isDeleted: false },
-            { 
-              isDeleted: true, 
-              deletedForEveryone: false,
-              'deletedForUsers.user': { $ne: currentUserId }
-            }
+            { deletedForUsers: { $exists: false } },
+            { deletedForUsers: { $size: 0 } },
+            { deletedForUsers: { $not: { $elemMatch: { user: currentUserId } } } }
           ]
         }
       ]
@@ -455,13 +448,35 @@ const getChatRooms = async (req, res) => {
 
     // Transform chat rooms to match frontend expectations
     const transformedChatRooms = await Promise.all(chatRooms.map(async (room) => {
+      let lastVisibleMessage = room.lastMessage;
+      const lastDeletedForUser = lastVisibleMessage?.deletedForUsers?.some?.(
+        entry => entry.user && entry.user.toString() === userId.toString()
+      );
+      if (lastVisibleMessage?.deletedForEveryone || lastDeletedForUser) {
+        lastVisibleMessage = await Message.findOne({
+          chatRoom: room._id,
+          messageType: 'group',
+          deletedForEveryone: { $ne: true },
+          $or: [
+            { deletedForUsers: { $exists: false } },
+            { deletedForUsers: { $size: 0 } },
+            { deletedForUsers: { $not: { $elemMatch: { user: userId } } } }
+          ]
+        }).sort({ createdAt: -1 }).lean();
+      }
+
       // Get unread count for this user (exclude messages sent by this user)
       const unreadCount = await Message.countDocuments({
         chatRoom: room._id,
         messageType: 'group',
         sender: { $ne: userId },
         'readBy.user': { $ne: userId },
-        isDeleted: false
+        deletedForEveryone: { $ne: true },
+        $or: [
+          { deletedForUsers: { $exists: false } },
+          { deletedForUsers: { $size: 0 } },
+          { deletedForUsers: { $not: { $elemMatch: { user: userId } } } }
+        ]
       });
 
       // Check if current user is mentioned in unread messages
@@ -471,7 +486,12 @@ const getChatRooms = async (req, res) => {
         sender: { $ne: userId },
         'readBy.user': { $ne: userId },
         mentions: userId,
-        isDeleted: false
+        deletedForEveryone: { $ne: true },
+        $or: [
+          { deletedForUsers: { $exists: false } },
+          { deletedForUsers: { $size: 0 } },
+          { deletedForUsers: { $not: { $elemMatch: { user: userId } } } }
+        ]
       });
       
       return {
@@ -495,10 +515,10 @@ const getChatRooms = async (req, res) => {
           joinedAt: member.joinedAt
         })),
         memberCount: room.members.length,
-        lastMessage: room.lastMessage ? {
-          content: room.lastMessage.content,
-          sender: room.lastMessage.sender,
-          createdAt: room.lastMessage.createdAt
+        lastMessage: lastVisibleMessage ? {
+          content: lastVisibleMessage.content,
+          sender: lastVisibleMessage.sender,
+          createdAt: lastVisibleMessage.createdAt
         } : null,
         unreadCount,
         lastActivity: room.lastActivity,
@@ -562,9 +582,21 @@ const getRecentConversations = async (req, res) => {
       {
         $match: {
           messageType: 'direct',
-          $or: [
-            { sender: userObjectId },
-            { recipient: userObjectId }
+          deletedForEveryone: { $ne: true },
+          $and: [
+            {
+              $or: [
+                { sender: userObjectId },
+                { recipient: userObjectId }
+              ]
+            },
+            {
+              $or: [
+                { deletedForUsers: { $exists: false } },
+                { deletedForUsers: { $size: 0 } },
+                { deletedForUsers: { $not: { $elemMatch: { user: userObjectId } } } }
+              ]
+            }
           ]
         }
       },
@@ -610,17 +642,11 @@ const getRecentConversations = async (req, res) => {
           sender: conv._id,
           recipient: userObjectId,
           'readBy.user': { $ne: userObjectId },
+          deletedForEveryone: { $ne: true },
           $or: [
-            { isDeleted: false },
-            {
-              isDeleted: true,
-              deletedForEveryone: false,
-              $or: [
-                { deletedForUsers: { $exists: false } },
-                { deletedForUsers: { $size: 0 } },
-                { deletedForUsers: { $not: { $elemMatch: { user: userObjectId } } } }
-              ]
-            }
+            { deletedForUsers: { $exists: false } },
+            { deletedForUsers: { $size: 0 } },
+            { deletedForUsers: { $not: { $elemMatch: { user: userObjectId } } } }
           ]
         });
 
@@ -658,9 +684,21 @@ const getRecentConversations = async (req, res) => {
       {
         $match: {
           messageType: 'direct',
-          $or: [
-            { sender: userObjectId },
-            { recipient: userObjectId }
+          deletedForEveryone: { $ne: true },
+          $and: [
+            {
+              $or: [
+                { sender: userObjectId },
+                { recipient: userObjectId }
+              ]
+            },
+            {
+              $or: [
+                { deletedForUsers: { $exists: false } },
+                { deletedForUsers: { $size: 0 } },
+                { deletedForUsers: { $not: { $elemMatch: { user: userObjectId } } } }
+              ]
+            }
           ]
         }
       },
@@ -706,7 +744,8 @@ const getRecentConversations = async (req, res) => {
 // Send group message
 const sendGroupMessage = async (req, res) => {
   try {
-    const { chatRoomId, text, replyTo, forwardedFrom } = req.body;
+    let { chatRoomId, text, replyTo, replyToId, forwardedFrom } = req.body;
+    replyTo = replyTo || replyToId;
     const senderId = req.user._id;
 
     // Check if user is member of the chat room
@@ -920,19 +959,13 @@ const getGroupMessages = async (req, res) => {
     const messages = await Message.find({
       chatRoom: chatRoomId,
       messageType: 'group',
+      deletedForEveryone: { $ne: true },
       $and: [
         {
           $or: [
-            { isDeleted: false },
-            { 
-              isDeleted: true, 
-              deletedForEveryone: false,
-              $or: [
-                { deletedForUsers: { $exists: false } },
-                { deletedForUsers: { $size: 0 } },
-                { deletedForUsers: { $not: { $elemMatch: { user: userId } } } }
-              ]
-            }
+            { deletedForUsers: { $exists: false } },
+            { deletedForUsers: { $size: 0 } },
+            { deletedForUsers: { $not: { $elemMatch: { user: userId } } } }
           ]
         }
       ]
@@ -950,19 +983,13 @@ const getGroupMessages = async (req, res) => {
     const total = await Message.countDocuments({
       chatRoom: chatRoomId,
       messageType: 'group',
+      deletedForEveryone: { $ne: true },
       $and: [
         {
           $or: [
-            { isDeleted: false },
-            { 
-              isDeleted: true, 
-              deletedForEveryone: false,
-              $or: [
-                { deletedForUsers: { $exists: false } },
-                { deletedForUsers: { $size: 0 } },
-                { deletedForUsers: { $not: { $elemMatch: { user: userId } } } }
-              ]
-            }
+            { deletedForUsers: { $exists: false } },
+            { deletedForUsers: { $size: 0 } },
+            { deletedForUsers: { $not: { $elemMatch: { user: userId } } } }
           ]
         }
       ]
@@ -994,7 +1021,15 @@ const markMessagesAsRead = async (req, res) => {
     const { chatId, messageType } = req.body;
     const userId = req.user._id;
 
-    let filter = { 'readBy.user': { $ne: userId }, isDeleted: false };
+    let filter = {
+      'readBy.user': { $ne: userId },
+      deletedForEveryone: { $ne: true },
+      $or: [
+        { deletedForUsers: { $exists: false } },
+        { deletedForUsers: { $size: 0 } },
+        { deletedForUsers: { $not: { $elemMatch: { user: userId } } } }
+      ]
+    };
 
     if (messageType === 'direct') {
       // For direct messages, mark messages from the other user as read
@@ -1109,6 +1144,7 @@ const addReaction = async (req, res) => {
     res.status(200).json({
       success: true,
       message: existingReaction ? 'Reaction removed' : 'Reaction added',
+      reactions: message.reactions,
       data: {
         reactions: message.reactions
       }
@@ -1875,11 +1911,48 @@ const handleInviteResponse = async (req, res) => {
 const deleteDirectMessage = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { messageId, deleteType = 'forMe' } = req.body;
+    const { messageId, deleteType = 'forMe' } = req.body || {};
     const currentUserId = req.user._id;
     
     if (process.env.NODE_ENV === 'development') { console.log('Delete direct message request:', { userId, messageId, deleteType, currentUserId });
 }
+    if (!messageId) {
+      const otherUserId = String(userId || '').replace(/^direct_/, '');
+      if (!otherUserId) {
+        return res.status(400).json({
+          success: false,
+          message: 'User ID is required'
+        });
+      }
+
+      const deletedAt = new Date();
+      const result = await Message.updateMany(
+        {
+          messageType: 'direct',
+          deletedForEveryone: false,
+          'deletedForUsers.user': { $ne: currentUserId },
+          $or: [
+            { sender: currentUserId, recipient: otherUserId },
+            { sender: otherUserId, recipient: currentUserId }
+          ]
+        },
+        {
+          $addToSet: {
+            deletedForUsers: {
+              user: currentUserId,
+              deletedAt
+            }
+          }
+        }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: 'Conversation deleted for you',
+        data: { updatedCount: result.modifiedCount }
+      });
+    }
+
     // Validate messageId format
     if (!messageId || messageId.length < 10) {
       return res.status(400).json({
@@ -1940,6 +2013,12 @@ const deleteDirectMessage = async (req, res) => {
     
     await message.save();
 
+    if (deleteType === 'forEveryone' && io) {
+      const payload = { messageId: message._id, deleteType: 'forEveryone' };
+      io.to(`user-${message.sender}`).emit('message_deleted', payload);
+      io.to(`user-${message.recipient}`).emit('message_deleted', payload);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Message deleted successfully'
@@ -1959,7 +2038,7 @@ const deleteDirectMessage = async (req, res) => {
 const deleteGroupMessage = async (req, res) => {
   try {
     const { chatRoomId } = req.params;
-    const { messageId, deleteType = 'forMe' } = req.body;
+    const { messageId, deleteType = 'forMe' } = req.body || {};
     const currentUserId = req.user._id;
 
     // Find the chat room
@@ -2035,6 +2114,14 @@ const deleteGroupMessage = async (req, res) => {
     }
     
     await message.save();
+
+    if (deleteType === 'forEveryone' && io) {
+      io.to(`chat-${chatRoomId}`).emit('message_deleted', {
+        messageId: message._id,
+        deleteType: 'forEveryone',
+        chatRoomId
+      });
+    }
 
     res.status(200).json({
       success: true,

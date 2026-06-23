@@ -22,6 +22,7 @@ type LegacyAuthController = {
   checkPasswordSame: RequestHandler;
   generateGuestToken: RequestHandler;
   googleTokenLogin: RequestHandler;
+  appleMobileLogin: RequestHandler;
 };
 
 type ProgressiveAuthLimiter = {

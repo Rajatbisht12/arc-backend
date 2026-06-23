@@ -57,6 +57,5 @@ router.post("/:id/prize-distribution", protect, tournamentController.updatePrize
 router.post("/:id/generate-final-result", protect, tournamentController.generateFinalResult);
 router.post("/:id/assign-special-prize", protect, tournamentController.assignSpecialPrize);
 router.post("/:id/open-registration", protect, tournamentController.openRegistration);
-router.post("/:id/start", protect, tournamentController.startTournament);
 
 export default router;

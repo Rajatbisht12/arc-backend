@@ -104,6 +104,7 @@ router.post("/logout", legacyAuthController.logout);
 router.post("/complete-google-profile", protect, legacyAuthController.completeGoogleProfile);
 
 router.post("/google/token", legacyAuthController.googleTokenLogin);
+router.post("/apple/mobile", legacyAuthController.appleMobileLogin);
 
 router.get("/google", passport.authenticate("google", { scope: ["profile", "email"] }));
 // Mobile entry point — passes state=mobile so callback can redirect to deep link

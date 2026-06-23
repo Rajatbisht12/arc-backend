@@ -10,6 +10,18 @@ router.get("/avatar/:userId", userController.getAvatar);
 router.get("/blocked", protect, userController.getBlockedUsers);
 router.post("/block/:username", protect, userController.blockUser);
 router.delete("/block/:username", protect, userController.unblockUser);
+router.delete("/roster-invite/:inviteId", protect, userController.cancelRosterInvite);
+// Player-facing roster invite endpoints (list / accept / decline)
+router.get("/roster-invites", protect, userController.getRosterInvites);
+router.post("/roster-invites/:inviteId/accept", protect, userController.acceptRosterInvite);
+router.post("/roster-invites/:inviteId/decline", protect, userController.declineRosterInvite);
+router.delete("/staff-invite/:inviteId", protect, userController.cancelStaffInvite);
+router.get("/gaming-stats", protect, userController.getGamingStats);
+router.post("/gaming-stats", protect, userController.addGamingStat);
+router.put("/gaming-stats/:statId", protect, userController.updateGamingStat);
+router.delete("/gaming-stats/:statId", protect, userController.deleteGamingStat);
+router.post("/gaming-stats/sync-coc", protect, userController.syncClashOfClansData);
+router.post("/gaming-stats/sync-cr", protect, userController.syncClashRoyaleData);
 router.get("/:identifier/tournaments", optionalAuth, userController.getLiveTournamentHistory);
 router.get("/:username/tournament-history", optionalAuth, userController.getUserTournamentHistory);
 router.get("/privacy-settings", protect, userController.getPrivacySettings);
@@ -30,19 +42,7 @@ router.post("/:teamId/staff/add-by-username", protect, userController.addStaffMe
 router.delete("/:teamId/staff/:playerId", protect, userController.removeStaffMember);
 router.post("/:playerId/add-team/:teamId", protect, userController.addTeamToPlayer);
 router.get("/:teamId/pending-invites", protect, userController.getTeamPendingInvites);
-router.delete("/roster-invite/:inviteId", protect, userController.cancelRosterInvite);
-// Player-facing roster invite endpoints (list / accept / decline)
-router.get("/roster-invites", protect, userController.getRosterInvites);
-router.post("/roster-invites/:inviteId/accept", protect, userController.acceptRosterInvite);
-router.post("/roster-invites/:inviteId/decline", protect, userController.declineRosterInvite);
-router.delete("/staff-invite/:inviteId", protect, userController.cancelStaffInvite);
 router.delete("/:teamId/staff/cancel-by-username", protect, userController.cancelStaffInviteByUsername);
-router.get("/gaming-stats", protect, userController.getGamingStats);
-router.post("/gaming-stats", protect, userController.addGamingStat);
-router.put("/gaming-stats/:statId", protect, userController.updateGamingStat);
-router.delete("/gaming-stats/:statId", protect, userController.deleteGamingStat);
-router.post("/gaming-stats/sync-coc", protect, userController.syncClashOfClansData);
-router.post("/gaming-stats/sync-cr", protect, userController.syncClashRoyaleData);
 router.post("/:teamId/leave-request", protect, userController.sendLeaveRequest);
 router.get("/:teamId/leave-requests", protect, userController.getTeamLeaveRequests);
 router.post("/leave-requests/:requestId/approve", protect, userController.approveLeaveRequest);

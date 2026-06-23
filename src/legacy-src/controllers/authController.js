@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const OtpVerification = require('../models/OtpVerification');
+const Follow = require('../models/Follow');
 const { generateToken, generateRefreshToken } = require('../utils/jwt');
 const { uploadAvatar, uploadImage } = require('../utils/cloudinary');
 const { sendOTPEmail } = require('../utils/email');
@@ -466,10 +467,14 @@ const getMe = async (req, res) => {
       .populate('followers', 'username profile.displayName profile.avatar')
       .populate('following', 'username profile.displayName profile.avatar');
 
+    const userResponse = user.toObject();
+    userResponse.followersCount = await Follow.getFollowerCount(user._id).catch(() => user.followers?.length || 0);
+    userResponse.followingCount = await Follow.getFollowingCount(user._id).catch(() => user.following?.length || 0);
+
     res.status(200).json({
       success: true,
       data: {
-        user
+        user: userResponse
       }
     });
 
@@ -527,6 +532,7 @@ const updateProfile = async (req, res) => {
     if (updates.displayName) updateObject['profile.displayName'] = updates.displayName;
     if (updates.bio !== undefined) updateObject['profile.bio'] = updates.bio;
     if (updates.gender !== undefined) updateObject['profile.gender'] = updates.gender;
+    if (updates.dob !== undefined) updateObject['profile.dob'] = updates.dob ? new Date(updates.dob) : null;
     if (updates.location !== undefined) updateObject['profile.location'] = updates.location;
     if (updates.website !== undefined) updateObject['profile.website'] = updates.website;
     if (updates['profile.avatar']) updateObject['profile.avatar'] = updates['profile.avatar'];
@@ -555,11 +561,15 @@ const updateProfile = async (req, res) => {
     ).populate('followers', 'username profile.displayName profile.avatar')
      .populate('following', 'username profile.displayName profile.avatar');
 
+    const userResponse = user.toObject();
+    userResponse.followersCount = await Follow.getFollowerCount(user._id).catch(() => user.followers?.length || 0);
+    userResponse.followingCount = await Follow.getFollowingCount(user._id).catch(() => user.following?.length || 0);
+
     res.status(200).json({
       success: true,
       message: 'Profile updated successfully',
       data: {
-        user
+        user: userResponse
       }
     });
 
@@ -1133,6 +1143,144 @@ const googleTokenLogin = async (req, res) => {
   }
 };
 
+const APPLE_KEYS_URL = 'https://appleid.apple.com/auth/keys';
+let appleKeyCache = {
+  expiresAt: 0,
+  keys: []
+};
+
+const getAppleSigningKey = async (kid) => {
+  const now = Date.now();
+  if (!appleKeyCache.keys.length || appleKeyCache.expiresAt < now) {
+    const axios = require('axios');
+    const { data } = await axios.get(APPLE_KEYS_URL, { timeout: 5000 });
+    appleKeyCache = {
+      keys: Array.isArray(data.keys) ? data.keys : [],
+      expiresAt: now + 60 * 60 * 1000
+    };
+  }
+
+  const jwk = appleKeyCache.keys.find((key) => key.kid === kid);
+  if (!jwk) {
+    throw new Error('Apple signing key not found');
+  }
+
+  const crypto = require('crypto');
+  return crypto.createPublicKey({ key: jwk, format: 'jwk' }).export({
+    type: 'spki',
+    format: 'pem'
+  });
+};
+
+const verifyAppleIdentityToken = async (identityToken) => {
+  const jwt = require('jsonwebtoken');
+  const decoded = jwt.decode(identityToken, { complete: true });
+  const kid = decoded?.header?.kid;
+  if (!kid) {
+    throw new Error('Invalid Apple identity token header');
+  }
+
+  const publicKey = await getAppleSigningKey(kid);
+  const audience = process.env.APPLE_BUNDLE_ID || process.env.IOS_BUNDLE_ID || 'com.arcSquadHunt';
+
+  return jwt.verify(identityToken, publicKey, {
+    algorithms: ['RS256'],
+    issuer: 'https://appleid.apple.com',
+    audience
+  });
+};
+
+const appleMobileLogin = async (req, res) => {
+  try {
+    const { identityToken, displayName } = req.body;
+    if (!identityToken) {
+      return res.status(400).json({ success: false, message: 'identityToken is required' });
+    }
+
+    const profile = await verifyAppleIdentityToken(identityToken);
+    const appleId = profile.sub;
+    const tokenEmail = typeof profile.email === 'string' ? profile.email.toLowerCase() : '';
+    const emailVerified = profile.email_verified === true || profile.email_verified === 'true' || !tokenEmail;
+
+    if (!appleId) {
+      return res.status(400).json({ success: false, message: 'Apple identity token is missing a subject' });
+    }
+
+    if (!emailVerified) {
+      return res.status(400).json({ success: false, message: 'Apple email is not verified' });
+    }
+
+    let user = await User.findOne({ appleId });
+    if (!user && tokenEmail) {
+      user = await User.findOne({ email: tokenEmail });
+    }
+
+    if (!user && !tokenEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Apple did not provide an email for this account. Please sign in with the same Apple account again or use another login method.'
+      });
+    }
+
+    if (!user) {
+      const randomStr = Math.random().toString(36).substring(2, 10) + Date.now().toString(36).substring(2, 10);
+      let finalUsername = `a_${randomStr.substring(0, 14)}`;
+      let checkUser = await User.findOne({ username: finalUsername });
+      let counter = 1;
+      while (checkUser && counter < 1000) {
+        const maxLen = 18 - counter.toString().length;
+        finalUsername = `a_${randomStr.substring(0, maxLen)}${counter}`;
+        if (finalUsername.length > 20) finalUsername = finalUsername.substring(0, 20);
+        checkUser = await User.findOne({ username: finalUsername });
+        counter++;
+      }
+
+      user = await User.create({
+        email: tokenEmail,
+        appleId,
+        username: finalUsername,
+        password: require('crypto').randomBytes(32).toString('hex'),
+        userType: 'player',
+        profile: {
+          displayName: displayName || tokenEmail.split('@')[0],
+          avatar: ''
+        },
+        needsProfileCompletion: true,
+        isActive: true
+      });
+    } else {
+      if (!user.appleId) user.appleId = appleId;
+      user.lastSeen = new Date();
+      await user.save();
+    }
+
+    if (!user.isActive) {
+      return res.status(401).json({ success: false, message: 'Account is deactivated.' });
+    }
+
+    const token = generateToken({ id: user._id, username: user.username, userType: user.userType });
+    const refreshToken = generateRefreshToken({ id: user._id });
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    return res.json({
+      success: true,
+      token,
+      refreshToken,
+      user: userResponse,
+      data: {
+        token,
+        refreshToken,
+        user: userResponse
+      },
+      profileComplete: !user.needsProfileCompletion
+    });
+  } catch (error) {
+    log.error('Apple mobile login error:', { error: String(error) });
+    return res.status(401).json({ success: false, message: 'Apple login failed' });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -1152,5 +1300,6 @@ module.exports = {
   resetPasswordWithOtp,
   checkPasswordSame,
   generateGuestToken,
-  googleTokenLogin
+  googleTokenLogin,
+  appleMobileLogin
 };

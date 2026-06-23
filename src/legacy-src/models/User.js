@@ -454,6 +454,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     sparse: true
   },
+  appleId: {
+    type: String,
+    index: true,
+    sparse: true
+  },
   needsProfileCompletion: {
     type: Boolean,
     default: false

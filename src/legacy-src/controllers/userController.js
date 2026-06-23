@@ -91,11 +91,34 @@ const getUsers = async (req, res) => {
     const total = await User.countDocuments(filter);
 
     const isGuest = req.user && req.user.userType === 'guest';
+    const viewerId = req.user?._id;
+    const userIds = users.map(u => u._id);
+    const [viewerFollows, followerCounts, followingCounts] = await Promise.all([
+      viewerId && !isGuest
+        ? Follow.find({ follower: viewerId, following: { $in: userIds } }).select('following').lean()
+        : Promise.resolve([]),
+      Promise.all(users.map(u =>
+        Follow.getFollowerCount(u._id).catch(() => Array.isArray(u.followers) ? u.followers.length : 0)
+      )),
+      Promise.all(users.map(u =>
+        Follow.getFollowingCount(u._id).catch(() => Array.isArray(u.following) ? u.following.length : 0)
+      )),
+    ]);
+    const viewerFollowingIds = new Set(viewerFollows.map(f => f.following.toString()));
 
     res.status(200).json({
       success: true,
       data: {
-        users: users.map(u => formatUserDTO(u, isGuest, false)),
+        users: users.map((u, index) => {
+          const dto = formatUserDTO(u, isGuest, false);
+          const id = u._id.toString();
+          dto.isFollowing = viewerId && id !== viewerId.toString()
+            ? viewerFollowingIds.has(id)
+            : false;
+          dto.followersCount = followerCounts[index];
+          dto.followingCount = followingCounts[index];
+          return dto;
+        }),
         pagination: {
           current: page,
           total: Math.ceil(total / limit),
@@ -243,10 +266,10 @@ const getUser = async (req, res) => {
   try {
     const { identifier } = req.params;
 
-    // ── Redis profile cache (skip for self-views since they need live data) ──
+    // ── Redis profile cache (only anonymous views; logged-in views include viewer-specific relationship data) ──
     const requestingUserId = req.user?._id?.toString?.() || req.user?._id || null;
     const cacheKey = profileCacheKey(identifier);
-    if (requestingUserId !== identifier) {
+    if (!requestingUserId) {
       const cached = await getJson(cacheKey);
       if (cached) {
         return res.status(200).json(cached);
@@ -506,6 +529,23 @@ const getUser = async (req, res) => {
 
     const isGuest = req.user && req.user.userType === 'guest';
     const isSelf = req.user && req.user._id && !isGuest && req.user._id.toString() === user._id.toString();
+    const [
+      followersCount,
+      followingCount,
+      postsCount,
+      isFollowing,
+      isFollowedBy,
+    ] = await Promise.all([
+      Follow.getFollowerCount(user._id).catch(() => user.followers ? user.followers.length : 0),
+      Follow.getFollowingCount(user._id).catch(() => user.following ? user.following.length : 0),
+      Post.countDocuments({ author: user._id, isActive: true }).catch(() => 0),
+      requestingUserId && !isGuest && !isSelf
+        ? Follow.isFollowing(requestingUserId, user._id).catch(() => false)
+        : Promise.resolve(false),
+      requestingUserId && !isGuest && !isSelf
+        ? Follow.isFollowing(user._id, requestingUserId).catch(() => false)
+        : Promise.resolve(false),
+    ]);
 
     const responseData = {
       success: true,
@@ -513,16 +553,21 @@ const getUser = async (req, res) => {
         user: formatUserDTO(user, isGuest, isSelf),
         isBlockedByMe,
         recentPosts: recentPosts.map(p => formatPostDTO(p, isGuest, isSelf)),
+        relationship: {
+          isFollowing,
+          isFollowedBy,
+          isSelf: !!isSelf
+        },
         stats: {
-          followersCount: await Follow.getFollowerCount(user._id).catch(() => user.followers ? user.followers.length : 0),
-          followingCount: await Follow.getFollowingCount(user._id).catch(() => user.following ? user.following.length : 0),
-          postsCount: await Post.countDocuments({ author: user._id, isActive: true }).catch(() => 0)
+          followersCount,
+          followingCount,
+          postsCount
         }
       }
     };
 
-    // Cache non-self, non-blocked profile views in Redis for 5 minutes
-    if (!isSelf && !isBlockedByMe) {
+    // Cache anonymous, non-blocked profile views in Redis for 5 minutes
+    if (!requestingUserId && !isBlockedByMe) {
       setJson(cacheKey, responseData, PROFILE_CACHE_TTL).catch(() => {});
     }
 
@@ -643,11 +688,26 @@ const getFollowers = async (req, res) => {
     }
 
     const isGuest = req.user && req.user.userType === 'guest';
+    const viewerId = req.user?._id;
+    const viewerFollows = viewerId && !isGuest && followers.length > 0
+      ? await Follow.find({
+          follower: viewerId,
+          following: { $in: followers.map(f => f._id) }
+        }).select('following').lean()
+      : [];
+    const viewerFollowingIds = new Set(viewerFollows.map(f => f.following.toString()));
 
     res.status(200).json({
       success: true,
       data: {
-        followers: followers.map(f => formatUserDTO(f, isGuest, false)),
+        followers: followers.map(f => {
+          const dto = formatUserDTO(f, isGuest, false);
+          const id = f._id.toString();
+          dto.isFollowing = viewerId && id !== viewerId.toString()
+            ? viewerFollowingIds.has(id)
+            : false;
+          return dto;
+        }),
         pagination: {
           current: page,
           total: result.pages,
@@ -680,11 +740,26 @@ const getFollowing = async (req, res) => {
     const following = result.users.filter(f => f && !f.username?.startsWith('duo_'));
 
     const isGuest = req.user && req.user.userType === 'guest';
+    const viewerId = req.user?._id;
+    const viewerFollows = viewerId && !isGuest && following.length > 0
+      ? await Follow.find({
+          follower: viewerId,
+          following: { $in: following.map(f => f._id) }
+        }).select('following').lean()
+      : [];
+    const viewerFollowingIds = new Set(viewerFollows.map(f => f.following.toString()));
 
     res.status(200).json({
       success: true,
       data: {
-        following: following.map(f => formatUserDTO(f, isGuest, false)),
+        following: following.map(f => {
+          const dto = formatUserDTO(f, isGuest, false);
+          const id = f._id.toString();
+          dto.isFollowing = viewerId && id !== viewerId.toString()
+            ? viewerFollowingIds.has(id)
+            : false;
+          return dto;
+        }),
         pagination: {
           current: page,
           total: result.pages,
