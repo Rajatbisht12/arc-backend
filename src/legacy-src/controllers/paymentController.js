@@ -165,7 +165,18 @@ async function createOrder(req, res) {
       }
     });
   } catch (err) {
-    console.error('Error creating subscription order:', err);
+    console.error('Error creating subscription order:', {
+      code: err?.code || 'ORDER_CREATE_FAILED',
+      message: err?.message || 'Unknown provider error',
+      userId: req.user?._id ? String(req.user._id) : ''
+    });
+    if (String(err?.message || '').includes('RAZORPAY_KEY_ID')) {
+      return res.status(503).json({
+        success: false,
+        code: 'PAYMENT_GATEWAY_NOT_CONFIGURED',
+        message: 'Payment gateway is not configured. Please contact support.'
+      });
+    }
     res.status(500).json({
       success: false,
       message: 'Failed to create order'

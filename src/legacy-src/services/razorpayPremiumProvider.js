@@ -178,7 +178,10 @@ const fetchPaymentRefunds = (paymentId) => {
   if (typeof payments.fetchMultipleRefund !== 'function') {
     throw providerError('The installed Razorpay SDK does not support refund reconciliation', 'PROVIDER_OPERATION_UNSUPPORTED', 501);
   }
-  return payments.fetchMultipleRefund(safeProviderId(paymentId, 'Razorpay payment ID', ['pay_']));
+  return payments.fetchMultipleRefund(
+    safeProviderId(paymentId, 'Razorpay payment ID', ['pay_']),
+    { count: 100, skip: 0 }
+  );
 };
 
 const sanitizeProviderSnapshot = (value, depth = 0) => {

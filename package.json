@@ -20,7 +20,7 @@
     "verify:premium-indexes": "node scripts/migrate-premium-indexes.js --verify",
     "backfill:premium": "node scripts/backfill-premium-memberships.js",
     "backfill:premium:apply": "node scripts/backfill-premium-memberships.js --apply",
-    "test:premium": "node src/legacy-src/services/premiumMembershipService.test.js"
+    "test:premium": "node src/legacy-src/services/premiumMembershipService.test.js && node src/legacy-src/services/premiumMembership.security.test.js && node src/legacy-src/services/premiumMembership.models.security.test.js && node src/legacy-src/services/premiumMembershipService.security.test.js && node --check scripts/migrate-premium-indexes.js && node --check scripts/backfill-premium-memberships.js && node scripts/backfill-premium-memberships.test.js"
   },
   "keywords": [
     "modular-monolith",

@@ -12,8 +12,9 @@
 - `RAZORPAY_PREMIUM_PLAN_IDS`: JSON mapping. Both forms are supported:
   `{"player_pro:monthly":"plan_x"}` or
   `{"player_pro":{"monthly":"plan_x"}}`.
-- Individual plan variables are also supported, for example
-  `RAZORPAY_PLAN_PLAYER_PRO_MONTHLY=plan_x`.
+- Individual plan variables are also supported as
+  `RAZORPAY_PLAN_<PLAN_KEY>_<PERIOD>`. Configure monthly, quarterly, and yearly
+  IDs for `PLAYER_PRO`, `PLAYER_PRO_PLUS`, `TEAM_PRO`, and `TEAM_ORG` as needed.
 - `PREMIUM_SUBSCRIPTION_YEARS`: recurring duration, clamped to 1–10 years.
 - `PREMIUM_LIFECYCLE_JOB_ENABLED=false`: disables the lifecycle worker.
 - `PREMIUM_LIFECYCLE_CRON`: cron expression, default `*/5 * * * *`.
@@ -23,16 +24,50 @@
 Missing credentials or plan mappings return a clear `503` and never mutate a
 membership into a recurring state. Provider methods are guarded by real IDs.
 
+## Razorpay webhook configuration
+
+Configure Razorpay to send these events to
+`POST /api/payments/razorpay/webhook`:
+
+- `payment.captured` and `payment.failed`
+- `subscription.authenticated`, `subscription.activated`,
+  `subscription.charged`, `subscription.pending`, `subscription.halted`,
+  `subscription.paused`, `subscription.resumed`, `subscription.cancelled`,
+  `subscription.completed`, and `subscription.expired`
+- `refund.processed` and `refund.failed`
+
+The webhook secret must be different from `RAZORPAY_KEY_SECRET`. Delivery uses
+the exact raw request bytes, `x-razorpay-signature`, and
+`x-razorpay-event-id`; do not place a JSON parser before the raw-body capture
+for this route. Webhook inbox claims are idempotent and retry stale or failed
+deliveries up to their configured attempt ceiling.
+
 ## Rollout
 
 1. Run `npm run migrate:premium-indexes`, then
    `npm run verify:premium-indexes`. Resolve duplicate provider/idempotency keys
    before continuing if index creation fails.
-2. Run `npm run backfill:premium` (dry-run), inspect counts, then run
-   `npm run backfill:premium:apply`. The script is rerunnable.
+2. Run bounded dry-run batches and retain each reported `nextCursor`:
+   `npm run backfill:premium -- --limit=500 --after=<ObjectId>`. Omit `--after`
+   for the first batch. After reviewing the dry-run, execute the same batch
+   with `npm run backfill:premium:apply -- --limit=500 --after=<ObjectId>`,
+   using the same input cursor—not the newly reported cursor. Once apply
+   succeeds, use its `nextCursor` as the input to both runs of the next batch.
+   Continue while `hasMore` is true. The cursor only advances after a user is
+   processed successfully, so a failed user is retried on the next run.
 3. Configure the webhook secret and subscription/refund lifecycle events.
 4. Enable the lifecycle worker and monitor failed webhook inbox rows,
    reconciliation errors, expired access, and provider/local divergence codes.
+
+The backfill never treats pending or failed payments as purchase evidence. It
+selects the newest completed/refunded subscription transaction, derives a
+finite period for ambiguous legacy state, and only preserves lifetime access
+when a successful transaction explicitly and unambiguously identifies it.
+Every successful legacy transaction is linked to the canonical membership and
+normalizes proven Razorpay IDs, capture amount, and paid timestamp. Dry-run
+mode connects with automatic index/collection creation disabled and performs
+no writes. Synchronization events are deduplicated, so apply batches are safe
+to rerun.
 
 ## Customer APIs
 

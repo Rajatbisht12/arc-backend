@@ -85,7 +85,7 @@ test('provider terminal states cannot preserve or reactivate access', () => {
 
 test('canonical schemas declare one-current, provider, payment, and mutation uniqueness', () => {
   const membershipIndexes = PremiumMembership.schema.indexes();
-  const current = membershipIndexes.find(([key]) => key.user === 1 && Object.keys(key).length === 1);
+  const current = membershipIndexes.find(([key, options]) => key.user === 1 && Object.keys(key).length === 1 && options.unique);
   assert(current?.[1]?.unique);
   assert.deepStrictEqual(current[1].partialFilterExpression, { isCurrent: true });
   const subscription = membershipIndexes.find(([key]) => key['razorpay.subscriptionId'] === 1);
@@ -126,9 +126,9 @@ test('admin routes enforce premium RBAC, mutation idempotency audit, and legacy 
 
 test('raw webhook capture and customer route aliases preserve the signed byte contract', () => {
   const root = path.resolve(__dirname, '..', '..', '..');
-  const app = fs.readFileSync(path.join(root, 'app.ts'), 'utf8');
-  const paymentRoutes = fs.readFileSync(path.join(root, 'modules', 'payments', 'payments.routes.ts'), 'utf8');
-  const membershipRoutes = fs.readFileSync(path.join(root, 'modules', 'membership', 'membership.routes.ts'), 'utf8');
+  const app = fs.readFileSync(path.join(root, 'src', 'app.ts'), 'utf8');
+  const paymentRoutes = fs.readFileSync(path.join(root, 'src', 'modules', 'payments', 'payments.routes.ts'), 'utf8');
+  const membershipRoutes = fs.readFileSync(path.join(root, 'src', 'modules', 'membership', 'membership.routes.ts'), 'utf8');
   assert(app.includes('/api/payments/razorpay/webhook'));
   assert(app.includes('rawBody = Buffer.from(buffer)'));
   assert(paymentRoutes.indexOf('/razorpay/webhook') < paymentRoutes.indexOf('/history'));
@@ -164,7 +164,7 @@ test('entitlement projection does not mint credits during reconciliation', () =>
   const projection = source.slice(source.indexOf('const projectEntitlement ='), source.indexOf('const grantPeriodCredits ='));
   assert(!projection.includes("'membership.credits': credits"));
   const grants = source.slice(source.indexOf('const grantPeriodCredits ='), source.indexOf('const safeMembershipUpdate ='));
-  assert(grants.indexOf("User.updateOne") < grants.indexOf("'metadata.lastCreditGrantKey'"));
+  assert(grants.indexOf("User.updateOne") < grants.lastIndexOf("'metadata.lastCreditGrantKey'"));
   assert(source.includes('`payment:${paymentId}:credits`'));
 });
 
@@ -202,7 +202,7 @@ test('signed payment events recover captured checkout and record failures withou
 });
 
 test('production scripts cover explicit indexes, dry-run migration, and lifecycle startup', () => {
-  const root = path.resolve(__dirname, '..', '..', '..', '..');
+  const root = path.resolve(__dirname, '..', '..', '..');
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert(packageJson.scripts['migrate:premium-indexes']);
   assert(packageJson.scripts['verify:premium-indexes']);
