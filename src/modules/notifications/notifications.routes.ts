@@ -9,12 +9,23 @@ const EXPO_PUSH_TOKEN_PATTERN = /^ExponentPushToken\[[\w-]+\]$|^ExpoPushToken\[[
 const EXPO_PUSH_TOKEN_MAX_LENGTH = 512;
 const MAX_PUSH_TOKENS_PER_USER = 10;
 const VALID_PLATFORMS = new Set(["ios", "android", "web", "unknown"]);
+const VALID_TRACKING_PLATFORMS = new Set(["ios", "android", "web"]);
+const VALID_BROADCAST_CATEGORIES = new Set([
+  "announcement", "update", "maintenance", "feature_release", "tournament",
+  "recruitment", "promotion", "creator", "premium", "system", "custom"
+]);
+const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
 
 const getUserId = (req: { user?: { _id?: string } }) => req.user?._id;
 const safeString = (value: unknown, maxLength = 200) =>
   typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 const maskToken = (token: string) =>
   token.length <= 24 ? token : `${token.slice(0, 12)}...${token.slice(-8)}`;
+const isObjectId = (value: unknown) => typeof value === "string" && OBJECT_ID_PATTERN.test(value);
+const trackingPlatform = (value: unknown) => {
+  const platform = safeString(value, 40).toLowerCase();
+  return VALID_TRACKING_PLATFORMS.has(platform) ? platform : "unknown";
+};
 const latestPushDiagnostics = new Map<string, Record<string, unknown>>();
 
 const buildClientVisibilityFilter = (platform: string, appVersion: string) => {
@@ -128,7 +139,8 @@ router.post("/push-token", protect, async (req, res) => {
       return res.status(400).json({ success: false, message: "Valid Expo push token is required" });
     }
 
-    const normalizedPlatform = typeof platform === "string" && VALID_PLATFORMS.has(platform) ? platform : "unknown";
+    const requestedPlatform = safeString(platform, 40).toLowerCase();
+    const normalizedPlatform = VALID_PLATFORMS.has(requestedPlatform) ? requestedPlatform : "unknown";
     const normalizedNativeToken = nativeToken && typeof nativeToken === "object"
       ? {
           type: safeString((nativeToken as Record<string, unknown>).type, 40),
@@ -180,8 +192,7 @@ router.post("/push-token", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to register push token",
-      error: error instanceof Error ? error.message : String(error)
+      message: "Failed to register push token"
     });
   }
 });
@@ -247,8 +258,7 @@ router.post("/client-context", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to register notification client context",
-      error: error instanceof Error ? error.message : String(error)
+      message: "Failed to register notification client context"
     });
   }
 });
@@ -262,8 +272,8 @@ router.delete("/push-token", protect, async (req, res) => {
       return res.status(401).json({ success: false, message: "Authenticated user is required" });
     }
 
-    if (typeof token !== "string") {
-      return res.status(400).json({ success: false, message: "Push token is required" });
+    if (typeof token !== "string" || token.length > EXPO_PUSH_TOKEN_MAX_LENGTH || !EXPO_PUSH_TOKEN_PATTERN.test(token)) {
+      return res.status(400).json({ success: false, message: "Valid Expo push token is required" });
     }
 
     await User.updateOne({ _id: userId }, { $pull: { pushTokens: { token } } });
@@ -271,8 +281,7 @@ router.delete("/push-token", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to remove push token",
-      error: error instanceof Error ? error.message : String(error)
+      message: "Failed to remove push token"
     });
   }
 });
@@ -323,8 +332,7 @@ router.get("/push-status", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch push notification status",
-      error: error instanceof Error ? error.message : String(error)
+      message: "Failed to fetch push notification status"
     });
   }
 });
@@ -358,8 +366,7 @@ router.post("/push-test", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to send test push notification",
-      error: error instanceof Error ? error.message : String(error)
+      message: "Failed to send test push notification"
     });
   }
 });
@@ -397,7 +404,7 @@ router.post("/:id/delivered", protect, async (req, res) => {
     const result = await trackDelivery({
       notification: owned.notification,
       userId,
-      platform: safeString(req.body?.platform, 40).toLowerCase(),
+      platform: trackingPlatform(req.body?.platform),
       metadata: { source: safeString(req.body?.source, 80) }
     });
     return res.json({ success: true, data: result });
@@ -426,7 +433,7 @@ router.post("/:id/open", protect, async (req, res) => {
       notification: owned.notification,
       userId,
       eventType: "open",
-      platform: safeString(req.body?.platform, 40).toLowerCase(),
+      platform: trackingPlatform(req.body?.platform),
       metadata: { source: safeString(req.body?.source, 80) }
     });
     return res.json({ success: true, data: result });
@@ -456,7 +463,7 @@ router.post("/:id/click", protect, async (req, res) => {
       notification: owned.notification,
       userId,
       eventType: "open",
-      platform: safeString(req.body?.platform, 40).toLowerCase(),
+      platform: trackingPlatform(req.body?.platform),
       metadata: { source: "click" }
     });
     const result = await trackEvent({
@@ -464,7 +471,7 @@ router.post("/:id/click", protect, async (req, res) => {
       userId,
       eventType: "click",
       url: safeString(req.body?.url, 2048),
-      platform: safeString(req.body?.platform, 40).toLowerCase(),
+      platform: trackingPlatform(req.body?.platform),
       metadata: { source: safeString(req.body?.source, 80) }
     });
     return res.json({ success: true, data: result });
@@ -480,23 +487,38 @@ router.post("/:id/click", protect, async (req, res) => {
 router.get("/", protect, async (req, res) => {
   try {
     const userId = getUserId(req as { user?: { _id?: string } });
+    if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
     const page = Math.max(1, Number.parseInt(String(req.query.page ?? "1"), 10) || 1);
     const limit = Math.max(1, Math.min(100, Number.parseInt(String(req.query.limit ?? "20"), 10) || 20));
     const skip = (page - 1) * limit;
     const isRead = req.query.isRead;
 
     const platform = safeString(req.query.platform, 40).toLowerCase();
+    if (platform && !VALID_PLATFORMS.has(platform)) {
+      return res.status(400).json({ success: false, message: "platform filter is invalid" });
+    }
     const appVersion = safeString(req.query.appVersion, 40);
-    const archived = String(req.query.archived ?? "false") === "true";
+    const archivedValue = String(req.query.archived ?? "false").toLowerCase();
+    if (!["true", "false"].includes(archivedValue)) {
+      return res.status(400).json({ success: false, message: "archived filter must be true or false" });
+    }
+    const archived = archivedValue === "true";
     let filter: Record<string, unknown> = withClientVisibility({
       recipient: userId,
       deletedAt: null,
       archivedAt: archived ? { $ne: null } : null
     }, platform, appVersion);
     if (isRead !== undefined) {
-      filter = { ...filter, isRead: String(isRead) === "true" };
+      const readValue = String(isRead).toLowerCase();
+      if (!["true", "false"].includes(readValue)) {
+        return res.status(400).json({ success: false, message: "isRead filter must be true or false" });
+      }
+      filter = { ...filter, isRead: readValue === "true" };
     }
     const category = safeString(req.query.category, 60).toLowerCase();
+    if (category && category !== "all" && !VALID_BROADCAST_CATEGORIES.has(category)) {
+      return res.status(400).json({ success: false, message: "category filter is invalid" });
+    }
     if (category && category !== "all") filter = { ...filter, "data.customData.category": category };
     const search = safeString(req.query.search, 100);
     if (search) {
@@ -532,15 +554,19 @@ router.get("/", protect, async (req, res) => {
           current: page,
           total: Math.ceil(total / limit),
           count: notifications.length,
-          totalNotifications: total
+          totalNotifications: total,
+          // Compatibility aliases for clients that use conventional names.
+          page,
+          pages: Math.ceil(total / limit),
+          limit,
+          totalItems: total
         }
       }
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch notifications",
-      error: error instanceof Error ? error.message : String(error)
+      message: "Failed to fetch notifications"
     });
   }
 });
@@ -549,6 +575,8 @@ router.put("/:id/read", protect, async (req, res) => {
   try {
     const userId = (req as { user?: { _id?: string } }).user?._id;
     const { id } = req.params;
+    if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
+    if (!isObjectId(id)) return res.status(404).json({ success: false, message: "Notification not found" });
     const platform = safeString(req.body?.platform ?? req.query.platform, 40).toLowerCase();
     const appVersion = safeString(req.body?.appVersion ?? req.query.appVersion, 40);
     const notification = await Notification.findOne(
@@ -557,13 +585,13 @@ router.put("/:id/read", protect, async (req, res) => {
     if (!notification) {
       return res.status(404).json({ success: false, message: "Notification not found" });
     }
-    await notification.markAsRead();
-    return res.status(200).json({ success: true, message: "Notification marked as read" });
+    const alreadyRead = notification.isRead === true;
+    if (!alreadyRead) await notification.markAsRead();
+    return res.status(200).json({ success: true, message: "Notification marked as read", data: { alreadyRead } });
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to mark notification as read",
-      error: error instanceof Error ? error.message : String(error)
+      message: "Failed to mark notification as read"
     });
   }
 });
@@ -571,6 +599,7 @@ router.put("/:id/read", protect, async (req, res) => {
 router.put("/read-all", protect, async (req, res) => {
   try {
     const userId = (req as { user?: { _id?: string } }).user?._id;
+    if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
     const platform = safeString(req.body?.platform ?? req.query.platform, 40).toLowerCase();
     const appVersion = safeString(req.body?.appVersion ?? req.query.appVersion, 40);
     await Notification.updateMany(
@@ -581,8 +610,7 @@ router.put("/read-all", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to mark all notifications as read",
-      error: error instanceof Error ? error.message : String(error)
+      message: "Failed to mark all notifications as read"
     });
   }
 });
@@ -590,6 +618,8 @@ router.put("/read-all", protect, async (req, res) => {
 router.put("/:id/archive", protect, async (req, res) => {
   try {
     const userId = getUserId(req as { user?: { _id?: string } });
+    if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
+    if (!isObjectId(req.params.id)) return res.status(404).json({ success: false, message: "Notification not found" });
     const notification = await Notification.findOne({ _id: req.params.id, recipient: userId, deletedAt: null });
     if (!notification) return res.status(404).json({ success: false, message: "Notification not found" });
     notification.archivedAt = new Date();
@@ -603,6 +633,8 @@ router.put("/:id/archive", protect, async (req, res) => {
 router.put("/:id/unarchive", protect, async (req, res) => {
   try {
     const userId = getUserId(req as { user?: { _id?: string } });
+    if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
+    if (!isObjectId(req.params.id)) return res.status(404).json({ success: false, message: "Notification not found" });
     const notification = await Notification.findOne({ _id: req.params.id, recipient: userId, deletedAt: null });
     if (!notification) return res.status(404).json({ success: false, message: "Notification not found" });
     notification.archivedAt = null;
@@ -617,6 +649,8 @@ router.delete("/:id", protect, async (req, res) => {
   try {
     const userId = (req as { user?: { _id?: string } }).user?._id;
     const { id } = req.params;
+    if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
+    if (!isObjectId(id)) return res.status(404).json({ success: false, message: "Notification not found" });
     const notification = await Notification.findOne({ _id: id, recipient: userId, deletedAt: null });
     if (!notification) {
       return res.status(404).json({ success: false, message: "Notification not found" });
@@ -630,8 +664,7 @@ router.delete("/:id", protect, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to delete notification",
-      error: error instanceof Error ? error.message : String(error)
+      message: "Failed to delete notification"
     });
   }
 });

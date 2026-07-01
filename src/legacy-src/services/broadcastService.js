@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { randomUUID } = require('crypto');
 const Broadcast = require('../models/Broadcast');
 const BroadcastRecipient = require('../models/BroadcastRecipient');
 const BroadcastEvent = require('../models/BroadcastEvent');
@@ -20,6 +21,7 @@ const CTA_TYPES = new Set([
   'none', 'home', 'profile', 'tournament', 'recruitment', 'clip', 'post', 'story',
   'random_connect', 'premium', 'creator_monetization', 'host_verification', 'custom'
 ]);
+const SCHEDULE_MODES = new Set(['draft', 'immediate', 'scheduled']);
 const RECURRENCES = new Set(['once', 'daily', 'weekly', 'monthly', 'yearly']);
 const USER_TYPES = new Set(['player', 'team', 'creator']);
 const PLATFORMS = new Set(['android', 'ios', 'web']);
@@ -31,6 +33,11 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const RECIPIENT_CHUNK_SIZE = Math.max(25, Math.min(500, Number(process.env.BROADCAST_CHUNK_SIZE || 100)));
 const DELIVERY_CONCURRENCY = Math.max(1, Math.min(25, Number(process.env.BROADCAST_DELIVERY_CONCURRENCY || 10)));
 const PROCESSING_LEASE_MS = 15 * 60 * 1000;
+const METRICS_REFRESH_LOCK_MS = Math.max(10000, Number(process.env.BROADCAST_METRICS_LOCK_MS || 60000));
+const METRICS_REFRESH_MAX_ROUNDS = Math.max(
+  1,
+  Math.min(10, Number(process.env.BROADCAST_METRICS_MAX_ROUNDS || 3))
+);
 const BROADCAST_DISPATCH_MAX_ATTEMPTS = Math.max(
   1,
   Math.min(100, Number(process.env.BROADCAST_DISPATCH_MAX_ATTEMPTS || 12))
@@ -129,7 +136,20 @@ const createOccurrenceSnapshot = (broadcast) => ({
   audience: broadcast.audience?.toObject ? broadcast.audience.toObject() : (broadcast.audience || {})
 });
 
-const enumStrings = (value, allowed) => uniqueStrings(value, 100).filter((entry) => allowed.has(entry));
+const enumStrings = (value, allowed, fieldName) => {
+  const values = uniqueStrings(value, 100);
+  const invalid = values.find((entry) => !allowed.has(entry));
+  if (invalid) throw fail(`${fieldName} contains an unsupported value: ${invalid}`);
+  return values;
+};
+
+const enumValue = (value, allowed, fieldName, fallback) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string' || !allowed.has(value)) {
+    throw fail(`${fieldName} must be one of: ${Array.from(allowed).join(', ')}`);
+  }
+  return value;
+};
 
 const normalizeEmails = (value) => {
   const emails = Array.from(new Set(uniqueStrings(value, 254).map((email) => email.toLowerCase())));
@@ -170,8 +190,10 @@ const optionalDateBound = (value, fieldName, endOfDay = false) => {
 const optionalNumber = (value, fieldName) => {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) throw fail(`${fieldName} must be a non-negative number`);
-  return Math.floor(parsed);
+  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
+    throw fail(`${fieldName} must be a non-negative integer`);
+  }
+  return parsed;
 };
 
 const isSafeNavigationUrl = (value) => {
@@ -200,17 +222,17 @@ const isSafeHttpsUrl = (value) => {
   }
 };
 
-const assertTimezone = (value) => {
+const assertTimezone = (value, fieldName = 'schedule.timezone') => {
   const timezone = safeString(value, 100, 'UTC') || 'UTC';
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date());
   } catch {
-    throw fail('schedule.timezone must be a valid IANA timezone');
+    throw fail(`${fieldName} must be a valid IANA timezone`);
   }
   return timezone;
 };
 
-const normalizeAudience = (raw = {}) => {
+const normalizeAudience = (raw = {}, { allowIncomplete = false } = {}) => {
   const input = raw && typeof raw === 'object' ? raw : {};
   if (input.allUsers === true) {
     return {
@@ -241,28 +263,48 @@ const normalizeAudience = (raw = {}) => {
     if (type === 'teams' || type === 'team_account') return 'team';
     return type;
   });
-  let userTypes = enumStrings(accountTypes, USER_TYPES);
+  let userTypes = enumStrings(accountTypes, USER_TYPES, 'audience.accountTypes');
   if (input.individualUsers === true && !userTypes.includes('player')) userTypes.push('player');
   if (input.teamAccounts === true && !userTypes.includes('team')) userTypes.push('team');
   // Creator accounts are individual profiles in product semantics.
   if (userTypes.includes('player') && !userTypes.includes('creator')) userTypes.push('creator');
 
-  let premium = ['all', 'premium', 'non_premium'].includes(input.premium) ? input.premium : 'all';
+  let premium = enumValue(
+    input.premium,
+    new Set(['all', 'premium', 'non_premium']),
+    'audience.premium',
+    'all'
+  );
   if (input.premiumUsers === true && input.nonPremiumUsers !== true) premium = 'premium';
   if (input.nonPremiumUsers === true && input.premiumUsers !== true) premium = 'non_premium';
 
-  let verifiedHost = ['all', 'verified', 'unverified'].includes(input.verifiedHost)
-    ? input.verifiedHost
-    : 'all';
-  if (['all', 'verified', 'unverified'].includes(input.hostVerification)) {
-    verifiedHost = input.hostVerification;
+  let verifiedHost = enumValue(
+    input.verifiedHost,
+    new Set(['all', 'verified', 'unverified']),
+    'audience.verifiedHost',
+    'all'
+  );
+  if (input.hostVerification !== undefined && input.hostVerification !== null && input.hostVerification !== '') {
+    verifiedHost = enumValue(
+      input.hostVerification,
+      new Set(['all', 'verified', 'unverified']),
+      'audience.hostVerification',
+      'all'
+    );
   }
   if (input.verifiedHosts === true && input.nonVerifiedHosts !== true) verifiedHost = 'verified';
   if (input.nonVerifiedHosts === true && input.verifiedHosts !== true) verifiedHost = 'unverified';
 
   let creatorMonetizationStatuses = enumStrings(
     input.creatorMonetizationStatuses || input.creatorStatuses,
-    MONETIZATION_STATUSES
+    MONETIZATION_STATUSES,
+    'audience.creatorMonetizationStatuses'
+  );
+  const creatorMonetization = enumValue(
+    input.creatorMonetization,
+    new Set(['all', 'enabled', 'pending']),
+    'audience.creatorMonetization',
+    'all'
   );
   if (input.creatorMonetizationEnabled === true && !creatorMonetizationStatuses.includes('approved')) {
     creatorMonetizationStatuses.push('approved');
@@ -270,10 +312,10 @@ const normalizeAudience = (raw = {}) => {
   if (input.creatorMonetizationPending === true && !creatorMonetizationStatuses.includes('pending')) {
     creatorMonetizationStatuses.push('pending');
   }
-  if (input.creatorMonetization === 'enabled' && !creatorMonetizationStatuses.includes('approved')) {
+  if (creatorMonetization === 'enabled' && !creatorMonetizationStatuses.includes('approved')) {
     creatorMonetizationStatuses.push('approved');
   }
-  if (input.creatorMonetization === 'pending' && !creatorMonetizationStatuses.includes('pending')) {
+  if (creatorMonetization === 'pending' && !creatorMonetizationStatuses.includes('pending')) {
     creatorMonetizationStatuses.push('pending');
   }
 
@@ -298,7 +340,7 @@ const normalizeAudience = (raw = {}) => {
     countries: uniqueStrings(input.countries || input.country, 100),
     states: uniqueStrings(input.states || input.state, 100),
     cities: uniqueStrings(input.cities || input.city, 100),
-    platforms: enumStrings(input.platforms || input.platform, PLATFORMS),
+    platforms: enumStrings(input.platforms || input.platform, PLATFORMS, 'audience.platforms'),
     appVersions: uniqueStrings(input.appVersions || input.appVersion, 40),
     lastActiveFrom: optionalDateBound(input.lastActiveFrom ?? lastActive.from ?? input.lastActiveDate, 'lastActiveFrom'),
     lastActiveTo: optionalDateBound(input.lastActiveTo ?? lastActive.to, 'lastActiveTo', true),
@@ -306,7 +348,7 @@ const normalizeAudience = (raw = {}) => {
     joinedTo: optionalDateBound(input.joinedTo ?? joinedBetween.to ?? joinedBetween.end, 'joinedTo', true),
     followersMin: optionalNumber(input.followersMin ?? followers.min, 'followersMin'),
     followersMax: optionalNumber(input.followersMax ?? followers.max, 'followersMax'),
-    premiumPlans: enumStrings(input.premiumPlans || input.premiumPlan, PREMIUM_PLANS),
+    premiumPlans: enumStrings(input.premiumPlans || input.premiumPlan, PREMIUM_PLANS, 'audience.premiumPlans'),
     userIds,
     usernames: uniqueStrings(input.usernames || input.customUsernames, 20),
     emails: normalizeEmails(input.emails || input.customEmails)
@@ -328,29 +370,44 @@ const normalizeAudience = (raw = {}) => {
     Boolean(result.lastActiveFrom || result.lastActiveTo || result.joinedFrom || result.joinedTo) ||
     result.followersMin !== null || result.followersMax !== null || result.premiumPlans.length > 0 ||
     result.userIds.length > 0 || result.usernames.length > 0 || result.emails.length > 0;
-  if (!result.allUsers && !hasFilter) {
+  if (!allowIncomplete && !result.allUsers && !hasFilter) {
     throw fail('Audience must explicitly select allUsers or include at least one targeting filter');
   }
   return result;
 };
 
-const normalizeSchedule = (raw = {}) => {
+const normalizeSchedule = (raw = {}, { allowIncomplete = false } = {}) => {
   const input = raw && typeof raw === 'object' ? raw : {};
-  const mode = ['draft', 'immediate', 'scheduled'].includes(input.mode) ? input.mode : 'draft';
+  const mode = enumValue(input.mode, SCHEDULE_MODES, 'schedule.mode', 'draft');
+  if (input.recurrence !== undefined && input.recurrence !== null &&
+      typeof input.recurrence !== 'string' &&
+      (typeof input.recurrence !== 'object' || Array.isArray(input.recurrence))) {
+    throw fail('schedule.recurrence must be a recurrence name or object');
+  }
   const recurrenceInput = input.recurrence && typeof input.recurrence === 'object' ? input.recurrence : {};
   const recurrenceValue = typeof input.recurrence === 'string'
     ? input.recurrence
     : (recurrenceInput.frequency || 'once');
-  const recurrence = RECURRENCES.has(recurrenceValue) ? recurrenceValue : 'once';
-  const recurrenceInterval = Math.max(1, Math.min(365,
-    optionalNumber(input.recurrenceInterval ?? recurrenceInput.interval, 'schedule.recurrence.interval') || 1
-  ));
+  const recurrence = enumValue(recurrenceValue, RECURRENCES, 'schedule.recurrence.frequency', 'once');
+  const rawRecurrenceInterval = optionalNumber(
+    input.recurrenceInterval ?? recurrenceInput.interval,
+    'schedule.recurrence.interval'
+  );
+  const recurrenceInterval = rawRecurrenceInterval ?? 1;
+  if (recurrenceInterval < 1 || recurrenceInterval > 365) {
+    throw fail('schedule.recurrence.interval must be between 1 and 365');
+  }
   const scheduledAt = optionalDate(input.scheduledAt ?? input.sendAt, 'schedule.scheduledAt');
   const recurrenceEndAt = optionalDate(
     input.recurrenceEndAt ?? recurrenceInput.endAt,
     'schedule.recurrenceEndAt'
   );
-  if (mode === 'scheduled' && !scheduledAt) throw fail('schedule.scheduledAt is required for scheduled broadcasts');
+  if (!allowIncomplete && mode === 'scheduled' && !scheduledAt) {
+    throw fail('schedule.scheduledAt is required for scheduled broadcasts');
+  }
+  if (recurrence === 'once' && recurrenceEndAt) {
+    throw fail('schedule.recurrence.endAt is only valid for recurring broadcasts');
+  }
   if (recurrenceEndAt && scheduledAt && recurrenceEndAt <= scheduledAt) {
     throw fail('schedule.recurrenceEndAt must be after schedule.scheduledAt');
   }
@@ -365,19 +422,19 @@ const normalizeSchedule = (raw = {}) => {
   };
 };
 
-const normalizeBroadcastPayload = (raw = {}, { partial = false } = {}) => {
+const normalizeBroadcastPayload = (raw = {}, { partial = false, allowIncomplete = false } = {}) => {
   const input = raw && typeof raw === 'object' ? raw : {};
   const result = {};
 
   if (!partial || Object.prototype.hasOwnProperty.call(input, 'title')) {
     assertStringLength(input.title, 100, 'Title');
     result.title = safeString(input.title, 100);
-    if (!result.title) throw fail('Title is required');
+    if (!allowIncomplete && !result.title) throw fail('Title is required');
   }
   if (!partial || Object.prototype.hasOwnProperty.call(input, 'message')) {
     assertStringLength(input.message, 1000, 'Message');
     result.message = safeString(input.message, 1000);
-    if (!result.message) throw fail('Message is required');
+    if (!allowIncomplete && !result.message) throw fail('Message is required');
   }
   if (!partial || Object.prototype.hasOwnProperty.call(input, 'subtitle')) {
     assertStringLength(input.subtitle, 160, 'Subtitle');
@@ -396,48 +453,72 @@ const normalizeBroadcastPayload = (raw = {}, { partial = false } = {}) => {
 
   if (!partial || Object.prototype.hasOwnProperty.call(input, 'cta')) {
     const cta = input.cta && typeof input.cta === 'object' ? input.cta : {};
-    assertStringLength(cta.url ?? cta.deepLink, 2048, 'CTA URL');
-    assertStringLength(cta.text ?? cta.buttonText, 60, 'CTA text');
-    const url = safeString(cta.url ?? cta.deepLink, 2048);
-    if (!isSafeNavigationUrl(url)) throw fail('CTA URL/deep link is invalid');
+    assertStringLength(cta.url, 2048, 'CTA URL');
+    assertStringLength(cta.deepLink, 2048, 'CTA deep link');
+    assertStringLength(cta.text, 60, 'CTA text');
+    assertStringLength(cta.buttonText, 60, 'CTA button text');
+    const explicitUrl = safeString(cta.url, 2048);
+    const explicitDeepLink = safeString(cta.deepLink, 2048);
+    if (!isSafeNavigationUrl(explicitUrl)) throw fail('CTA URL is invalid');
+    if (!isSafeNavigationUrl(explicitDeepLink)) throw fail('CTA deep link is invalid');
+    // Keep the legacy single-destination contract working while allowing Web
+    // and native clients to receive purpose-built destinations.
+    const url = explicitUrl || explicitDeepLink;
+    const deepLink = explicitDeepLink || explicitUrl;
+    const ctaType = enumValue(cta.type, CTA_TYPES, 'cta.type', (url || deepLink) ? 'custom' : 'none');
     result.cta = {
-      text: safeString(cta.text ?? cta.buttonText, 60),
+      text: safeString(cta.text, 60) || safeString(cta.buttonText, 60),
       url,
-      type: CTA_TYPES.has(cta.type) ? cta.type : (url ? 'custom' : 'none')
+      deepLink,
+      type: ctaType
     };
     const urlRequiredTypes = new Set(['profile', 'tournament', 'recruitment', 'clip', 'post', 'story', 'custom']);
-    if (result.cta.text && (result.cta.type === 'none' || (urlRequiredTypes.has(result.cta.type) && !url))) {
-      throw fail('CTA destination is required when CTA button text is provided');
+    if (!allowIncomplete && (
+      (result.cta.type === 'none' && result.cta.text) ||
+      (urlRequiredTypes.has(result.cta.type) && !url && !deepLink)
+    )) {
+      throw fail('CTA destination is required for the selected deep-link type');
     }
   }
 
   if (!partial || Object.prototype.hasOwnProperty.call(input, 'priority')) {
-    result.priority = PRIORITIES.has(input.priority) ? input.priority : 'normal';
+    result.priority = enumValue(input.priority, PRIORITIES, 'priority', 'normal');
   }
   if (!partial || Object.prototype.hasOwnProperty.call(input, 'category')) {
-    result.category = CATEGORIES.has(input.category) ? input.category : 'announcement';
+    result.category = enumValue(input.category, CATEGORIES, 'category', 'announcement');
   }
   if (!partial || Object.prototype.hasOwnProperty.call(input, 'customCategory')) {
+    assertStringLength(input.customCategory, 60, 'Custom category');
     result.customCategory = safeString(input.customCategory, 60);
   }
-  if (result.category === 'custom' && !result.customCategory &&
+  if (!allowIncomplete && result.category === 'custom' && !result.customCategory &&
       (!partial || Object.prototype.hasOwnProperty.call(input, 'customCategory'))) {
     throw fail('Custom category is required when category is custom');
   }
   if (!partial || Object.prototype.hasOwnProperty.call(input, 'deliveryType')) {
-    result.deliveryType = DELIVERY_TYPES.has(input.deliveryType) ? input.deliveryType : 'both';
+    result.deliveryType = enumValue(input.deliveryType, DELIVERY_TYPES, 'deliveryType', 'both');
   }
   if (!partial || Object.prototype.hasOwnProperty.call(input, 'push')) {
     const push = input.push && typeof input.push === 'object' ? input.push : {};
+    assertStringLength(push.sound, 100, 'Push sound');
+    assertStringLength(push.collapseKey, 100, 'Push collapse key');
+    const badge = optionalNumber(push.badge ?? push.badgeCount, 'push.badge');
+    const ttl = optionalNumber(push.ttl, 'push.ttl') ?? 2419200;
+    if (badge !== null && badge > 9999) throw fail('push.badge cannot exceed 9999');
+    if (ttl > 2419200) throw fail('push.ttl cannot exceed 2419200 seconds');
     result.push = {
-      badge: optionalNumber(push.badge ?? push.badgeCount, 'push.badge'),
+      badge,
       sound: safeString(push.sound, 100, 'default') || 'default',
-      ttl: Math.min(2419200, optionalNumber(push.ttl, 'push.ttl') ?? 2419200),
+      ttl,
       collapseKey: safeString(push.collapseKey, 100)
     };
   }
-  if (!partial || Object.prototype.hasOwnProperty.call(input, 'audience')) result.audience = normalizeAudience(input.audience);
-  if (!partial || Object.prototype.hasOwnProperty.call(input, 'schedule')) result.schedule = normalizeSchedule(input.schedule);
+  if (!partial || Object.prototype.hasOwnProperty.call(input, 'audience')) {
+    result.audience = normalizeAudience(input.audience, { allowIncomplete });
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(input, 'schedule')) {
+    result.schedule = normalizeSchedule(input.schedule, { allowIncomplete });
+  }
   return result;
 };
 
@@ -552,17 +633,52 @@ const getZonedParts = (date, timezone) => {
   return Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]));
 };
 
+const wallTimeValue = (parts) => Date.UTC(
+  parts.year,
+  parts.month - 1,
+  parts.day,
+  parts.hour || 0,
+  parts.minute || 0,
+  parts.second || 0,
+  parts.millisecond || 0
+);
+
+const sameWallTime = (left, right) => (
+  left.year === right.year &&
+  left.month === right.month &&
+  left.day === right.day &&
+  (left.hour || 0) === (right.hour || 0) &&
+  (left.minute || 0) === (right.minute || 0) &&
+  (left.second || 0) === (right.second || 0)
+);
+
 const zonedPartsToDate = (parts, timezone) => {
-  const desiredWallTime = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-  let candidate = new Date(desiredWallTime);
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const actual = getZonedParts(candidate, timezone);
-    const actualWallTime = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute, actual.second);
-    const delta = desiredWallTime - actualWallTime;
-    if (delta === 0) return candidate;
-    candidate = new Date(candidate.getTime() + delta);
+  const desiredWallTime = wallTimeValue(parts);
+  // Timezone offsets around the requested wall date are sufficient to derive
+  // every exact instant, including both sides of a DST transition.
+  const offsets = new Set();
+  for (const hours of [-48, -24, -12, 0, 12, 24, 48]) {
+    const sample = new Date(desiredWallTime + (hours * 60 * 60 * 1000));
+    offsets.add(wallTimeValue(getZonedParts(sample, timezone)) - sample.getTime());
   }
-  return candidate;
+  const candidates = Array.from(offsets).map((offset) => {
+    const candidate = new Date(desiredWallTime - offset);
+    return { candidate, actual: getZonedParts(candidate, timezone) };
+  });
+  const exact = candidates
+    .filter(({ actual }) => sameWallTime(actual, parts))
+    .sort((left, right) => left.candidate - right.candidate);
+  // During a repeated wall time, consistently choose its first occurrence.
+  if (exact.length) return exact[0].candidate;
+
+  // A nonexistent DST-gap wall time is moved forward by the size of the gap
+  // (for example 02:30 -> 03:30), matching "later" disambiguation semantics.
+  const later = candidates
+    .map((entry) => ({ ...entry, wallDelta: wallTimeValue(entry.actual) - desiredWallTime }))
+    .filter((entry) => entry.wallDelta > 0)
+    .sort((left, right) => left.wallDelta - right.wallDelta || left.candidate - right.candidate);
+  if (later.length) return later[0].candidate;
+  throw fail(`Unable to resolve wall time in timezone ${timezone}`);
 };
 
 const nextRecurrenceDate = (currentValue, recurrence, interval = 1, timezone = 'UTC') => {
@@ -574,8 +690,18 @@ const nextRecurrenceDate = (currentValue, recurrence, interval = 1, timezone = '
   ));
   if (recurrence === 'daily') wallCalendar.setUTCDate(wallCalendar.getUTCDate() + safeInterval);
   if (recurrence === 'weekly') wallCalendar.setUTCDate(wallCalendar.getUTCDate() + (7 * safeInterval));
-  if (recurrence === 'monthly') wallCalendar.setUTCMonth(wallCalendar.getUTCMonth() + safeInterval);
-  if (recurrence === 'yearly') wallCalendar.setUTCFullYear(wallCalendar.getUTCFullYear() + safeInterval);
+  if (recurrence === 'monthly') {
+    const targetMonthIndex = zoned.year * 12 + (zoned.month - 1) + safeInterval;
+    const targetYear = Math.floor(targetMonthIndex / 12);
+    const targetMonth = targetMonthIndex % 12;
+    const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+    wallCalendar.setUTCFullYear(targetYear, targetMonth, Math.min(zoned.day, lastDay));
+  }
+  if (recurrence === 'yearly') {
+    const targetYear = zoned.year + safeInterval;
+    const lastDay = new Date(Date.UTC(targetYear, zoned.month, 0)).getUTCDate();
+    wallCalendar.setUTCFullYear(targetYear, zoned.month - 1, Math.min(zoned.day, lastDay));
+  }
   return zonedPartsToDate({
     year: wallCalendar.getUTCFullYear(),
     month: wallCalendar.getUTCMonth() + 1,
@@ -584,6 +710,25 @@ const nextRecurrenceDate = (currentValue, recurrence, interval = 1, timezone = '
     minute: wallCalendar.getUTCMinutes(),
     second: wallCalendar.getUTCSeconds()
   }, timezone);
+};
+
+const getTimezoneDayBounds = (timezoneValue = 'UTC', nowValue = new Date()) => {
+  const timezone = assertTimezone(timezoneValue, 'timezone');
+  const now = new Date(nowValue);
+  if (Number.isNaN(now.getTime())) throw fail('now must be a valid date');
+  const zoned = getZonedParts(now, timezone);
+  const start = zonedPartsToDate({
+    year: zoned.year, month: zoned.month, day: zoned.day,
+    hour: 0, minute: 0, second: 0, millisecond: 0
+  }, timezone);
+  const nextWallDay = new Date(Date.UTC(zoned.year, zoned.month - 1, zoned.day + 1));
+  const end = zonedPartsToDate({
+    year: nextWallDay.getUTCFullYear(),
+    month: nextWallDay.getUTCMonth() + 1,
+    day: nextWallDay.getUTCDate(),
+    hour: 0, minute: 0, second: 0, millisecond: 0
+  }, timezone);
+  return { timezone, start, end };
 };
 
 const createOccurrenceKey = (date = new Date()) => new Date(date).toISOString().replace(/[:.]/g, '-');
@@ -626,6 +771,7 @@ const resolvePushDeliveryStatus = (result = {}) => {
 };
 
 const resolveBroadcastDeepLink = (cta = {}) => {
+  if (cta.deepLink) return cta.deepLink;
   if (cta.url) return cta.url;
   const destinations = {
     home: '/',
@@ -636,6 +782,8 @@ const resolveBroadcastDeepLink = (cta = {}) => {
   };
   return destinations[cta.type] || '/notifications';
 };
+
+const resolveBroadcastWebUrl = (cta = {}) => cta.url || cta.deepLink || resolveBroadcastDeepLink(cta);
 
 const buildNotificationData = (broadcast, recipientLog, effectiveDeliveryType = broadcast.deliveryType) => ({
   broadcastId: broadcast._id,
@@ -653,13 +801,14 @@ const buildNotificationData = (broadcast, recipientLog, effectiveDeliveryType = 
   cta: {
     text: broadcast.cta?.text || '',
     url: broadcast.cta?.url || '',
+    deepLink: broadcast.cta?.deepLink || broadcast.cta?.url || '',
     type: broadcast.cta?.type || 'none'
   },
   customData: {
     broadcastId: String(broadcast._id),
     deliveryLogId: String(recipientLog._id),
     deepLink: resolveBroadcastDeepLink(broadcast.cta),
-    url: resolveBroadcastDeepLink(broadcast.cta),
+    url: resolveBroadcastWebUrl(broadcast.cta),
     subtitle: broadcast.subtitle || '',
     bannerImage: broadcast.bannerImage || '',
     thumbnail: broadcast.thumbnail || '',
@@ -737,6 +886,7 @@ const deliverToRecipient = async (broadcast, occurrenceKey, user, processingKey)
   recipientLog = await BroadcastRecipient.findOneAndUpdate(
     {
       _id: recipientLog._id,
+      webPushAcknowledgedAt: null,
       $or: [
         { overallStatus: { $in: ['pending', 'partial', 'failed'] } },
         { overallStatus: 'processing', processingKey },
@@ -765,7 +915,11 @@ const deliverToRecipient = async (broadcast, occurrenceKey, user, processingKey)
       ? latest.inApp.status
       : 'skipped';
     await BroadcastRecipient.updateOne(
-      { _id: recipientLog._id, overallStatus: { $in: ['pending', 'processing', 'partial', 'failed'] } },
+      {
+        _id: recipientLog._id,
+        webPushAcknowledgedAt: null,
+        overallStatus: { $in: ['pending', 'processing', 'partial', 'failed'] }
+      },
       {
         $set: {
           overallStatus: resolveOverallStatus('skipped', finalInAppStatus),
@@ -802,10 +956,9 @@ const deliverToRecipient = async (broadcast, occurrenceKey, user, processingKey)
   );
   const nativePushAvailable = eligiblePushTokens.length > 0;
   const pushAvailable = pushAllowed && (nativePushAvailable || webPushAvailable);
-  let inAppRequested = broadcast.deliveryType === 'in_app' || broadcast.deliveryType === 'both';
-  // Only an explicit user push opt-out invokes the product's in-app fallback.
-  // A Push-only broadcast with no matching device remains push-only/skipped.
-  if (pushRequested && !pushAllowed && inAppAllowed) inAppRequested = true;
+  // Delivery type is an operator contract: an explicit push-only broadcast
+  // must never materialize an inbox notification as an implicit fallback.
+  const inAppRequested = broadcast.deliveryType === 'in_app' || broadcast.deliveryType === 'both';
   const effectiveDeliveryType = resolveEffectiveDeliveryType({
     push: pushRequested && pushAvailable,
     inApp: inAppRequested && inAppAllowed
@@ -980,48 +1133,159 @@ const deliverToRecipient = async (broadcast, occurrenceKey, user, processingKey)
   };
 };
 
-const refreshBroadcastMetrics = async (broadcastId) => {
+const aggregateBroadcastMetrics = async (broadcastId) => {
   const [summary] = await BroadcastRecipient.aggregate([
     { $match: { broadcast: new mongoose.Types.ObjectId(String(broadcastId)) } },
-    {
-      $group: {
-        _id: null,
-        sourceUpdatedAt: { $max: '$updatedAt' },
-        recipients: { $sum: 1 },
-        delivered: { $sum: { $cond: [{ $in: ['$overallStatus', ['delivered', 'partial']] }, 1, 0] } },
-        failed: { $sum: { $cond: [{ $eq: ['$overallStatus', 'failed'] }, 1, 0] } },
-        skipped: { $sum: { $cond: [{ $eq: ['$overallStatus', 'skipped'] }, 1, 0] } },
-        opened: { $sum: { $cond: [{ $ne: ['$openedAt', null] }, 1, 0] } },
-        clicked: { $sum: { $cond: [{ $ne: ['$clickedAt', null] }, 1, 0] } },
-        pushDelivered: { $sum: { $cond: [{ $eq: ['$push.status', 'delivered'] }, 1, 0] } },
-        pushAttempted: { $sum: { $cond: [{ $in: ['$push.status', ['processing', 'delivered', 'failed']] }, 1, 0] } },
-        inAppDelivered: { $sum: { $cond: [{ $eq: ['$inApp.status', 'delivered'] }, 1, 0] } },
-        retryableFailures: { $sum: { $cond: [{ $or: [
-          { $eq: ['$push.status', 'failed'] },
-          { $eq: ['$inApp.status', 'failed'] }
-        ] }, 1, 0] } }
-      }
-    }
+    { $group: {
+      _id: null,
+      sourceUpdatedAt: { $max: '$updatedAt' },
+      recipients: { $sum: 1 },
+      delivered: { $sum: { $cond: [{ $in: ['$overallStatus', ['delivered', 'partial']] }, 1, 0] } },
+      failed: { $sum: { $cond: [{ $eq: ['$overallStatus', 'failed'] }, 1, 0] } },
+      skipped: { $sum: { $cond: [{ $eq: ['$overallStatus', 'skipped'] }, 1, 0] } },
+      opened: { $sum: { $cond: [{ $ne: ['$openedAt', null] }, 1, 0] } },
+      clicked: { $sum: { $cond: [{ $ne: ['$clickedAt', null] }, 1, 0] } },
+      pushDelivered: { $sum: { $cond: [{ $eq: ['$push.status', 'delivered'] }, 1, 0] } },
+      pushAttempted: { $sum: { $cond: [{ $in: ['$push.status', ['processing', 'delivered', 'failed']] }, 1, 0] } },
+      inAppDelivered: { $sum: { $cond: [{ $eq: ['$inApp.status', 'delivered'] }, 1, 0] } },
+      retryableFailures: { $sum: { $cond: [{ $or: [
+        { $eq: ['$push.status', 'failed'] },
+        { $eq: ['$inApp.status', 'failed'] }
+      ] }, 1, 0] } }
+    } }
   ]);
-  const metrics = summary || {
-    recipients: 0, delivered: 0, failed: 0, skipped: 0,
-    opened: 0, clicked: 0, pushDelivered: 0, pushAttempted: 0, inAppDelivered: 0, retryableFailures: 0
+  const value = summary || {
+    sourceUpdatedAt: new Date(0), recipients: 0, delivered: 0, failed: 0, skipped: 0,
+    opened: 0, clicked: 0, pushDelivered: 0, pushAttempted: 0,
+    inAppDelivered: 0, retryableFailures: 0
   };
-  delete metrics._id;
-  const sourceUpdatedAt = metrics.sourceUpdatedAt || new Date(0);
-  delete metrics.sourceUpdatedAt;
+  const sourceUpdatedAt = value.sourceUpdatedAt || new Date(0);
+  delete value._id;
+  delete value.sourceUpdatedAt;
+  return { metrics: value, sourceUpdatedAt };
+};
+
+const requestBroadcastMetricsRefresh = async (broadcastId) => {
   await Broadcast.updateOne(
-    {
-      _id: broadcastId,
-      $or: [
-        { metricsSourceUpdatedAt: null },
-        { metricsSourceUpdatedAt: { $exists: false } },
-        { metricsSourceUpdatedAt: { $lte: sourceUpdatedAt } }
-      ]
-    },
-    { $set: { metrics, metricsSourceUpdatedAt: sourceUpdatedAt } }
+    { _id: broadcastId },
+    { $inc: { 'metricsRefresh.requestedRevision': 1 } }
   );
-  return metrics;
+};
+
+const refreshBroadcastMetrics = async (broadcastId) => {
+  const id = String(broadcastId);
+  const requested = await Broadcast.findOneAndUpdate(
+    { _id: id },
+    { $inc: { 'metricsRefresh.requestedRevision': 1 } },
+    { new: true }
+  ).select('metrics metricsRefresh').lean();
+  if (!requested) return null;
+
+  const lockKey = `metrics-${randomUUID()}`;
+  for (let attempt = 0; attempt < 1; attempt += 1) {
+    const now = new Date();
+    const locked = await Broadcast.findOneAndUpdate(
+      {
+        _id: id,
+        $or: [
+          { 'metricsRefresh.lockKey': '' },
+          { 'metricsRefresh.lockKey': null },
+          { 'metricsRefresh.lockKey': { $exists: false } },
+          { 'metricsRefresh.lockExpiresAt': { $lte: now } }
+        ]
+      },
+      {
+        $set: {
+          'metricsRefresh.lockKey': lockKey,
+          'metricsRefresh.lockExpiresAt': new Date(now.getTime() + METRICS_REFRESH_LOCK_MS)
+        }
+      },
+      { new: true }
+    ).select('metrics metricsRefresh').lean();
+    if (!locked) {
+      // This request already advanced requestedRevision. The current lock
+      // holder must observe it before conditional release; stale-lock recovery
+      // handles a crashed holder without making user requests wait.
+      return requested.metrics || {};
+    }
+
+    let latestMetrics = locked.metrics || {};
+    try {
+      for (let round = 0; round < METRICS_REFRESH_MAX_ROUNDS; round += 1) {
+        const state = await Broadcast.findOne({ _id: id, 'metricsRefresh.lockKey': lockKey })
+          .select('metricsRefresh.requestedRevision')
+          .lean();
+        if (!state) break;
+        const targetRevision = Number(state.metricsRefresh?.requestedRevision || 0);
+        const aggregate = await aggregateBroadcastMetrics(id);
+        const sourceUpdatedAt = aggregate.sourceUpdatedAt;
+        const applied = await Broadcast.findOneAndUpdate(
+          {
+            _id: id,
+            'metricsRefresh.lockKey': lockKey,
+            $or: [
+              { metricsSourceUpdatedAt: null },
+              { metricsSourceUpdatedAt: { $exists: false } },
+              { metricsSourceUpdatedAt: { $lte: sourceUpdatedAt } }
+            ]
+          },
+          {
+            $set: {
+              metrics: aggregate.metrics,
+              metricsSourceUpdatedAt: sourceUpdatedAt,
+              'metricsRefresh.appliedRevision': targetRevision,
+              'metricsRefresh.lockExpiresAt': new Date(Date.now() + METRICS_REFRESH_LOCK_MS)
+            }
+          },
+          { new: true }
+        ).select('metricsRefresh').lean();
+        if (!applied) {
+          const current = await Broadcast.findById(id).select('metrics').lean();
+          latestMetrics = current?.metrics || latestMetrics;
+          break;
+        }
+        latestMetrics = aggregate.metrics;
+        const requestedRevision = Number(applied.metricsRefresh?.requestedRevision || 0);
+        if (requestedRevision !== targetRevision) continue;
+
+        const released = await Broadcast.updateOne(
+          {
+            _id: id,
+            'metricsRefresh.lockKey': lockKey,
+            'metricsRefresh.requestedRevision': targetRevision,
+            'metricsRefresh.appliedRevision': targetRevision
+          },
+          {
+            $set: { 'metricsRefresh.lockKey': '', 'metricsRefresh.lockExpiresAt': null }
+          }
+        );
+        if (released.modifiedCount) return latestMetrics;
+        // A refresh request landed between the equality check and release.
+      }
+    } finally {
+      await Broadcast.updateOne(
+        { _id: id, 'metricsRefresh.lockKey': lockKey },
+        { $set: { 'metricsRefresh.lockKey': '', 'metricsRefresh.lockExpiresAt': null } }
+      );
+    }
+    return latestMetrics;
+  }
+  // The requested revision remains greater than appliedRevision. The recovery
+  // scanner will retry after the active holder releases or its lease expires.
+  return requested.metrics || {};
+};
+
+const reconcileDirtyBroadcastMetrics = async (limit = 100) => {
+  const dirty = await Broadcast.find({
+    $expr: {
+      $gt: [
+        { $ifNull: ['$metricsRefresh.requestedRevision', 0] },
+        { $ifNull: ['$metricsRefresh.appliedRevision', 0] }
+      ]
+    }
+  }).select('_id').limit(Math.max(1, Math.min(1000, limit))).lean();
+  await mapWithConcurrency(dirty, 5, (broadcast) => refreshBroadcastMetrics(broadcast._id));
+  return { reconciled: dirty.length };
 };
 
 const deliveryMetricContribution = (overallStatus, pushStatus, inAppStatus) => ({
@@ -1045,10 +1309,9 @@ const addMetricTransition = (deltas, broadcastId, before, after) => {
 
 const applyMetricTransitions = async (deltas) => {
   // Recipient rows are authoritative. Never mix aggregate-and-$set refreshes
-  // with independent metric $inc writes: an increment can land between an
-  // aggregate snapshot and its write, then be overwritten. The updatedAt
-  // watermark CAS in refreshBroadcastMetrics prevents older concurrent
-  // snapshots from replacing newer ones.
+  // with independent metric $inc writes. refreshBroadcastMetrics serializes
+  // replacement through a Mongo revision lease and loops until every revision
+  // requested while the aggregate was running has been applied.
   await Promise.all(Array.from(deltas.keys()).map((broadcastId) =>
     refreshBroadcastMetrics(broadcastId)
   ));
@@ -1064,22 +1327,48 @@ const recordNotificationFailure = async ({
   code = '',
   reason,
   attempts = 0
-}) => NotificationFailure.findOneAndUpdate(
-  { broadcast, occurrenceKey, broadcastRecipient, channel, stage },
-  {
-    $setOnInsert: { broadcast, occurrenceKey, broadcastRecipient, recipient, channel, stage, firstFailedAt: new Date() },
-    $set: {
-      recipient,
-      code: safeString(code, 200),
-      reason: safeString(reason, 1000, 'Broadcast delivery failed'),
-      attempts: Math.max(0, Number(attempts || 0)),
-      status: 'open',
-      lastFailedAt: new Date(),
-      resolvedAt: null
+}) => {
+  if (channel === 'push' && broadcastRecipient) {
+    const stillFailed = await BroadcastRecipient.exists({
+      _id: broadcastRecipient,
+      webPushAcknowledgedAt: null,
+      'push.status': { $ne: 'delivered' }
+    });
+    if (!stillFailed) return null;
+  }
+  const failure = await NotificationFailure.findOneAndUpdate(
+    { broadcast, occurrenceKey, broadcastRecipient, channel, stage },
+    {
+      $setOnInsert: { broadcast, occurrenceKey, broadcastRecipient, recipient, channel, stage, firstFailedAt: new Date() },
+      $set: {
+        recipient,
+        code: safeString(code, 200),
+        reason: safeString(reason, 1000, 'Broadcast delivery failed'),
+        attempts: Math.max(0, Number(attempts || 0)),
+        status: 'open',
+        lastFailedAt: new Date(),
+        resolvedAt: null
+      }
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  if (channel === 'push' && broadcastRecipient) {
+    const acknowledged = await BroadcastRecipient.exists({
+      _id: broadcastRecipient,
+      $or: [
+        { webPushAcknowledgedAt: { $ne: null } },
+        { 'push.status': 'delivered' }
+      ]
+    });
+    if (acknowledged) {
+      await NotificationFailure.updateOne(
+        { _id: failure._id, status: { $in: ['open', 'retrying'] } },
+        { $set: { status: 'resolved', resolvedAt: new Date() } }
+      );
     }
-  },
-  { upsert: true, new: true, setDefaultsOnInsert: true }
-);
+  }
+  return failure;
+};
 
 const expireUnacknowledgedWebPushes = async (limit = 1000) => {
   const now = new Date();
@@ -1128,6 +1417,37 @@ const expireUnacknowledgedWebPushes = async (limit = 1000) => {
   await applyMetricTransitions(metricDeltas);
   const broadcastIds = Array.from(new Set(expiredRows.map(({ before }) => String(before.broadcast))));
   return { expired: expiredRows.length, broadcastIds };
+};
+
+const reconcileAcknowledgedNotificationFailures = async (limit = 1000) => {
+  const rows = await NotificationFailure.aggregate([
+    { $match: {
+      channel: 'push',
+      status: { $in: ['open', 'retrying'] },
+      broadcastRecipient: { $ne: null }
+    } },
+    { $lookup: {
+      from: BroadcastRecipient.collection.name,
+      localField: 'broadcastRecipient',
+      foreignField: '_id',
+      as: 'recipientLog'
+    } },
+    { $unwind: '$recipientLog' },
+    { $match: { $or: [
+      { 'recipientLog.webPushAcknowledgedAt': { $ne: null } },
+      { 'recipientLog.push.status': 'delivered' }
+    ] } },
+    { $sort: { lastFailedAt: 1, _id: 1 } },
+    { $limit: Math.max(1, Math.min(5000, limit)) },
+    { $project: { _id: 1 } }
+  ]);
+  const failureIds = rows.map((row) => row._id);
+  if (!failureIds.length) return { resolved: 0 };
+  const result = await NotificationFailure.updateMany(
+    { _id: { $in: failureIds }, status: { $in: ['open', 'retrying'] } },
+    { $set: { status: 'resolved', resolvedAt: new Date() } }
+  );
+  return { resolved: Number(result.modifiedCount || 0) };
 };
 
 const refreshRecipientPushStatuses = async (recipientLogIds) => {
@@ -1283,6 +1603,10 @@ const retryBroadcastPushRecipients = async (recipientLogIds, reconciliationKey) 
       ? { ...occurrenceSnapshot, _id: activeBroadcast._id }
       : activeBroadcast;
     const user = userById.get(String(recipientLog.recipient));
+    if (recipientLog.webPushAcknowledgedAt) {
+      terminalReceiptIds.skipped.push(recipientLog._id);
+      continue;
+    }
     const categoryAllowed = broadcast
       ? isBroadcastCategoryAllowed(user?.notificationSettings || {}, broadcast.category)
       : false;
@@ -1291,7 +1615,7 @@ const retryBroadcastPushRecipients = async (recipientLogIds, reconciliationKey) 
       const pushStatus = 'skipped';
       skippedOperations.push({
         updateOne: {
-          filter: { _id: recipientLog._id },
+          filter: { _id: recipientLog._id, webPushAcknowledgedAt: null },
           update: {
             $set: {
               'push.status': pushStatus,
@@ -1306,11 +1630,12 @@ const retryBroadcastPushRecipients = async (recipientLogIds, reconciliationKey) 
     }
     if (!pushAllowed) {
       const inAppAllowed = user.notificationSettings?.inAppEnabled !== false && categoryAllowed;
+      const inAppRequested = broadcast.deliveryType === 'both' || broadcast.deliveryType === 'in_app';
       let inAppStatus = recipientLog.inApp?.status || 'skipped';
       let fallbackNotification = recipientLog.notification
         ? notificationById.get(String(recipientLog.notification))
         : null;
-      if (inAppAllowed && inAppStatus !== 'delivered') {
+      if (inAppRequested && inAppAllowed && inAppStatus !== 'delivered') {
         fallbackNotification = await Notification.findOneAndUpdate(
           { broadcastRecipient: recipientLog._id },
           {
@@ -1329,12 +1654,12 @@ const retryBroadcastPushRecipients = async (recipientLogIds, reconciliationKey) 
         inAppStatus = 'delivered';
         const { emitNotification } = require('../utils/notificationEmitter');
         emitNotification(user._id, fallbackNotification);
-      } else if (!inAppAllowed) {
+      } else if (!inAppRequested || !inAppAllowed) {
         inAppStatus = 'skipped';
       }
       skippedOperations.push({
         updateOne: {
-          filter: { _id: recipientLog._id },
+          filter: { _id: recipientLog._id, webPushAcknowledgedAt: null },
           update: {
             $set: {
               notification: fallbackNotification?._id || recipientLog.notification || null,
@@ -1508,6 +1833,10 @@ const processBroadcastPushReceipts = async ({ receiptRecordIds, workerJobId }) =
 const finalizeBroadcast = async (broadcastId, occurrenceKey) => {
   const broadcast = await Broadcast.findById(broadcastId);
   if (!broadcast || broadcast.execution?.occurrenceKey !== occurrenceKey) return null;
+  if (broadcast.status !== 'processing' || broadcast.cancelledAt) {
+    await requestBroadcastMetricsRefresh(broadcastId);
+    return null;
+  }
   await refreshBroadcastMetrics(broadcastId);
   const now = new Date();
   const recurrence = broadcast.schedule?.recurrence || 'once';
@@ -1594,7 +1923,7 @@ const processBroadcastDispatch = async ({ broadcastId, occurrenceKey, runAt, wor
         'execution.finishedAt': null,
         'execution.lastError': ''
       },
-      $inc: { 'execution.attempts': 1 }
+      $inc: { 'execution.attempts': 1, __v: 1 }
     },
     { new: true }
   );
@@ -1757,6 +2086,11 @@ const processBroadcastChunk = async ({ broadcastId, occurrenceKey, chunkIndex, r
     { new: true }
   );
   if (!chunk) return { skipped: true, reason: 'already_completed_or_leased' };
+  const occurrence = await BroadcastOccurrence.findOne({ broadcast: broadcast._id, occurrenceKey }).lean();
+  if (!occurrence?.snapshot) {
+    throw new Error(`Immutable broadcast occurrence snapshot is missing for ${occurrenceKey}`);
+  }
+  const deliveryBroadcast = { ...occurrence.snapshot, _id: broadcast._id };
   const users = await User.find({
     // The durable chunk is the immutable occurrence snapshot. Job payload IDs
     // are advisory only and may be stale after queue recovery.
@@ -1768,42 +2102,51 @@ const processBroadcastChunk = async ({ broadcastId, occurrenceKey, chunkIndex, r
   const skippedSnapshotOperations = chunk.recipientIds
     .map((recipientId) => ({ recipientId, user: usersById.get(String(recipientId)) }))
     .filter(({ user }) => !user || user.isActive === false || user.needsProfileCompletion === true)
-    .map(({ recipientId, user }) => {
+    .flatMap(({ recipientId, user }) => {
       const reason = !user
         ? 'Recipient account no longer exists'
         : (user.isActive === false ? 'Recipient account is inactive' : 'Recipient profile is incomplete');
-      return {
-        updateOne: {
-          filter: { broadcast: broadcast._id, recipient: recipientId, occurrenceKey },
-          update: {
-            $setOnInsert: {
-              broadcast: broadcast._id,
-              recipient: recipientId,
-              occurrenceKey,
-              recipientSnapshot: {
-                username: user?.username || '',
-                displayName: user?.profile?.displayName || '',
-                userType: user?.userType || '',
-                isPremium: user?.isPremium === true,
-                premiumPlan: user?.membership?.tier || 'free',
-                location: user?.profile?.location || '',
-                country: deriveCountry(user?.profile),
-                platforms: user ? getMatchedRecipientPlatforms(user, broadcast.audience || {}) : []
-              },
-              requestedDeliveryType: broadcast.deliveryType
-            },
-            $set: {
+      const identity = { broadcast: broadcast._id, recipient: recipientId, occurrenceKey };
+      const initialState = {
+        ...identity,
+        recipientSnapshot: {
+          username: user?.username || '',
+          displayName: user?.profile?.displayName || '',
+          userType: user?.userType || '',
+          isPremium: user?.isPremium === true,
+          premiumPlan: user?.membership?.tier || 'free',
+          location: user?.profile?.location || '',
+          country: deriveCountry(user?.profile),
+          platforms: user ? getMatchedRecipientPlatforms(user, deliveryBroadcast.audience || {}) : []
+        },
+        requestedDeliveryType: deliveryBroadcast.deliveryType,
+        overallStatus: 'skipped',
+        push: { status: 'skipped' },
+        inApp: { status: 'skipped' },
+        lastError: reason
+      };
+      return [
+        {
+          updateOne: {
+            filter: identity,
+            update: { $setOnInsert: initialState },
+            upsert: true
+          }
+        },
+        {
+          updateOne: {
+            filter: { ...identity, webPushAcknowledgedAt: null },
+            update: { $set: {
               overallStatus: 'skipped',
               'push.status': 'skipped',
               'inApp.status': 'skipped',
               processingLeaseAt: null,
               processingKey: '',
               lastError: reason
-            }
-          },
-          upsert: true
+            } }
+          }
         }
-      };
+      ];
     });
   if (skippedSnapshotOperations.length) {
     await BroadcastRecipient.bulkWrite(skippedSnapshotOperations, { ordered: false });
@@ -1813,12 +2156,12 @@ const processBroadcastChunk = async ({ broadcastId, occurrenceKey, chunkIndex, r
   const unexpectedErrors = [];
   await mapWithConcurrency(eligibleUsers, DELIVERY_CONCURRENCY, async (user) => {
     try {
-      outcomes.push(await deliverToRecipient(broadcast, occurrenceKey, user, workerJobId));
+      outcomes.push(await deliverToRecipient(deliveryBroadcast, occurrenceKey, user, workerJobId));
     } catch (error) {
       outcomes.push({ overallStatus: 'failed', error: error.message });
       unexpectedErrors.push(error);
       await BroadcastRecipient.updateOne(
-        { broadcast: broadcastId, recipient: user._id, occurrenceKey },
+        { broadcast: broadcastId, recipient: user._id, occurrenceKey, webPushAcknowledgedAt: null },
         {
           $set: {
             overallStatus: 'failed',
@@ -1843,7 +2186,7 @@ const processBroadcastChunk = async ({ broadcastId, occurrenceKey, chunkIndex, r
     try {
       batchResult = await sendBroadcastPushBatch(
         pushOutcomes.map((item) => item.pushWork),
-        broadcast.audience?.toObject ? broadcast.audience.toObject() : broadcast.audience
+        deliveryBroadcast.audience
       );
     } catch (error) {
       const failureReason = String(error?.message || error).slice(0, 1000);
@@ -1968,6 +2311,7 @@ const processBroadcastChunk = async ({ broadcastId, occurrenceKey, chunkIndex, r
     BroadcastChunk.countDocuments({ broadcast: broadcastId, occurrenceKey, status: 'completed' }),
     BroadcastChunk.countDocuments({ broadcast: broadcastId, occurrenceKey, status: 'failed' })
   ]);
+  await requestBroadcastMetricsRefresh(broadcastId);
 
   const updated = await Broadcast.findOneAndUpdate(
     { _id: broadcastId, status: 'processing', 'execution.occurrenceKey': occurrenceKey },
@@ -2084,7 +2428,40 @@ const resolveOwnedRecipientLog = async (notification, userId) => {
 const trackDelivery = async ({ notification, userId, platform = 'unknown', metadata = {} }) => {
   const recipientLog = await resolveOwnedRecipientLog(notification, userId);
   if (!recipientLog) return { tracked: false, reason: 'not_broadcast' };
-  if (platform !== 'web') throw fail('Browser delivery acknowledgements require platform=web');
+  if (!PLATFORMS.has(platform)) throw fail('Delivery acknowledgement platform is invalid');
+  if (!['push', 'both'].includes(recipientLog.requestedDeliveryType)) {
+    return { tracked: false, reason: 'push_not_requested' };
+  }
+
+  // Native callbacks are useful device-level delivery evidence, but provider
+  // receipts remain authoritative for the channel state/retry machine. This
+  // prevents a forged client acknowledgement from suppressing a real provider
+  // failure while still supporting accurate platform analytics.
+  if (platform === 'ios' || platform === 'android') {
+    const eventResult = await BroadcastEvent.updateOne(
+      { broadcastRecipient: recipientLog._id, eventType: 'delivered' },
+      {
+        $setOnInsert: {
+          broadcast: recipientLog.broadcast,
+          broadcastRecipient: recipientLog._id,
+          recipient: userId,
+          notification: notification?._id || null,
+          eventType: 'delivered',
+          platform,
+          metadata: metadata && typeof metadata === 'object' ? metadata : {}
+        }
+      },
+      { upsert: true }
+    );
+    const inserted = Boolean(eventResult?.upsertedCount || eventResult?.upsertedId);
+    return {
+      tracked: true,
+      duplicate: !inserted,
+      deliveryLogId: String(recipientLog._id),
+      authority: 'client_event'
+    };
+  }
+
   if (!recipientLog.webPushEmittedAt) {
     return { tracked: false, reason: 'web_push_not_submitted' };
   }
@@ -2107,8 +2484,7 @@ const trackDelivery = async ({ notification, userId, platform = 'unknown', metad
     },
     { new: true }
   );
-  if (!changed) return { tracked: true, duplicate: true, deliveryLogId: String(recipientLog._id) };
-  await BroadcastEvent.updateOne(
+  const eventResult = await BroadcastEvent.updateOne(
     { broadcastRecipient: recipientLog._id, eventType: 'delivered' },
     {
       $setOnInsert: {
@@ -2124,23 +2500,18 @@ const trackDelivery = async ({ notification, userId, platform = 'unknown', metad
     { upsert: true }
   );
   await NotificationFailure.updateMany(
-    { broadcastRecipient: recipientLog._id, channel: 'push', status: 'retrying' },
+    { broadcastRecipient: recipientLog._id, channel: 'push', status: { $in: ['open', 'retrying'] } },
     { $set: { status: 'resolved', resolvedAt: now } }
   );
-  const deliveryDeltas = new Map();
-  addMetricTransition(
-    deliveryDeltas,
-    recipientLog.broadcast,
-    deliveryMetricContribution(recipientLog.overallStatus, recipientLog.push?.status, recipientLog.inApp?.status),
-    deliveryMetricContribution(changed.overallStatus, changed.push?.status, changed.inApp?.status)
-  );
-  await applyMetricTransitions(deliveryDeltas);
-  return { tracked: true, duplicate: false, deliveryLogId: String(recipientLog._id) };
+  await refreshBroadcastMetrics(recipientLog.broadcast);
+  const inserted = Boolean(eventResult?.upsertedCount || eventResult?.upsertedId);
+  return { tracked: true, duplicate: !changed && !inserted, deliveryLogId: String(recipientLog._id), authority: 'client_event' };
 };
 
 const trackEvent = async ({ notification, userId, eventType, url = '', platform = 'unknown', metadata = {} }) => {
   const recipientLog = await resolveOwnedRecipientLog(notification, userId);
   if (!recipientLog) return { tracked: false, reason: 'not_broadcast' };
+  if (!['open', 'click'].includes(eventType)) throw fail('Broadcast event type is invalid');
 
   // Opening a browser notification is also conclusive delivery evidence. The
   // explicit /delivered acknowledgement normally arrives first, but this
@@ -2158,9 +2529,10 @@ const trackEvent = async ({ notification, userId, eventType, url = '', platform 
     update,
     { new: true }
   );
-  if (!changed) return { tracked: true, duplicate: true };
-
-  await BroadcastEvent.updateOne(
+  // Always upsert the event, even when the recipient timestamp was already
+  // written. A process can fail between those two durable writes; a retry must
+  // repair that crash window instead of permanently losing platform analytics.
+  const eventResult = await BroadcastEvent.updateOne(
     { broadcastRecipient: recipientLog._id, eventType },
     {
       $setOnInsert: {
@@ -2176,16 +2548,21 @@ const trackEvent = async ({ notification, userId, eventType, url = '', platform 
     },
     { upsert: true }
   );
-  await refreshBroadcastMetrics(recipientLog.broadcast);
-  return { tracked: true, duplicate: false, deliveryLogId: String(recipientLog._id) };
+  const inserted = Boolean(eventResult?.upsertedCount || eventResult?.upsertedId);
+  if (changed || inserted) await refreshBroadcastMetrics(recipientLog.broadcast);
+  return { tracked: true, duplicate: !changed && !inserted, deliveryLogId: String(recipientLog._id) };
 };
 
 module.exports = {
   RECIPIENT_CHUNK_SIZE,
+  WEB_PUSH_ACK_TIMEOUT_MS,
   normalizeAudience,
   normalizeSchedule,
   normalizeBroadcastPayload,
   buildAudienceQuery,
+  assertTimezone,
+  getTimezoneDayBounds,
+  getMatchedNotificationClients,
   isBroadcastCategoryAllowed,
   getActor,
   createOccurrenceKey,
@@ -2193,14 +2570,19 @@ module.exports = {
   resolveEffectiveDeliveryType,
   resolveOverallStatus,
   resolvePushDeliveryStatus,
+  resolveBroadcastDeepLink,
+  resolveBroadcastWebUrl,
+  buildNotificationData,
   assertBroadcastPushPayloadSize,
   processBroadcastDispatch,
   processBroadcastChunk,
   processBroadcastPushReceipts,
   reconcileTerminalPushReceipts,
   expireUnacknowledgedWebPushes,
-  markBroadcastWorkerFailure,
+  reconcileDirtyBroadcastMetrics,
+  reconcileAcknowledgedNotificationFailures,
   refreshBroadcastMetrics,
+  markBroadcastWorkerFailure,
   trackDelivery,
   trackEvent,
   fail

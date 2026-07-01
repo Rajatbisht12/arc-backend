@@ -12,6 +12,7 @@ const broadcastTemplateSchema = new mongoose.Schema({
     cta: {
       text: { type: String, default: '', trim: true, maxlength: 60 },
       url: { type: String, default: '', trim: true, maxlength: 2048 },
+      deepLink: { type: String, default: '', trim: true, maxlength: 2048 },
       type: { type: String, default: 'none', trim: true, maxlength: 40 }
     },
     priority: { type: String, enum: ['normal', 'high', 'critical'], default: 'normal' },
@@ -34,5 +35,6 @@ const broadcastTemplateSchema = new mongoose.Schema({
 
 broadcastTemplateSchema.index({ name: 1 }, { unique: true });
 broadcastTemplateSchema.index({ isActive: 1, updatedAt: -1 });
+broadcastTemplateSchema.index({ isActive: 1, 'content.category': 1, updatedAt: -1 });
 
 module.exports = mongoose.models.BroadcastTemplate || mongoose.model('BroadcastTemplate', broadcastTemplateSchema);

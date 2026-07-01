@@ -9,18 +9,26 @@ const {
   normalizeBroadcastPayload,
   buildAudienceQuery,
   nextRecurrenceDate,
+  getTimezoneDayBounds,
   resolveEffectiveDeliveryType,
   resolveOverallStatus,
   resolvePushDeliveryStatus,
   assertBroadcastPushPayloadSize,
   isBroadcastCategoryAllowed
 } = require('./broadcastService');
-const { serializeBroadcast } = require('../controllers/broadcastController');
+const {
+  serializeBroadcast,
+  normalizeSearchTerm,
+  applyLogFilters,
+  createBroadcastPayloadHash,
+  assertIdempotentCreateReplay
+} = require('../controllers/broadcastController');
 const {
   classifyBroadcastPushRecords,
   filterBroadcastTokens,
   isTransientExpoError,
   buildPushData,
+  buildExpoMessages,
   getExpoMessageByteLength,
   assertExpoMessageSize,
   notificationMatchesClientContext,
@@ -28,6 +36,8 @@ const {
 } = require('../utils/pushNotificationService');
 const Broadcast = require('../models/Broadcast');
 const BroadcastOccurrence = require('../models/BroadcastOccurrence');
+const BroadcastRecipient = require('../models/BroadcastRecipient');
+const BroadcastTemplate = require('../models/BroadcastTemplate');
 const Notification = require('../models/Notification');
 
 let passed = 0;
@@ -136,6 +146,29 @@ test('invalid custom IDs and inverted ranges fail before MongoDB', () => {
   );
 });
 
+test('explicit contract typos fail closed instead of broadening or immediately sending', () => {
+  assert.throws(
+    () => normalizeAudience({ premium: 'premium', platforms: ['windows'] }),
+    /audience\.platforms/
+  );
+  assert.throws(
+    () => normalizeAudience({ premium: 'gold' }),
+    /audience\.premium/
+  );
+  assert.throws(
+    () => normalizeSchedule({ mode: 'scheduld', scheduledAt: '2026-08-01T00:00:00.000Z' }),
+    /schedule\.mode/
+  );
+  assert.throws(
+    () => normalizeSchedule({ mode: 'scheduled', scheduledAt: '2026-08-01T00:00:00.000Z', recurrence: { frequency: 'hourly' } }),
+    /schedule\.recurrence\.frequency/
+  );
+  assert.throws(
+    () => normalizeSchedule({ mode: 'scheduled', scheduledAt: '2026-08-01T00:00:00.000Z', recurrence: { frequency: 'daily', interval: 0 } }),
+    /between 1 and 365/
+  );
+});
+
 test('email targeting and category preferences are normalized consistently', () => {
   const audience = normalizeAudience({ customEmails: ['USER@Example.com', 'user@example.com'] });
   assert.deepStrictEqual(audience.emails, ['user@example.com']);
@@ -144,6 +177,8 @@ test('email targeting and category preferences are normalized consistently', () 
   assert.strictEqual(isBroadcastCategoryAllowed({ systemAlerts: false }, 'system'), false);
   assert.strictEqual(isBroadcastCategoryAllowed({ announcementsEnabled: false }, 'feature_release'), false);
   assert.strictEqual(isBroadcastCategoryAllowed({ marketingEnabled: false }, 'premium'), false);
+  assert.strictEqual(isBroadcastCategoryAllowed({ promotionsEnabled: false }, 'promotion'), false);
+  assert.strictEqual(isBroadcastCategoryAllowed({ marketingEnabled: false, promotionsEnabled: true }, 'promotion'), false);
   assert.strictEqual(isBroadcastCategoryAllowed({ mutedBroadcastCategories: ['tournament'] }, 'tournament'), false);
 });
 
@@ -167,6 +202,30 @@ test('recurrence preserves local wall-clock time across DST', () => {
   assert.strictEqual(next.toISOString(), '2026-03-08T13:00:00.000Z');
 });
 
+test('calendar recurrence clamps month days and moves DST gaps forward', () => {
+  assert.strictEqual(
+    nextRecurrenceDate('2027-01-31T09:00:00.000Z', 'monthly', 1, 'UTC').toISOString(),
+    '2027-02-28T09:00:00.000Z'
+  );
+  assert.strictEqual(
+    nextRecurrenceDate('2024-02-29T09:00:00.000Z', 'yearly', 1, 'UTC').toISOString(),
+    '2025-02-28T09:00:00.000Z'
+  );
+  // 02:30 does not exist on this New York date; later disambiguation yields 03:30.
+  assert.strictEqual(
+    nextRecurrenceDate('2026-03-07T07:30:00.000Z', 'daily', 1, 'America/New_York').toISOString(),
+    '2026-03-08T07:30:00.000Z'
+  );
+});
+
+test('timezone day bounds validate IANA zones and honor short DST days', () => {
+  const bounds = getTimezoneDayBounds('America/New_York', '2026-03-08T12:00:00.000Z');
+  assert.strictEqual(bounds.timezone, 'America/New_York');
+  assert.strictEqual(bounds.start.toISOString(), '2026-03-08T05:00:00.000Z');
+  assert.strictEqual(bounds.end.toISOString(), '2026-03-09T04:00:00.000Z');
+  assert.throws(() => getTimezoneDayBounds('Not/A_Zone'), /valid IANA timezone/);
+});
+
 const validPayload = {
   title: 'Feature update',
   message: 'A useful announcement',
@@ -180,6 +239,10 @@ const validPayload = {
 };
 
 test('CTA and media validators allow production schemes only', () => {
+  assert.throws(
+    () => normalizeBroadcastPayload({ ...validPayload, deliveryType: 'email' }),
+    /deliveryType/
+  );
   for (const url of ['/premium', 'https://squadhunt.in/premium', 'arcmobile://premium', 'com.arcsquadhunt://premium']) {
     assert.strictEqual(normalizeBroadcastPayload({ ...validPayload, cta: { type: 'custom', url } }).cta.url, url);
   }
@@ -195,6 +258,82 @@ test('CTA and media validators allow production schemes only', () => {
     () => normalizeBroadcastPayload({ ...validPayload, bannerImage: 'http://example.com/image.png' }),
     /HTTPS/
   );
+  const deepLinkOnly = normalizeBroadcastPayload({
+    ...validPayload,
+    cta: { text: 'Open', type: 'custom', url: '', deepLink: 'arc://premium' }
+  }).cta;
+  assert.strictEqual(deepLinkOnly.url, 'arc://premium');
+  assert.strictEqual(deepLinkOnly.deepLink, 'arc://premium');
+  const splitDestination = normalizeBroadcastPayload({
+    ...validPayload,
+    cta: { type: 'custom', url: 'https://squadhunt.in/premium', deepLink: 'arc://premium' }
+  }).cta;
+  assert.strictEqual(splitDestination.url, 'https://squadhunt.in/premium');
+  assert.strictEqual(splitDestination.deepLink, 'arc://premium');
+  assert.throws(
+    () => normalizeBroadcastPayload({ ...validPayload, cta: { type: 'tournament', text: '' } }),
+    /destination is required/
+  );
+});
+
+test('drafts may be incomplete but strict delivery normalization rejects them', () => {
+  const draft = normalizeBroadcastPayload({}, { allowIncomplete: true });
+  assert.strictEqual(draft.title, '');
+  assert.strictEqual(draft.message, '');
+  assert.strictEqual(draft.audience.allUsers, false);
+  assert.throws(() => normalizeBroadcastPayload(draft), /Title is required/);
+  assert.strictEqual(new Broadcast(draft).validateSync(), undefined);
+});
+
+test('create idempotency binds a key replay to the normalized payload hash', () => {
+  const first = normalizeBroadcastPayload({ ...validPayload, title: '  Feature update  ' });
+  const equivalent = normalizeBroadcastPayload({ ...validPayload, title: 'Feature update' });
+  const changed = normalizeBroadcastPayload({ ...validPayload, title: 'Different' });
+  const reorderedAudience = normalizeBroadcastPayload({
+    ...validPayload,
+    audience: { platforms: ['web', 'ios'] }
+  });
+  const equivalentAudience = normalizeBroadcastPayload({
+    ...validPayload,
+    audience: { platforms: ['ios', 'web'] }
+  });
+  const firstHash = createBroadcastPayloadHash(first);
+  assert.strictEqual(firstHash, createBroadcastPayloadHash(equivalent));
+  assert.strictEqual(createBroadcastPayloadHash(reorderedAudience), createBroadcastPayloadHash(equivalentAudience));
+  assert.doesNotThrow(() => assertIdempotentCreateReplay({ creationPayloadHash: firstHash }, firstHash));
+  let error;
+  try {
+    assertIdempotentCreateReplay({ creationPayloadHash: firstHash }, createBroadcastPayloadHash(changed));
+  } catch (caught) {
+    error = caught;
+  }
+  assert.match(error.message, /different broadcast payload/);
+  assert.strictEqual(error.statusCode, 409);
+  assert(Broadcast.schema.path('creationPayloadHash'));
+});
+
+test('delivery-log query helpers safely combine filters and bounded regex searches', () => {
+  const escapedBoundary = normalizeSearchTerm(`${'a'.repeat(99)}*`);
+  assert.doesNotThrow(() => new RegExp(escapedBoundary, 'i'));
+  assert(escapedBoundary.endsWith('\\*'));
+
+  const filter = {};
+  applyLogFilters(filter, { status: 'queued', platform: 'unknown', deliveryType: 'push' });
+  assert.strictEqual(filter.overallStatus, 'pending');
+  assert.strictEqual(filter.requestedDeliveryType, 'push');
+  assert(filter.$and[0].$or.some((entry) => entry['recipientSnapshot.platforms']?.$size === 0));
+  assert.throws(() => applyLogFilters({}, { status: 'made_up' }), /status filter is invalid/);
+  assert.throws(
+    () => applyLogFilters({}, { from: '2026-08-02', to: '2026-08-01' }),
+    /from cannot be after to/
+  );
+
+  const recipientIndexes = BroadcastRecipient.schema.indexes().map(([key]) => JSON.stringify(key));
+  assert(recipientIndexes.includes(JSON.stringify({ createdAt: -1 })));
+  assert(recipientIndexes.includes(JSON.stringify({ overallStatus: 1, createdAt: -1 })));
+  assert(recipientIndexes.includes(JSON.stringify({ 'recipientSnapshot.platforms': 1, createdAt: -1 })));
+  const templateIndexes = BroadcastTemplate.schema.indexes().map(([key]) => JSON.stringify(key));
+  assert(templateIndexes.includes(JSON.stringify({ isActive: 1, 'content.category': 1, updatedAt: -1 })));
 });
 
 test('database validators preserve the broadcast content contract', () => {
@@ -202,14 +341,17 @@ test('database validators preserve the broadcast content contract', () => {
     () => normalizeBroadcastPayload({ ...validPayload, message: 'x'.repeat(1001) }),
     /cannot exceed 1000/
   );
-  const customCategoryError = new Broadcast({
+  const incompleteCustomDraft = new Broadcast({
     title: 'Custom',
-    message: 'Custom broadcast',
     category: 'custom',
     customCategory: '',
-    audience: { allUsers: true }
+    audience: {}
   }).validateSync();
-  assert(customCategoryError?.errors?.customCategory);
+  assert.strictEqual(incompleteCustomDraft, undefined);
+  assert.throws(
+    () => normalizeBroadcastPayload({ ...validPayload, category: 'custom', customCategory: '' }),
+    /Custom category is required/
+  );
   const longNotification = new Notification({
     recipient: new mongoose.Types.ObjectId(),
     type: 'system',
@@ -333,6 +475,24 @@ test('broadcast push data stays compact and enforces the provider byte ceiling',
   assert(getExpoMessageByteLength({ data: 'x'.repeat(4000) }) < 4096);
   assert.throws(() => assertExpoMessageSize({ data: 'x'.repeat(4096) }), /maximum is/);
   assert(assertBroadcastPushPayloadSize(validPayload) < 4096);
+  const [richMessage] = buildExpoMessages(
+    ['ExponentPushToken[ios-rich-image]'],
+    {
+      _id: new mongoose.Types.ObjectId(),
+      title: 'Rich broadcast',
+      message: 'Image attachment',
+      data: { customData: { pushOptions: { image: 'https://cdn.example/banner.jpg' } } }
+    },
+    1
+  );
+  assert.deepStrictEqual(richMessage.richContent, { image: 'https://cdn.example/banner.jpg' });
+  assert.strictEqual(richMessage.mutableContent, true);
+  const [plainMessage] = buildExpoMessages(
+    ['ExponentPushToken[ios-plain]'],
+    { _id: new mongoose.Types.ObjectId(), title: 'Plain', message: 'No image', data: {} },
+    1
+  );
+  assert.strictEqual(plainMessage.mutableContent, undefined);
   const longUrl = `https://example.com/${'x'.repeat(2028)}`;
   assert.throws(
     () => assertBroadcastPushPayloadSize({ ...validPayload, bannerImage: longUrl, cta: { text: 'Open', type: 'custom', url: longUrl } }),
@@ -340,11 +500,71 @@ test('broadcast push data stays compact and enforces the provider byte ceiling',
   );
 });
 
+test('broadcast Expo alerts opt into iOS background processing without changing generic pushes', () => {
+  const [broadcastMessage] = buildExpoMessages(
+    ['ExponentPushToken[ios-broadcast-background]'],
+    {
+      _id: new mongoose.Types.ObjectId(),
+      title: 'Visible broadcast',
+      message: 'Foreground alert body',
+      data: { broadcastId: new mongoose.Types.ObjectId() }
+    },
+    1
+  );
+  assert.strictEqual(broadcastMessage._contentAvailable, true);
+  assert.strictEqual(broadcastMessage.title, 'Visible broadcast');
+  assert.strictEqual(broadcastMessage.body, 'Foreground alert body');
+  assert(getExpoMessageByteLength(broadcastMessage) < 4096);
+
+  const [genericMessage] = buildExpoMessages(
+    ['ExponentPushToken[ios-generic-alert]'],
+    {
+      _id: new mongoose.Types.ObjectId(),
+      title: 'Generic alert',
+      message: 'No background wake',
+      data: {}
+    },
+    1
+  );
+  assert.strictEqual(genericMessage._contentAvailable, undefined);
+});
+
+test('Android broadcast alerts use priority-specific channels while generic system alerts stay default', () => {
+  const buildAlert = (data) => buildExpoMessages(
+    ['ExponentPushToken[android-channel-contract]'],
+    {
+      _id: new mongoose.Types.ObjectId(),
+      type: 'system',
+      title: 'Channel contract',
+      message: 'Visible alert',
+      data
+    },
+    1
+  )[0];
+
+  assert.strictEqual(
+    buildAlert({ broadcastId: new mongoose.Types.ObjectId(), customData: { priority: 'normal' } }).channelId,
+    'broadcasts'
+  );
+  assert.strictEqual(
+    buildAlert({ customData: { broadcastId: new mongoose.Types.ObjectId(), priority: 'high' } }).channelId,
+    'broadcasts-high'
+  );
+  assert.strictEqual(
+    buildAlert({ broadcastId: new mongoose.Types.ObjectId(), customData: { priority: 'critical' } }).channelId,
+    'broadcasts-critical'
+  );
+  assert.strictEqual(buildAlert({}).channelId, 'default');
+});
+
 test('route ordering and tracking endpoints are unambiguous', () => {
   const backendRoot = path.resolve(__dirname, '..', '..');
   const adminRoutes = fs.readFileSync(path.join(backendRoot, 'modules', 'admin', 'broadcast.routes.ts'), 'utf8');
+  const templateRoutes = fs.readFileSync(path.join(backendRoot, 'modules', 'admin', 'broadcast-template.routes.ts'), 'utf8');
   const controllerSource = fs.readFileSync(path.join(backendRoot, 'legacy-src', 'controllers', 'broadcastController.js'), 'utf8');
   const notificationRoutes = fs.readFileSync(path.join(backendRoot, 'modules', 'notifications', 'notifications.routes.ts'), 'utf8');
+  const notificationService = fs.readFileSync(path.join(backendRoot, 'legacy-src', 'services', 'broadcastService.js'), 'utf8');
+  const userController = fs.readFileSync(path.join(backendRoot, 'legacy-src', 'controllers', 'userController.js'), 'utf8');
   const storyRoutes = fs.readFileSync(path.join(backendRoot, 'modules', 'stories', 'stories.routes.ts'), 'utf8');
   assert(adminRoutes.indexOf('/delivery-logs') < adminRoutes.indexOf('/:id'));
   assert(adminRoutes.indexOf('/preview') < adminRoutes.indexOf('/:id'));
@@ -367,9 +587,30 @@ test('route ordering and tracking endpoints are unambiguous', () => {
   assert(!notificationRoutes.includes('source: "mark_read"'), 'mark-read must not steal explicit open platform attribution');
   assert(notificationRoutes.includes('buildClientVisibilityFilter'));
   assert(notificationRoutes.includes('notificationClients.clientId": clientId'));
+  assert(notificationRoutes.includes('VALID_TRACKING_PLATFORMS'));
+  assert(notificationRoutes.includes('VALID_BROADCAST_CATEGORIES'));
+  assert(notificationRoutes.includes('recipient: userId'));
+  assert(notificationRoutes.includes('alreadyRead'));
+  assert(notificationRoutes.includes('totalNotifications'));
+  assert(notificationRoutes.includes('totalItems'));
+  const nativeDeliverySource = notificationService.slice(
+    notificationService.indexOf('const trackDelivery ='),
+    notificationService.indexOf('const trackEvent =')
+  );
+  assert(nativeDeliverySource.includes("platform === 'ios' || platform === 'android'"));
+  assert(nativeDeliverySource.includes("authority: 'client_event'"));
+  const engagementSource = notificationService.slice(notificationService.indexOf('const trackEvent ='));
+  assert(engagementSource.includes('Always upsert the event'));
+  assert(!engagementSource.includes('if (!changed) return { tracked: true, duplicate: true }'));
+  assert(userController.includes('Unknown notification setting'));
+  assert(userController.includes('mutedBroadcastCategories must be an array'));
   assert(controllerSource.includes("creationIdempotencyKeyHash"));
+  assert(controllerSource.includes("creationPayloadHash"));
   assert(controllerSource.includes("Idempotency-Key"));
-  assert(controllerSource.includes("status: 'scheduled', sentAt: { $ne: null }"));
+  assert(controllerSource.includes("{ status: 'cancelled' }"), 'History must include every cancelled broadcast');
+  assert(controllerSource.includes("BroadcastTemplate.findOne({ name: payload.name, isActive: false })"));
+  assert(!templateRoutes.includes('durableMutationAudit("VIEW_BROADCAST_TEMPLATES")'));
+  assert(templateRoutes.includes('durableMutationAudit("CREATE_BROADCAST_TEMPLATE")'));
 });
 
 test('queue and recipient source contracts include durable idempotency and preference fallback', () => {
@@ -386,7 +627,8 @@ test('queue and recipient source contracts include durable idempotency and prefe
   assert(queueSource.includes('recovery-${Math.floor(Date.now() / 60000)}'));
   assert(serviceSource.includes("BroadcastChunk.findOneAndUpdate"));
   assert(serviceSource.includes("status: 'completed'"));
-  assert(serviceSource.includes('if (pushRequested && !pushAllowed && inAppAllowed)'));
+  assert(!serviceSource.includes('if (pushRequested && !pushAllowed && inAppAllowed)'));
+  assert(serviceSource.includes("const inAppRequested = broadcast.deliveryType === 'in_app' || broadcast.deliveryType === 'both'"));
   assert(serviceSource.includes("inAppStatus === 'delivered'"));
   assert(notificationModel.includes('broadcastRecipient'));
   assert(auditModel.includes('Admin audit logs are immutable'));
@@ -407,7 +649,7 @@ test('queue and recipient source contracts include durable idempotency and prefe
   assert(serviceSource.includes("status: { $ne: 'cancelled' }"), 'provider retries must reject cancelled broadcasts');
   assert(serviceSource.includes("ticketStatus: 'cancelled'"));
   assert(serviceSource.includes("ticketStatus: 'skipped'"), 'preference opt-outs must not become provider failures');
-  assert(serviceSource.includes("data: buildNotificationData(broadcast, recipientLog, 'in_app')"), 'retry-time push opt-out needs in-app fallback');
+  assert(serviceSource.includes("const inAppRequested = broadcast.deliveryType === 'both' || broadcast.deliveryType === 'in_app'"));
   assert(serviceSource.includes('emitBroadcastPushNotification'));
   assert(serviceSource.includes('expireUnacknowledgedWebPushes'));
   assert(serviceSource.includes("status: 'resolved'"), 'DLQ entries must resolve after a successful retry');
@@ -451,19 +693,26 @@ test('production hardening contracts cover retries, audit, indexes, and provider
   assert(serviceSource.includes("'x'.repeat(512 - tokenPrefix.length - 1)"), 'preflight must use the maximum accepted token size');
 
   assert(queueSource.includes('(isProcessing || isQueued) && broadcast.execution?.occurrenceKey'));
+  assert(queueSource.includes('reconcileDirtyBroadcastMetrics(100)'));
+  assert(queueSource.includes('reconcileAcknowledgedNotificationFailures(1000)'));
   assert(queueSource.includes('], 0, 4999, true)'), 'queue cleanup must remain bounded');
   assert(serviceSource.includes('BroadcastOccurrence.findOneAndUpdate'));
   assert(serviceSource.includes('occurrenceByKey'));
+  assert(serviceSource.includes('const deliveryBroadcast = { ...occurrence.snapshot, _id: broadcast._id }'));
+  assert(serviceSource.includes("$inc: { 'execution.attempts': 1, __v: 1 }"));
   assert.strictEqual(BroadcastOccurrence.schema.options.timestamps.updatedAt, false);
   assert(controllerSource.includes('await removeBroadcastJobs(String(broadcast._id))'));
   assert(controllerSource.includes('`manual-${Date.now()}`'), 'manual retries need a fresh deterministic queue suffix');
   assert(controllerSource.includes('(existing.schedule?.nextRunAt || existing.schedule?.scheduledAt)'));
+  assert(controllerSource.includes("error?.name === 'VersionError'"));
   assert(serviceSource.includes("'schedule.scheduledAt': nextRunAt"));
 
   assert(adminAuthSource.includes('durableMutationAudit'));
   assert(adminAuthSource.includes("`${action}_INTENT`"));
   assert(adminAuthSource.includes("`${action}_OUTCOME`"));
-  assert(adminRoutes.includes('durableMutationAudit("VIEW_BROADCAST_ANALYTICS")'));
+  assert(!adminRoutes.includes('durableMutationAudit("VIEW_BROADCAST_ANALYTICS")'));
+  assert(!adminRoutes.includes('durableMutationAudit("PREVIEW_BROADCAST")'));
+  assert(adminRoutes.includes('auditLog("VIEW_BROADCAST_ANALYTICS")'));
   assert(adminRoutes.includes('durableMutationAudit("SEND_BROADCAST")'));
   assert(migrationSource.includes("'BroadcastOccurrence'"));
   assert(migrationSource.includes("'AdminAuditLog'"));
@@ -471,19 +720,29 @@ test('production hardening contracts cover retries, audit, indexes, and provider
 
   assert(serviceSource.includes('webPushAcknowledgedAt: null'));
   assert(serviceSource.includes("? { ...providerResult, status: 'delivered'"));
-  assert(serviceSource.includes('metricsSourceUpdatedAt: { $lte: sourceUpdatedAt }'));
+  assert(serviceSource.includes("$inc: { 'metricsRefresh.requestedRevision': 1 }"));
+  assert(serviceSource.includes("'metricsRefresh.appliedRevision': targetRevision"));
+  assert(serviceSource.includes("'metricsRefresh.requestedRevision': targetRevision"));
+  assert(serviceSource.includes('reconcileDirtyBroadcastMetrics'));
+  assert(serviceSource.includes('await requestBroadcastMetricsRefresh(broadcastId)'));
   assert(!serviceSource.includes('return Broadcast.updateOne({ _id: broadcastId }, { $inc: increments })'));
   const trackDeliverySource = serviceSource.slice(
     serviceSource.indexOf('const trackDelivery ='),
     serviceSource.indexOf('const trackEvent =')
   );
   assert(!trackDeliverySource.includes("'push.status': { $in:"), 'first valid Web ACK must override a prior native failure');
+  assert(trackDeliverySource.includes("status: { $in: ['open', 'retrying'] }"));
   const trackEventSource = serviceSource.slice(serviceSource.indexOf('const trackEvent ='));
   assert(!trackEventSource.includes("update.$set['push.status']"), 'Web open must use the atomic delivery ACK path');
   assert(!trackEventSource.includes('{ $inc: { [`metrics.'), 'engagement metrics must use authoritative refresh');
+  assert(serviceSource.includes('const reconcileAcknowledgedNotificationFailures'));
+  assert(serviceSource.includes("from: BroadcastRecipient.collection.name"));
   assert(controllerSource.includes('BroadcastPushReceipt.aggregate'));
   assert(controllerSource.includes('BroadcastEvent.aggregate'));
   assert(controllerSource.includes("platformBreakdownBasis: 'provider_device_receipts_and_client_events'"));
+  assert(controllerSource.includes('providerRecipients.map'), 'provider retries must only reset rows backed by receipt jobs');
+  assert(controllerSource.includes('webPushAckDeadlineAt: ackDeadline'), 'Web retries need a fresh ACK deadline');
+  assert(controllerSource.includes("? 'mixed'"), 'native and Web retry paths must coexist in one batch');
 });
 
-console.log(`Broadcast backend contracts passed (${passed}/20)`);
+console.log(`Broadcast backend contracts passed (${passed})`);

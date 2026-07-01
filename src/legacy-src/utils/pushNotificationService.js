@@ -48,6 +48,18 @@ const NOTIFICATION_SETTING_DEFAULTS = {
 };
 
 const getChannelIdForNotification = (notification) => {
+  const data = notification?.data || {};
+  const customData = data.customData || {};
+  const broadcastId = toId(data.broadcastId || customData.broadcastId);
+  if (broadcastId) {
+    const broadcastPriority = typeof customData.priority === 'string'
+      ? customData.priority.trim().toLowerCase()
+      : '';
+    if (broadcastPriority === 'critical') return 'broadcasts-critical';
+    if (broadcastPriority === 'high') return 'broadcasts-high';
+    return 'broadcasts';
+  }
+
   switch (notification?.type) {
     case 'message':
       return 'messages';
@@ -526,6 +538,7 @@ const buildExpoMessages = (tokens, notification, unreadCount = 0) => {
   const title = sanitizeString(notification.title, 'SquadHunt');
   const body = sanitizeString(notification.message, 'You have a new notification');
   const data = buildPushData(notification);
+  const isBroadcast = Boolean(data.broadcastId);
   const image = sanitizeString(notification?.data?.image || notification?.data?.customData?.image);
   const channelId = getChannelIdForNotification(notification);
   const pushOptions = notification?.data?.customData?.pushOptions || {};
@@ -558,8 +571,15 @@ const buildExpoMessages = (tokens, notification, unreadCount = 0) => {
       ttl,
       expiration: Math.floor(Date.now() / 1000) + ttl,
       data,
+      // Broadcast alerts stay visible while also allowing iOS to wake the app
+      // for background delivery tracking. Generic notifications must not all
+      // opt into background processing.
+      ...(isBroadcast ? { _contentAvailable: true } : {}),
       ...(pushOptions.collapseKey ? { collapseId: sanitizeString(pushOptions.collapseKey) } : {}),
-      ...(richImage ? { richContent: { image: richImage } } : {})
+      // Expo/APNs requires mutable-content for the Notification Service
+      // Extension to download and attach a remote image on iOS. Android safely
+      // ignores this flag while continuing to use richContent.image.
+      ...(richImage ? { richContent: { image: richImage }, mutableContent: true } : {})
     };
     assertExpoMessageSize(message);
     return message;

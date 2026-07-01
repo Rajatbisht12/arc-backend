@@ -61,6 +61,9 @@ broadcastRecipientSchema.index(
 broadcastRecipientSchema.index({ broadcast: 1, createdAt: -1 });
 broadcastRecipientSchema.index({ broadcast: 1, overallStatus: 1 });
 broadcastRecipientSchema.index({ recipient: 1, createdAt: -1 });
+broadcastRecipientSchema.index({ createdAt: -1 });
+broadcastRecipientSchema.index({ overallStatus: 1, createdAt: -1 });
+broadcastRecipientSchema.index({ 'recipientSnapshot.platforms': 1, createdAt: -1 });
 broadcastRecipientSchema.index({ broadcast: 1, openedAt: 1, clickedAt: 1 });
 broadcastRecipientSchema.index({ openedAt: 1, createdAt: 1 });
 broadcastRecipientSchema.index({ webPushAcknowledgedAt: 1, webPushAckDeadlineAt: 1, 'push.status': 1 });

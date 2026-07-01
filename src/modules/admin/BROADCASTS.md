@@ -61,6 +61,9 @@ Relevant tuning variables are:
 - `BROADCAST_DELIVERY_CONCURRENCY` (default 10, bounded 1–25)
 - `BROADCAST_CLIENT_CONTEXT_MAX_AGE_DAYS` (default 90)
 - `BROADCAST_WEB_PUSH_ACK_TIMEOUT_MS` (default 10 minutes)
+- `BROADCAST_METRICS_LOCK_MS` (default 60 seconds)
+- `BROADCAST_METRICS_MAX_ROUNDS` (default 3 authoritative aggregation rounds
+  per lock holder; dirty revisions continue through scheduler recovery)
 - `EXPO_MAX_PAYLOAD_BYTES` (default 4096; payloads are compacted then rejected
   before queueing if still over the byte ceiling)
 - `EXPO_PUSH_TOKEN_MAX_LENGTH` (default 512; the registration API also caps

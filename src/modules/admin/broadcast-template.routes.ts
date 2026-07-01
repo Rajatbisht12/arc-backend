@@ -16,7 +16,7 @@ const templateLimiter = rateLimit({
   message: { success: false, message: "Too many template changes. Try again later." }
 });
 
-router.get("/", auditLog("VIEW_BROADCAST_TEMPLATES"), requireAdminPermission("broadcasts:read"), durableMutationAudit("VIEW_BROADCAST_TEMPLATES"), controller.listTemplates);
+router.get("/", auditLog("VIEW_BROADCAST_TEMPLATES"), requireAdminPermission("broadcasts:read"), controller.listTemplates);
 router.post("/", auditLog("CREATE_BROADCAST_TEMPLATE"), templateLimiter, requireAdminPermission("broadcasts:manage"), durableMutationAudit("CREATE_BROADCAST_TEMPLATE"), controller.createTemplate);
 router.patch("/:id", auditLog("UPDATE_BROADCAST_TEMPLATE"), templateLimiter, requireAdminPermission("broadcasts:manage"), durableMutationAudit("UPDATE_BROADCAST_TEMPLATE"), controller.updateTemplate);
 router.delete("/:id", auditLog("DELETE_BROADCAST_TEMPLATE"), templateLimiter, requireAdminPermission("broadcasts:manage"), durableMutationAudit("DELETE_BROADCAST_TEMPLATE"), controller.deleteTemplate);

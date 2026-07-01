@@ -131,6 +131,8 @@ type BroadcastService = {
   }) => Promise<unknown>;
   reconcileTerminalPushReceipts: (recipientLogIds: string[]) => Promise<unknown>;
   expireUnacknowledgedWebPushes: (limit?: number) => Promise<unknown>;
+  reconcileDirtyBroadcastMetrics: (limit?: number) => Promise<unknown>;
+  reconcileAcknowledgedNotificationFailures: (limit?: number) => Promise<unknown>;
   markBroadcastWorkerFailure: (
     data: { broadcastId: string; occurrenceKey: string; chunkIndex?: number; jobName?: string },
     error: Error
@@ -385,6 +387,8 @@ const recoverDueBroadcasts = async (): Promise<void> => {
       );
     }
     await loadBroadcastService().expireUnacknowledgedWebPushes(1000);
+    await loadBroadcastService().reconcileDirtyBroadcastMetrics(100);
+    await loadBroadcastService().reconcileAcknowledgedNotificationFailures(1000);
     const dueReceipts = await BroadcastPushReceipt.find({
       ticketStatus: "accepted",
       receiptStatus: "pending",

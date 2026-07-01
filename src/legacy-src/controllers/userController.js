@@ -3461,28 +3461,44 @@ const updateNotificationSettings = async (req, res) => {
   try {
     const allowedBooleanKeys = Object.keys(notificationSettingDefaults)
       .filter((key) => key !== 'mutedBroadcastCategories');
+    const allowedKeys = new Set([...allowedBooleanKeys, 'mutedBroadcastCategories']);
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ success: false, message: 'Notification settings must be an object' });
+    }
+    const unknownKeys = Object.keys(req.body).filter((key) => !allowedKeys.has(key));
+    if (unknownKeys.length) {
+      return res.status(400).json({ success: false, message: `Unknown notification setting: ${unknownKeys[0]}` });
+    }
     const update = {};
 
     allowedBooleanKeys.forEach((key) => {
-      if (typeof req.body?.[key] === 'boolean') {
+      if (Object.prototype.hasOwnProperty.call(req.body, key) && typeof req.body[key] !== 'boolean') {
+        update.__invalidBooleanKey = key;
+      } else if (typeof req.body?.[key] === 'boolean') {
         update[`notificationSettings.${key}`] = req.body[key];
       }
     });
+    if (update.__invalidBooleanKey) {
+      return res.status(400).json({ success: false, message: `${update.__invalidBooleanKey} must be a boolean` });
+    }
 
     if (Array.isArray(req.body?.mutedBroadcastCategories)) {
       const allowedCategories = new Set([
         'announcement', 'update', 'maintenance', 'feature_release', 'tournament',
         'recruitment', 'promotion', 'creator', 'premium', 'system', 'custom'
       ]);
-      const categories = Array.from(new Set(req.body.mutedBroadcastCategories
-        .filter((category) => typeof category === 'string')
-        .map((category) => category.trim().toLowerCase())
-        .filter((category) => allowedCategories.has(category))));
-      if (categories.length !== req.body.mutedBroadcastCategories.length) {
+      const normalizedCategories = req.body.mutedBroadcastCategories
+        .map((category) => typeof category === 'string' ? category.trim().toLowerCase() : '');
+      if (normalizedCategories.some((category) => !allowedCategories.has(category))) {
         return res.status(400).json({ success: false, message: 'mutedBroadcastCategories contains an invalid category' });
       }
+      const categories = Array.from(new Set(normalizedCategories));
       update['notificationSettings.mutedBroadcastCategories'] = categories;
+    } else if (Object.prototype.hasOwnProperty.call(req.body, 'mutedBroadcastCategories')) {
+      return res.status(400).json({ success: false, message: 'mutedBroadcastCategories must be an array' });
     }
+
+    delete update.__invalidBooleanKey;
 
     if (Object.keys(update).length === 0) {
       return res.status(400).json({ success: false, message: 'At least one notification setting is required' });

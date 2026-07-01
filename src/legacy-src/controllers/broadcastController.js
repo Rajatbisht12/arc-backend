@@ -4,18 +4,90 @@ const Broadcast = require('../models/Broadcast');
 const BroadcastRecipient = require('../models/BroadcastRecipient');
 const BroadcastChunk = require('../models/BroadcastChunk');
 const BroadcastTemplate = require('../models/BroadcastTemplate');
+const BroadcastOccurrence = require('../models/BroadcastOccurrence');
 const BroadcastPushReceipt = require('../models/BroadcastPushReceipt');
 const BroadcastEvent = require('../models/BroadcastEvent');
 const NotificationFailure = require('../models/NotificationFailure');
 const User = require('../models/User');
 const {
   normalizeBroadcastPayload,
+  WEB_PUSH_ACK_TIMEOUT_MS,
   buildAudienceQuery,
+  getTimezoneDayBounds,
+  getMatchedNotificationClients,
+  isBroadcastCategoryAllowed,
+  resolveOverallStatus,
+  buildNotificationData,
   assertBroadcastPushPayloadSize,
+  refreshBroadcastMetrics,
   getActor,
   createOccurrenceKey,
   fail
 } = require('../services/broadcastService');
+
+const BROADCAST_FILTER_STATUSES = new Set([
+  'draft', 'scheduled', 'queued', 'processing', 'sending', 'sent', 'cancelled', 'failed'
+]);
+const LOG_FILTER_STATUSES = new Set([
+  'pending', 'queued', 'processing', 'delivered', 'partial', 'opened', 'clicked', 'failed', 'skipped'
+]);
+const LOG_PLATFORMS = new Set(['android', 'ios', 'web', 'unknown']);
+const DELIVERY_TYPES = new Set(['push', 'in_app', 'both']);
+const PRIORITIES = new Set(['normal', 'high', 'critical']);
+const CATEGORIES = new Set([
+  'announcement', 'update', 'maintenance', 'feature_release', 'tournament',
+  'recruitment', 'promotion', 'creator', 'premium', 'system', 'custom'
+]);
+
+const normalizeSearchTerm = (value, maxLength = 100) => String(value || '')
+  .trim()
+  .slice(0, maxLength)
+  .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const canonicalizePayload = (value) => {
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof mongoose.Types.ObjectId) return value.toString();
+  if (Array.isArray(value)) {
+    return value
+      .map(canonicalizePayload)
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((result, key) => {
+      if (value[key] !== undefined) result[key] = canonicalizePayload(value[key]);
+      return result;
+    }, {});
+  }
+  return value;
+};
+
+const createBroadcastPayloadHash = (payload) => createHash('sha256')
+  .update(JSON.stringify(canonicalizePayload(payload)))
+  .digest('hex');
+
+const assertIdempotentCreateReplay = (broadcast, payloadHash) => {
+  if (!broadcast.creationPayloadHash || broadcast.creationPayloadHash !== payloadHash) {
+    throw fail('Idempotency-Key was already used with a different broadcast payload', 409);
+  }
+};
+
+const mapWithConcurrency = async (items, concurrency, handler) => {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      await handler(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+};
+
+const assertQueryEnum = (value, allowed, fieldName) => {
+  if (value === undefined || value === null || value === '') return '';
+  const normalized = String(value);
+  if (!allowed.has(normalized)) throw fail(`${fieldName} filter is invalid`);
+  return normalized;
+};
 
 const parsePagination = (query, defaultLimit = 20, maxLimit = 100) => {
   const page = Math.max(1, Number.parseInt(String(query.page || '1'), 10) || 1);
@@ -36,16 +108,32 @@ const assertObjectId = (value, label = 'ID') => {
 };
 
 const applyLogFilters = (filter, query) => {
-  if (query.status === 'opened') filter.openedAt = { $ne: null };
-  else if (query.status === 'clicked') filter.clickedAt = { $ne: null };
-  else if (query.status) filter.overallStatus = String(query.status);
-  if (query.platform) filter['recipientSnapshot.platforms'] = String(query.platform);
-  if (query.deliveryType) filter.requestedDeliveryType = String(query.deliveryType);
+  const status = assertQueryEnum(query.status, LOG_FILTER_STATUSES, 'status');
+  if (status === 'opened') filter.openedAt = { $ne: null };
+  else if (status === 'clicked') filter.clickedAt = { $ne: null };
+  else if (status === 'queued') filter.overallStatus = 'pending';
+  else if (status) filter.overallStatus = status;
+  const platform = assertQueryEnum(query.platform, LOG_PLATFORMS, 'platform');
+  if (platform === 'unknown') {
+    filter.$and = [
+      ...(filter.$and || []),
+      { $or: [
+        { 'recipientSnapshot.platforms': { $exists: false } },
+        { 'recipientSnapshot.platforms': { $size: 0 } },
+        { 'recipientSnapshot.platforms': 'unknown' }
+      ] }
+    ];
+  } else if (platform) {
+    filter['recipientSnapshot.platforms'] = platform;
+  }
+  const deliveryType = assertQueryEnum(query.deliveryType, DELIVERY_TYPES, 'deliveryType');
+  if (deliveryType) filter.requestedDeliveryType = deliveryType;
   const from = query.from ? new Date(String(query.from)) : null;
   const to = query.to ? new Date(String(query.to)) : null;
   if (from && Number.isNaN(from.getTime())) throw fail('from must be a valid date');
   if (to && Number.isNaN(to.getTime())) throw fail('to must be a valid date');
   if (to && /^\d{4}-\d{2}-\d{2}$/.test(String(query.to))) to.setUTCHours(23, 59, 59, 999);
+  if (from && to && from > to) throw fail('from cannot be after to');
   if (from || to) {
     filter.createdAt = {};
     if (from) filter.createdAt.$gte = from;
@@ -82,6 +170,10 @@ const serializeRecipientLog = (log, pushReceipts = []) => {
   const knownPlatforms = Array.from(new Set((log.recipientSnapshot?.platforms || []).filter(Boolean)));
   const matchedPushPlatforms = Array.from(new Set(pushReceipts.map((receipt) => receipt.platform).filter(Boolean)));
   const platforms = matchedPushPlatforms.length ? matchedPushPlatforms : knownPlatforms;
+  const receiptFailureReason = pushReceipts
+    .map((receipt) => receipt.failureReason)
+    .filter(Boolean)
+    .join('; ');
   return {
     ...log,
     id: String(log._id),
@@ -100,7 +192,7 @@ const serializeRecipientLog = (log, pushReceipts = []) => {
     opened: Boolean(log.openedAt),
     clicked: Boolean(log.clickedAt),
     failed: log.overallStatus === 'failed',
-    failureReason: log.lastError || log.push?.failureReason || log.inApp?.failureReason || '',
+    failureReason: log.lastError || log.push?.failureReason || log.inApp?.failureReason || receiptFailureReason || '',
     deliveredAt: log.inApp?.deliveredAt || log.push?.deliveredAt || null,
     failedAt: log.overallStatus === 'failed' ? log.updatedAt : null,
     timestamp: log.createdAt
@@ -112,7 +204,9 @@ const asyncRoute = (handler) => async (req, res) => {
     await handler(req, res);
   } catch (error) {
     const status = Number(error.statusCode) ||
-      (error.code === 11000 ? 409 : (error.name === 'ValidationError' ? 400 : 500));
+      (error.code === 11000 || error.name === 'VersionError'
+        ? 409
+        : (['ValidationError', 'CastError'].includes(error.name) ? 400 : 500));
     if (status >= 500) console.error('[BROADCAST API]', error);
     res.status(status).json({
       success: false,
@@ -129,6 +223,7 @@ const deliveryRates = (metrics = {}) => {
   const clicked = Number(metrics.clicked || 0);
   const eligible = Math.max(0, recipients - Number(metrics.skipped || 0));
   return {
+    sent: eligible,
     deliveryRate: eligible ? Number(((delivered / eligible) * 100).toFixed(2)) : 0,
     openRate: delivered ? Number(((opened / delivered) * 100).toFixed(2)) : 0,
     ctr: delivered ? Number(((clicked / delivered) * 100).toFixed(2)) : 0,
@@ -202,8 +297,9 @@ const queueBroadcast = async (broadcast, occurrenceKeyOverride = '', enqueueKey 
 };
 
 const createBroadcast = asyncRoute(async (req, res) => {
-  const payload = normalizeBroadcastPayload(req.body);
+  const payload = normalizeBroadcastPayload(req.body, { allowIncomplete: true });
   assertBroadcastPushPayloadSize(payload);
+  const creationPayloadHash = createBroadcastPayloadHash(payload);
   const actor = getActor(req.user);
   const rawIdempotencyKey = String(req.get('Idempotency-Key') || '').trim();
   if (rawIdempotencyKey.length > 200) throw fail('Idempotency-Key cannot exceed 200 characters');
@@ -214,6 +310,7 @@ const createBroadcast = asyncRoute(async (req, res) => {
   if (creationIdempotencyKeyHash) {
     const existing = await Broadcast.findOne({ creationIdempotencyKeyHash });
     if (existing) {
+      assertIdempotentCreateReplay(existing, creationPayloadHash);
       res.locals.auditAfter = { broadcastId: String(existing._id), status: existing.status, idempotentReplay: true };
       return res.status(200).json({ success: true, idempotentReplay: true, data: serializeBroadcast(existing) });
     }
@@ -226,12 +323,14 @@ const createBroadcast = asyncRoute(async (req, res) => {
       createdBy: actor,
       updatedBy: actor,
       creationIdempotencyKeyHash,
+      creationPayloadHash,
       'schedule.nextRunAt': null
     });
   } catch (error) {
     if (error?.code !== 11000 || !creationIdempotencyKeyHash) throw error;
     broadcast = await Broadcast.findOne({ creationIdempotencyKeyHash });
     if (!broadcast) throw error;
+    assertIdempotentCreateReplay(broadcast, creationPayloadHash);
     res.locals.auditAfter = { broadcastId: String(broadcast._id), status: broadcast.status, idempotentReplay: true };
     return res.status(200).json({ success: true, idempotentReplay: true, data: serializeBroadcast(broadcast) });
   }
@@ -248,18 +347,23 @@ const listBroadcasts = asyncRoute(async (req, res) => {
   });
   const filter = {};
   const requestedStatus = String(req.query.status || '');
+  if (requestedStatus) assertQueryEnum(requestedStatus, BROADCAST_FILTER_STATUSES, 'status');
   if (requestedStatus === 'sent') {
     filter.$and = [{ $or: [
       { status: { $in: ['queued', 'processing', 'sent', 'failed'] } },
-      { status: 'scheduled', sentAt: { $ne: null } }
+      { status: 'scheduled', sentAt: { $ne: null } },
+      { status: 'cancelled' }
     ] }];
   }
   else if (requestedStatus) filter.status = requestedStatus === 'sending' ? 'processing' : requestedStatus;
-  if (req.query.category) filter.category = String(req.query.category);
-  if (req.query.priority) filter.priority = String(req.query.priority);
-  if (req.query.deliveryType) filter.deliveryType = String(req.query.deliveryType);
+  const category = assertQueryEnum(req.query.category, CATEGORIES, 'category');
+  const priority = assertQueryEnum(req.query.priority, PRIORITIES, 'priority');
+  const deliveryType = assertQueryEnum(req.query.deliveryType, DELIVERY_TYPES, 'deliveryType');
+  if (category) filter.category = category;
+  if (priority) filter.priority = priority;
+  if (deliveryType) filter.deliveryType = deliveryType;
   if (req.query.search) {
-    const search = String(req.query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+    const search = normalizeSearchTerm(req.query.search);
     const searchClause = { $or: [{ title: { $regex: search, $options: 'i' } }, { message: { $regex: search, $options: 'i' } }] };
     if (filter.$and) filter.$and.push(searchClause);
     else filter.$or = searchClause.$or;
@@ -292,12 +396,17 @@ const updateBroadcast = asyncRoute(async (req, res) => {
   if (!['draft', 'scheduled'].includes(existing.status)) {
     throw fail('Only draft or scheduled broadcasts can be edited; duplicate a failed broadcast to change its content', 409);
   }
-  const payload = normalizeBroadcastPayload(req.body, { partial: true });
+  const payload = normalizeBroadcastPayload(req.body, {
+    partial: true,
+    allowIncomplete: existing.status === 'draft'
+  });
   const mergedAudience = payload.audience || existing.audience?.toObject?.() || existing.audience;
-  // Re-compile during edits so malformed/empty target sets never reach the queue.
-  buildAudienceQuery(mergedAudience);
+  // Scheduled records must remain delivery-ready. Drafts may intentionally be
+  // incomplete and are validated strictly at the send boundary.
+  if (existing.status === 'scheduled') buildAudienceQuery(mergedAudience);
   const wasScheduled = existing.status === 'scheduled';
   Object.assign(existing, payload);
+  if (wasScheduled) existing.set(normalizeBroadcastPayload(existing.toObject()));
   assertBroadcastPushPayloadSize(existing.toObject());
   existing.updatedBy = getActor(req.user);
   if (wasScheduled && existing.schedule?.mode !== 'scheduled') {
@@ -313,7 +422,14 @@ const updateBroadcast = asyncRoute(async (req, res) => {
     existing.schedule.scheduledAt = effectiveNextRunAt;
     existing.schedule.nextRunAt = effectiveNextRunAt;
   }
-  await existing.save();
+  try {
+    await existing.save();
+  } catch (error) {
+    if (error?.name === 'VersionError') {
+      throw fail('Broadcast changed while it was being edited; reload before retrying', 409);
+    }
+    throw error;
+  }
   if (wasScheduled) {
     const { removeBroadcastJobs } = require('../utils/jobQueue');
     await removeBroadcastJobs(String(existing._id)).catch(() => {});
@@ -404,9 +520,6 @@ const sendBroadcast = asyncRoute(async (req, res) => {
   if (!['draft', 'scheduled', 'failed'].includes(broadcast.status)) {
     throw fail('Broadcast has already been queued or sent', 409);
   }
-  const audience = broadcast.audience?.toObject ? broadcast.audience.toObject() : broadcast.audience;
-  buildAudienceQuery(audience);
-  assertBroadcastPushPayloadSize(broadcast.toObject());
   const wasFailed = broadcast.status === 'failed';
   const retryOccurrenceKey = wasFailed ? broadcast.execution?.occurrenceKey : '';
   const recipientEstimate = Number(broadcast.execution?.audienceSnapshotRecipients || 0) || null;
@@ -414,6 +527,12 @@ const sendBroadcast = asyncRoute(async (req, res) => {
     ? require('../services/broadcastService').normalizeSchedule(req.body.schedule)
     : null;
   if (requestedSchedule) broadcast.schedule = requestedSchedule;
+  // Persisted drafts may be structurally incomplete; this is the strict,
+  // normalized delivery boundary before any status or queue side effect.
+  broadcast.set(normalizeBroadcastPayload(broadcast.toObject()));
+  const audience = broadcast.audience?.toObject ? broadcast.audience.toObject() : broadcast.audience;
+  buildAudienceQuery(audience);
+  assertBroadcastPushPayloadSize(broadcast.toObject());
   const scheduled = broadcast.schedule?.mode === 'scheduled' && (!wasFailed || Boolean(requestedSchedule));
   if (scheduled && (!broadcast.schedule.scheduledAt || broadcast.schedule.scheduledAt <= new Date())) {
     throw fail('Scheduled time must be in the future');
@@ -481,7 +600,14 @@ const retryFailedNotifications = asyncRoute(async (req, res) => {
     }
   };
 
-  if (broadcast.status === 'failed' && broadcast.execution?.occurrenceKey) {
+  const failedOccurrenceChunkCount = broadcast.status === 'failed' && broadcast.execution?.occurrenceKey
+    ? await BroadcastChunk.countDocuments({
+      broadcast: broadcast._id,
+      occurrenceKey: broadcast.execution.occurrenceKey,
+      status: 'failed'
+    })
+    : 0;
+  if (failedOccurrenceChunkCount) {
     const failedReceiptFilter = {
       broadcast: broadcast._id,
       $or: [{ ticketStatus: 'failed' }, { receiptStatus: 'failed' }]
@@ -519,12 +645,13 @@ const retryFailedNotifications = asyncRoute(async (req, res) => {
   const providerRecipientFilter = {
     broadcast: broadcast._id,
     'push.status': 'failed',
+    webPushAcknowledgedAt: null,
     ...(requestedRecipients.length ? { recipient: { $in: requestedRecipients } } : {})
   };
   const providerFailureCount = await BroadcastRecipient.countDocuments(providerRecipientFilter);
   if (!providerFailureCount) throw fail('No retryable provider delivery records were found', 409);
   const failedRecipients = await BroadcastRecipient.find(providerRecipientFilter)
-    .select('_id recipient occurrenceKey push inApp overallStatus')
+    .select('_id recipient occurrenceKey requestedDeliveryType notification push inApp overallStatus webPushEmittedAt webPushAckDeadlineAt webPushRetryRequestedAt')
     .sort({ _id: 1 })
     .limit(retryBatchLimit)
     .lean();
@@ -534,41 +661,164 @@ const retryFailedNotifications = asyncRoute(async (req, res) => {
     broadcastRecipient: { $in: recipientLogIds },
     $or: [{ ticketStatus: 'failed' }, { receiptStatus: 'failed' }]
   }).select('_id broadcastRecipient').lean();
-  if (!failedReceipts.length) throw fail('No retryable provider delivery records were found', 409);
-  await BroadcastPushReceipt.updateMany({ _id: { $in: failedReceipts.map((row) => row._id) } }, resetReceiptUpdate);
-  await BroadcastRecipient.bulkWrite(failedRecipients.map((row) => ({
-    updateOne: {
-      filter: { _id: row._id },
-      update: { $set: {
-        overallStatus: row.inApp?.status === 'delivered' ? 'partial' : 'processing',
+  const providerRecipientIds = new Set(failedReceipts.map((row) => String(row.broadcastRecipient)));
+  const providerRecipients = failedRecipients.filter((row) => providerRecipientIds.has(String(row._id)));
+  // Only rows backed by concrete receipt jobs enter provider processing. This
+  // prevents Web-only ACK timeouts from being stranded in processing forever.
+  if (failedReceipts.length) {
+    await BroadcastPushReceipt.updateMany(
+      { _id: { $in: failedReceipts.map((row) => row._id) } },
+      resetReceiptUpdate
+    );
+    await BroadcastRecipient.bulkWrite(providerRecipients.map((row) => ({
+      updateOne: {
+        filter: { _id: row._id, webPushAcknowledgedAt: null, 'push.status': 'failed' },
+        update: { $set: {
+          overallStatus: resolveOverallStatus('processing', row.inApp?.status),
+          'push.status': 'processing',
+          'push.failureReason': '',
+          lastError: ''
+        } }
+      }
+    })), { ordered: false });
+  }
+
+  const webCandidates = failedRecipients.filter((row) => Boolean(row.webPushEmittedAt));
+  const occurrenceKeys = Array.from(new Set(webCandidates.map((row) => row.occurrenceKey).filter(Boolean)));
+  const [users, occurrences] = await Promise.all([
+    User.find({ _id: { $in: webCandidates.map((row) => row.recipient) }, isActive: true })
+      .select('notificationClients notificationSettings')
+      .lean(),
+    BroadcastOccurrence.find({ broadcast: broadcast._id, occurrenceKey: { $in: occurrenceKeys } }).lean()
+  ]);
+  const userById = new Map(users.map((user) => [String(user._id), user]));
+  const occurrenceByKey = new Map(occurrences.map((occurrence) => [occurrence.occurrenceKey, occurrence.snapshot]));
+  const fallbackBroadcast = broadcast.toObject();
+  const webRetryRecipientIds = [];
+  const { emitBroadcastPushNotification } = require('../utils/notificationEmitter');
+  await mapWithConcurrency(webCandidates, 25, async (row) => {
+    const user = userById.get(String(row.recipient));
+    const deliveryBroadcast = {
+      ...(occurrenceByKey.get(row.occurrenceKey) || fallbackBroadcast),
+      _id: broadcast._id
+    };
+    const settings = user?.notificationSettings || {};
+    const pushAllowed = Boolean(user) &&
+      settings.pushEnabled !== false &&
+      isBroadcastCategoryAllowed(settings, deliveryBroadcast.category);
+    const webPushAvailable = pushAllowed && getMatchedNotificationClients(
+      user,
+      deliveryBroadcast.audience || {}
+    ).some((client) =>
+      client.platform === 'web' &&
+      client.notificationPermission === 'granted' &&
+      client.browserNotificationsSupported === true
+    );
+    if (!webPushAvailable) return;
+
+    const hasProviderRetry = providerRecipientIds.has(String(row._id));
+    const retryRequestedAt = new Date();
+    const ackDeadline = new Date(retryRequestedAt.getTime() + WEB_PUSH_ACK_TIMEOUT_MS);
+    const claim = await BroadcastRecipient.findOneAndUpdate(
+      {
+        _id: row._id,
+        webPushAcknowledgedAt: null,
+        webPushEmittedAt: { $ne: null },
+        'push.status': { $in: hasProviderRetry ? ['failed', 'processing'] : ['failed'] }
+      },
+      { $set: {
+        webPushEmittedAt: retryRequestedAt,
+        webPushAckDeadlineAt: ackDeadline,
+        webPushRetryRequestedAt: retryRequestedAt,
+        overallStatus: resolveOverallStatus('processing', row.inApp?.status),
         'push.status': 'processing',
         'push.failureReason': '',
         lastError: ''
-      } }
+      } },
+      { new: true }
+    );
+    if (!claim) return;
+
+    let emitted = false;
+    try {
+      emitted = emitBroadcastPushNotification(row.recipient, {
+        id: String(row._id),
+        type: 'system',
+        title: deliveryBroadcast.title,
+        message: deliveryBroadcast.message,
+        subtitle: deliveryBroadcast.subtitle || '',
+        bannerImage: deliveryBroadcast.bannerImage || '',
+        thumbnail: deliveryBroadcast.thumbnail || '',
+        data: buildNotificationData(
+          deliveryBroadcast,
+          claim,
+          row.requestedDeliveryType || deliveryBroadcast.deliveryType
+        )
+      });
+    } catch {
+      emitted = false;
     }
-  })), { ordered: false });
+    if (emitted) {
+      webRetryRecipientIds.push(row._id);
+      return;
+    }
+    const fallbackPushStatus = hasProviderRetry ? 'processing' : 'failed';
+    const failureReason = hasProviderRetry
+      ? ''
+      : (row.push?.failureReason || 'No active Web socket accepted the retry');
+    await BroadcastRecipient.updateOne(
+      { _id: row._id, webPushAcknowledgedAt: null, webPushRetryRequestedAt: retryRequestedAt },
+      { $set: {
+        webPushAckDeadlineAt: null,
+        overallStatus: resolveOverallStatus(fallbackPushStatus, row.inApp?.status),
+        'push.status': fallbackPushStatus,
+        'push.failureReason': failureReason,
+        lastError: failureReason ? `Push: ${failureReason}`.slice(0, 1000) : ''
+      } }
+    );
+  });
+
+  const { enqueueBroadcastReceipts } = require('../utils/jobQueue');
+  if (failedReceipts.length) {
+    await enqueueBroadcastReceipts(
+      failedReceipts.map((row) => String(row._id)),
+      new Date(),
+      `manual-${String(broadcast._id)}-${Date.now()}`
+    ).catch(() => {});
+  }
+  const actionableRecipientIds = Array.from(new Set([
+    ...providerRecipients.map((row) => String(row._id)),
+    ...webRetryRecipientIds.map(String)
+  ]));
+  if (!actionableRecipientIds.length) {
+    throw fail('No retryable provider or Web delivery records were found', 409);
+  }
   await NotificationFailure.updateMany(
-    { broadcast: broadcast._id, broadcastRecipient: { $in: recipientLogIds }, status: 'open' },
+    { broadcast: broadcast._id, broadcastRecipient: { $in: actionableRecipientIds }, status: 'open' },
     { $set: { status: 'retrying', retryRequestedAt: new Date() } }
   );
-  const { enqueueBroadcastReceipts } = require('../utils/jobQueue');
-  await enqueueBroadcastReceipts(
-    failedReceipts.map((row) => String(row._id)),
-    new Date(),
-    `manual-${String(broadcast._id)}-${Date.now()}`
-  ).catch(() => {});
+  await refreshBroadcastMetrics(broadcast._id);
   const hasMore = providerFailureCount > failedRecipients.length;
   const remaining = Math.max(0, providerFailureCount - failedRecipients.length);
+  const retryMode = providerRecipients.length && webRetryRecipientIds.length
+    ? 'mixed'
+    : (webRetryRecipientIds.length ? 'web_socket' : 'provider_receipts');
   res.locals.auditAfter = {
-    broadcastId: String(broadcast._id), retryMode: 'provider_receipts',
-    recipientCount: failedRecipients.length, providerRecordCount: failedReceipts.length,
+    broadcastId: String(broadcast._id), retryMode,
+    recipientCount: actionableRecipientIds.length,
+    providerRecipientCount: providerRecipients.length,
+    webRecipientCount: webRetryRecipientIds.length,
+    providerRecordCount: failedReceipts.length,
     hasMore, remaining
   };
   return res.status(202).json({
     success: true,
     data: {
-      broadcastId: String(broadcast._id), retryMode: 'provider_receipts',
-      recipientCount: failedRecipients.length, hasMore, remaining
+      broadcastId: String(broadcast._id), retryMode,
+      recipientCount: actionableRecipientIds.length,
+      providerRecipientCount: providerRecipients.length,
+      webRecipientCount: webRetryRecipientIds.length,
+      hasMore, remaining
     }
   });
 });
@@ -603,6 +853,7 @@ const cancelBroadcast = asyncRoute(async (req, res) => {
   );
   const cancellableRecipientFilter = {
     broadcast: broadcast._id,
+    webPushAcknowledgedAt: null,
     'push.status': { $in: ['pending', 'processing'] }
   };
   await Promise.all([
@@ -619,18 +870,23 @@ const cancelBroadcast = asyncRoute(async (req, res) => {
       { $set: { 'push.status': 'skipped', overallStatus: 'skipped', processingLeaseAt: null, processingKey: '' } }
     )
   ]);
+  await refreshBroadcastMetrics(broadcast._id);
   res.locals.auditAfter = { broadcastId: String(broadcast._id), status: broadcast.status };
   const { removeBroadcastJobs } = require('../utils/jobQueue');
   await removeBroadcastJobs(String(broadcast._id)).catch(() => {});
   res.json({ success: true, data: serializeBroadcast(broadcast) });
 });
 
-const getDashboard = asyncRoute(async (_req, res) => {
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const [statuses, sentToday, recipientSummary, openTimes, recentBroadcasts] = await Promise.all([
+const getDashboard = asyncRoute(async (req, res) => {
+  const {
+    timezone,
+    start: startOfToday,
+    end: endOfToday
+  } = getTimezoneDayBounds(req.query.timezone || 'UTC');
+  const [statuses, broadcastsSent, sentToday, recipientSummary, openTimes, recentBroadcasts, todayBroadcasts] = await Promise.all([
     Broadcast.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
-    Broadcast.countDocuments({ sentAt: { $gte: startOfToday } }),
+    Broadcast.countDocuments({ sentAt: { $ne: null } }),
+    Broadcast.countDocuments({ sentAt: { $gte: startOfToday, $lt: endOfToday } }),
     Broadcast.aggregate([{
       $group: {
         _id: null,
@@ -650,7 +906,11 @@ const getDashboard = asyncRoute(async (_req, res) => {
       { $project: { duration: { $subtract: ['$openedAt', '$createdAt'] } } },
       { $group: { _id: null, averageMs: { $avg: '$duration' } } }
     ]),
-    Broadcast.find().sort({ updatedAt: -1 }).limit(8).lean()
+    Broadcast.find().sort({ updatedAt: -1 }).limit(8).lean(),
+    Broadcast.find({ sentAt: { $gte: startOfToday, $lt: endOfToday } })
+      .sort({ sentAt: -1 })
+      .limit(20)
+      .lean()
   ]);
   const statusMap = Object.fromEntries(statuses.map((entry) => [entry._id, entry.count]));
   const summary = recipientSummary[0] || { recipients: 0, delivered: 0, failed: 0, skipped: 0, opened: 0, clicked: 0, pushDelivered: 0, pushAttempted: 0 };
@@ -658,22 +918,31 @@ const getDashboard = asyncRoute(async (_req, res) => {
   res.json({
     success: true,
     data: {
+      timezone,
       totalBroadcasts: Object.values(statusMap).reduce((sum, value) => sum + Number(value), 0),
       drafts: statusMap.draft || 0,
       scheduled: statusMap.scheduled || 0,
-      sent: statusMap.sent || 0,
+      broadcastsSent,
+      sent: broadcastsSent,
       sending: (statusMap.processing || 0) + (statusMap.queued || 0),
       sentToday,
+      recipients: summary.recipients,
       delivered: summary.delivered,
       failed: summary.failed,
+      skipped: summary.skipped,
+      opened: summary.opened,
+      clicked: summary.clicked,
       retryableFailures: summary.retryableFailures || 0,
       totalRecipients: summary.recipients,
       pushDeliveryRate: summary.pushAttempted ? Number(((summary.pushDelivered / summary.pushAttempted) * 100).toFixed(2)) : 0,
+      deliveryRate: rates.deliveryRate,
       openRate: rates.openRate,
       ctr: rates.ctr,
+      clickRate: rates.clickRate,
       averageOpenTime: Number(((openTimes[0]?.averageMs || 0) / 1000).toFixed(1)),
       averageOpenTimeMs: Math.round(openTimes[0]?.averageMs || 0),
-      recentBroadcasts: recentBroadcasts.map(serializeBroadcast)
+      recentBroadcasts: recentBroadcasts.map(serializeBroadcast),
+      todayBroadcasts: todayBroadcasts.map(serializeBroadcast)
     }
   });
 });
@@ -783,7 +1052,7 @@ const getAnalytics = asyncRoute(async (req, res) => {
     BroadcastEvent.aggregate([
       { $match: { broadcast: broadcastObjectId, eventType: { $in: ['delivered', 'open', 'click'] } } },
       { $group: {
-        _id: { platform: { $ifNull: ['$platform', 'unknown'] }, recipient: '$recipient' },
+        _id: { platform: { $ifNull: ['$platform', 'unknown'] }, recipient: '$broadcastRecipient' },
         delivered: { $max: { $cond: [{ $eq: ['$eventType', 'delivered'] }, 1, 0] } },
         opened: { $max: { $cond: [{ $eq: ['$eventType', 'open'] }, 1, 0] } },
         clicked: { $max: { $cond: [{ $eq: ['$eventType', 'click'] }, 1, 0] } }
@@ -902,9 +1171,10 @@ const listTemplates = asyncRoute(async (req, res) => {
     updatedAt: 'updatedAt', createdAt: 'createdAt', name: 'name', category: 'content.category'
   }, 'updatedAt');
   const filter = req.query.includeInactive === 'true' ? {} : { isActive: true };
-  if (req.query.category) filter['content.category'] = String(req.query.category);
+  const category = assertQueryEnum(req.query.category, CATEGORIES, 'category');
+  if (category) filter['content.category'] = category;
   if (req.query.search) {
-    const search = String(req.query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+    const search = normalizeSearchTerm(req.query.search);
     filter.$or = [{ name: { $regex: search, $options: 'i' } }, { description: { $regex: search, $options: 'i' } }];
   }
   const [templates, total] = await Promise.all([
@@ -917,9 +1187,19 @@ const listTemplates = asyncRoute(async (req, res) => {
 const createTemplate = asyncRoute(async (req, res) => {
   const payload = normalizeTemplate(req.body);
   const actor = getActor(req.user);
-  const template = await BroadcastTemplate.create({ ...payload, createdBy: actor, updatedBy: actor });
-  res.locals.auditAfter = { templateId: String(template._id), name: template.name };
-  res.status(201).json({ success: true, data: serializeTemplate(template) });
+  // Names remain globally unique so duplicate active templates fail closed.
+  // Reusing an archived name restores that durable template instead of
+  // colliding with its soft-delete tombstone.
+  let template = await BroadcastTemplate.findOne({ name: payload.name, isActive: false });
+  const restored = Boolean(template);
+  if (template) {
+    Object.assign(template, payload, { isActive: true, updatedBy: actor });
+    await template.save();
+  } else {
+    template = await BroadcastTemplate.create({ ...payload, createdBy: actor, updatedBy: actor });
+  }
+  res.locals.auditAfter = { templateId: String(template._id), name: template.name, restored };
+  res.status(201).json({ success: true, restored, data: serializeTemplate(template) });
 });
 
 const updateTemplate = asyncRoute(async (req, res) => {
@@ -937,7 +1217,10 @@ const updateTemplate = asyncRoute(async (req, res) => {
       ...contentPatch
     }
   });
-  Object.assign(template, payload, { updatedBy: getActor(req.user) });
+  Object.assign(template, payload, {
+    ...(typeof req.body.isActive === 'boolean' ? { isActive: req.body.isActive } : {}),
+    updatedBy: getActor(req.user)
+  });
   await template.save();
   res.locals.auditAfter = { templateId: String(template._id), name: template.name, isActive: template.isActive };
   res.json({ success: true, data: serializeTemplate(template) });
@@ -971,5 +1254,9 @@ module.exports = {
   createTemplate,
   updateTemplate,
   deleteTemplate,
-  serializeBroadcast
+  serializeBroadcast,
+  normalizeSearchTerm,
+  applyLogFilters,
+  createBroadcastPayloadHash,
+  assertIdempotentCreateReplay
 };

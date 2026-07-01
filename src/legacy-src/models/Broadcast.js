@@ -30,14 +30,17 @@ const audienceSchema = new mongoose.Schema({
 }, { _id: false });
 
 const broadcastSchema = new mongoose.Schema({
-  title: { type: String, required: true, trim: true, maxlength: 100 },
-  message: { type: String, required: true, trim: true, maxlength: 1000 },
+  // Drafts are intentionally allowed to be incomplete. The send boundary
+  // performs strict normalized validation before any work is queued.
+  title: { type: String, default: '', trim: true, maxlength: 100 },
+  message: { type: String, default: '', trim: true, maxlength: 1000 },
   subtitle: { type: String, default: '', trim: true, maxlength: 160 },
   bannerImage: { type: String, default: '', trim: true, maxlength: 2048 },
   thumbnail: { type: String, default: '', trim: true, maxlength: 2048 },
   cta: {
     text: { type: String, default: '', trim: true, maxlength: 60 },
     url: { type: String, default: '', trim: true, maxlength: 2048 },
+    deepLink: { type: String, default: '', trim: true, maxlength: 2048 },
     type: {
       type: String,
       enum: ['none', 'home', 'profile', 'tournament', 'recruitment', 'clip', 'post', 'story', 'random_connect', 'premium', 'creator_monetization', 'host_verification', 'custom'],
@@ -54,13 +57,7 @@ const broadcastSchema = new mongoose.Schema({
     type: String,
     default: '',
     trim: true,
-    maxlength: 60,
-    validate: {
-      validator: function(value) {
-        return this.category !== 'custom' || Boolean(String(value || '').trim());
-      },
-      message: 'Custom category is required when category is custom'
-    }
+    maxlength: 60
   },
   deliveryType: { type: String, enum: ['push', 'in_app', 'both'], default: 'both' },
   push: {
@@ -112,6 +109,12 @@ const broadcastSchema = new mongoose.Schema({
     retryableFailures: { type: Number, default: 0, min: 0 }
   },
   metricsSourceUpdatedAt: { type: Date, default: null },
+  metricsRefresh: {
+    requestedRevision: { type: Number, default: 0, min: 0 },
+    appliedRevision: { type: Number, default: 0, min: 0 },
+    lockKey: { type: String, default: '', maxlength: 100 },
+    lockExpiresAt: { type: Date, default: null }
+  },
   createdBy: {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     username: { type: String, default: 'admin', trim: true },
@@ -123,13 +126,16 @@ const broadcastSchema = new mongoose.Schema({
   },
   sentAt: { type: Date, default: null },
   cancelledAt: { type: Date, default: null },
-  creationIdempotencyKeyHash: { type: String, default: undefined, maxlength: 64 }
+  creationIdempotencyKeyHash: { type: String, default: undefined, maxlength: 64 },
+  creationPayloadHash: { type: String, default: undefined, maxlength: 64 }
 }, {
   timestamps: true,
   optimisticConcurrency: true
 });
 
 broadcastSchema.index({ status: 1, 'schedule.nextRunAt': 1 });
+broadcastSchema.index({ status: 1, createdAt: -1 });
+broadcastSchema.index({ status: 1, sentAt: -1 });
 broadcastSchema.index({ createdAt: -1 });
 broadcastSchema.index({ sentAt: -1 });
 broadcastSchema.index({ category: 1, status: 1, createdAt: -1 });
