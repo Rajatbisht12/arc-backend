@@ -147,8 +147,11 @@ const serializeMembership = (membership) => {
       id: String(value.user._id),
       username: value.user.username,
       email: value.user.email,
+      phone: value.user.phone || value.user.phoneNumber || value.user.profile?.phone || '',
       displayName: value.user.profile?.displayName || value.user.username,
       avatar: value.user.profile?.avatar || '',
+      location: value.user.profile?.location || '',
+      country: value.user.profile?.country || value.user.country || '',
       accountType: value.user.userType === 'team' ? 'Team' : 'User',
       isPremium: Boolean(value.user.isPremium),
       isVerifiedHost: Boolean(value.user.isVerifiedHost),
@@ -577,6 +580,7 @@ const verifyOneTimePurchase = async ({ userId, orderId, paymentId, signature, pl
   if (String(notes.userId || '') !== String(userId)) throw fail('Payment order belongs to another account', 403, 'PAYMENT_OWNER_MISMATCH');
   const planKey = safeString(notes.planKey || notes.planId, 80);
   const billingPeriod = normalizeBillingPeriod(notes.billingPeriod);
+  const purchasePlatform = normalizePlatform(notes.platform);
   const accountType = user.userType === 'team' ? 'team' : (user.userType === 'creator' ? 'creator' : 'player');
   const plan = findPlan(planKey, accountType);
   assertProviderAmount({ payment, order, plan, billingPeriod });
@@ -602,7 +606,7 @@ const verifyOneTimePurchase = async ({ userId, orderId, paymentId, signature, pl
       planTier: plan.id,
       billingPeriod,
       source: 'razorpay_order',
-      platform: normalizePlatform(platform),
+      platform: purchasePlatform,
       membershipStatus: 'active',
       subscriptionStatus: 'not_applicable',
       autoRenew: false,
@@ -627,7 +631,7 @@ const verifyOneTimePurchase = async ({ userId, orderId, paymentId, signature, pl
     );
     transaction = await PaymentTransaction.findById(existingTransaction._id);
   } else {
-    transaction = await recordPayment({ membership, payment, orderId, description: `${plan.name} (${billingPeriod})`, platform, billingPeriod, planKey });
+    transaction = await recordPayment({ membership, payment, orderId, description: `${plan.name} (${billingPeriod})`, platform: purchasePlatform, billingPeriod, planKey });
   }
   await grantPeriodCredits(membership, `payment:${paymentId}:credits`);
   await projectEntitlement(membership);
@@ -907,6 +911,7 @@ const verifyRecurringSubscription = async ({ userId, subscriptionId, paymentId, 
     throw fail('Subscription uses an unexpected provider plan', 400, 'SUBSCRIPTION_PLAN_MISMATCH');
   }
   const plan = findPlan(membership.planKey, membership.accountType);
+  const subscriptionPlatform = normalizePlatform(notes.platform);
   assertProviderAmount({ payment, plan, billingPeriod: membership.billingPeriod });
   const previousState = snapshotState(membership);
   const periodStart = fromUnix(subscription.current_start) || new Date();
@@ -920,7 +925,7 @@ const verifyRecurringSubscription = async ({ userId, subscriptionId, paymentId, 
     currentPeriodEnd: periodEnd,
     expiresAt: periodEnd,
     lastPaymentAt: fromUnix(payment.created_at) || new Date(),
-    platform: normalizePlatform(platform),
+    platform: subscriptionPlatform,
     razorpay: {
       ...(membership.razorpay?.toObject?.() || membership.razorpay || {}),
       customerId: subscription.customer_id || membership.razorpay.customerId,
@@ -931,7 +936,7 @@ const verifyRecurringSubscription = async ({ userId, subscriptionId, paymentId, 
     },
     providerSnapshot: provider.sanitizeProviderSnapshot(subscription)
   });
-  const transaction = await recordPayment({ membership, payment, orderId: payment.order_id, description: `${plan.name} recurring (${membership.billingPeriod})`, platform, billingPeriod: membership.billingPeriod, planKey: membership.planKey });
+  const transaction = await recordPayment({ membership, payment, orderId: payment.order_id, description: `${plan.name} recurring (${membership.billingPeriod})`, platform: subscriptionPlatform, billingPeriod: membership.billingPeriod, planKey: membership.planKey });
   await grantPeriodCredits(membership, `payment:${paymentId}:credits`);
   await projectEntitlement(membership);
   await appendEvent({ membership, action: 'activation', source: 'razorpay_subscription', actor: customerActor(userId), previousState, amount: planPrice(plan, membership.billingPeriod), dedupeKey: `payment:${paymentId}:activation` });
@@ -984,6 +989,7 @@ const grantMembership = async ({ userId, planKey, billingPeriod, startAt, expire
       manual: { actorKey: actor.actorKey, actorId: actor.adminId, adminName: actor.adminName, role: actor.role, reason: safeString(reason, 1000) }
     }
   });
+  await grantPeriodCredits(membership, `admin:${actor?.correlationId || membership.version}:grant:credits`);
   await projectEntitlement(membership);
   await appendEvent({ membership, action: 'activation', source: 'admin', actor, previousState, reason });
   await notifyLifecycle(membership, { title: 'Premium granted', message: `${plan.name} access has been granted.`, action: 'activation' });
@@ -1015,6 +1021,7 @@ const extendMembership = async ({ membershipId, billingPeriod, expiresAt, days, 
   validateMembershipDates({ startAt: membership.startedAt || new Date(), expiresAt: expiry, billingPeriod: period });
   const previousState = snapshotState(membership);
   await safeMembershipUpdate(membership, { billingPeriod: period, expiresAt: expiry, currentPeriodEnd: expiry, membershipStatus: 'active', endedAt: null });
+  await grantPeriodCredits(membership, `admin:${actor?.correlationId || membership.version}:extend:credits`);
   await projectEntitlement(membership);
   await appendEvent({ membership, action: 'renewal', source: 'admin', actor, previousState, reason });
   await notifyLifecycle(membership, { title: 'Premium extended', message: `Your premium access now runs until ${expiry.toISOString()}.`, action: 'renewal' });
@@ -1092,6 +1099,7 @@ const changePlan = async ({ membershipId, planKey, billingPeriod, expiresAt, sch
         'metadata.pendingPlanChange': null,
         providerSnapshot: provider.sanitizeProviderSnapshot(providerResult)
       });
+      await grantPeriodCredits(membership, `admin:${actor?.correlationId || membership.version}:change-plan:credits`);
       await projectEntitlement(membership);
     }
     await appendEvent({ membership, action: 'plan_change', source: 'admin', actor, previousState, reason, metadata: { scheduleChangeAt, providerPlanId: nextProviderPlanId } });
@@ -1110,6 +1118,7 @@ const changePlan = async ({ membershipId, planKey, billingPeriod, expiresAt, sch
   validateMembershipDates({ startAt: membership.startedAt || new Date(), expiresAt: expiry, billingPeriod: period });
   const previousState = snapshotState(membership);
   await safeMembershipUpdate(membership, { planKey: plan.id, planTier: plan.id, billingPeriod: period, expiresAt: expiry, currentPeriodEnd: expiry });
+  await grantPeriodCredits(membership, `admin:${actor?.correlationId || membership.version}:change-plan:credits`);
   await projectEntitlement(membership);
   await appendEvent({ membership, action: 'plan_change', source: 'admin', actor, previousState, reason });
   await notifyLifecycle(membership, { title: 'Premium plan changed', message: `Your premium plan is now ${plan.name}.`, action: 'plan_change' });
@@ -1759,6 +1768,7 @@ const reconcileMembership = async (membershipId, { actor = systemActor('system:r
     if (!['removed', 'refunded'].includes(membership.membershipStatus)) {
       const cancelAtCycleEnd = providerBoolean(providerResult.cancel_at_cycle_end, membership.cancelAtCycleEnd);
       const terminal = TERMINAL_PROVIDER_STATUSES.has(status);
+      const providerEndedAt = fromUnix(providerResult.ended_at) || (terminal ? new Date() : null);
       await safeMembershipUpdate(membership, {
         ...(pendingActivated ? {
           planKey: effectivePlanKey,
@@ -1773,6 +1783,8 @@ const reconcileMembership = async (membershipId, { actor = systemActor('system:r
         subscriptionStatus: status || membership.subscriptionStatus,
         autoRenew: terminal ? false : !cancelAtCycleEnd,
         cancelAtCycleEnd,
+        cancelledAt: status === 'cancelled' ? (providerEndedAt || membership.cancelledAt) : membership.cancelledAt,
+        endedAt: terminal ? providerEndedAt : membership.endedAt,
         currentPeriodStart: fromUnix(providerResult.current_start) || membership.currentPeriodStart,
         currentPeriodEnd: periodEnd,
         expiresAt: periodEnd,
@@ -1927,8 +1939,20 @@ const listMemberships = async (query = {}) => {
       { 'profile.displayName': pattern },
       { 'profile.phone': pattern }
     ] }).select('_id').limit(500).lean();
+    const payments = await PaymentTransaction.find({
+      type: 'subscription',
+      $or: [
+        { paymentId: pattern },
+        { orderId: pattern },
+        { providerPaymentId: pattern },
+        { providerOrderId: pattern },
+        { providerSubscriptionId: pattern },
+        { providerRefundId: pattern }
+      ]
+    }).select('user membership').limit(500).lean();
     const searchConditions = [
-      { user: { $in: users.map((user) => user._id) } },
+      { user: { $in: [...users.map((user) => user._id), ...payments.map((payment) => payment.user)] } },
+      { _id: { $in: payments.map((payment) => payment.membership).filter(Boolean) } },
       { 'razorpay.subscriptionId': pattern },
       { 'razorpay.paymentId': pattern },
       { 'razorpay.orderId': pattern }
@@ -1940,7 +1964,7 @@ const listMemberships = async (query = {}) => {
   const sort = sortFields.has(query.sort) ? query.sort : 'createdAt';
   const order = query.order === 'asc' ? 1 : -1;
   const [memberships, total] = await Promise.all([
-    PremiumMembership.find(filter).populate('user', 'username email profile.displayName profile.avatar userType isPremium createdAt lastSeen').sort({ [sort]: order, _id: order }).skip((page - 1) * limit).limit(limit).lean(),
+    PremiumMembership.find(filter).populate('user', 'username email phone phoneNumber profile.displayName profile.avatar profile.phone userType isPremium createdAt lastSeen').sort({ [sort]: order, _id: order }).skip((page - 1) * limit).limit(limit).lean(),
     PremiumMembership.countDocuments(filter)
   ]);
   return { memberships: memberships.map(serializeMembership), pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
@@ -1968,7 +1992,7 @@ const getDashboard = async () => {
     PremiumMembership.countDocuments({ isCurrent: true, $or: [{ membershipStatus: 'cancelled' }, { cancelAtCycleEnd: true }] }),
     PremiumMembership.countDocuments({ isCurrent: true, autoRenew: true }),
     PremiumMembership.countDocuments({ isCurrent: true, autoRenew: false }),
-    PremiumMembership.countDocuments({ isCurrent: true, membershipStatus: 'active', startedAt: { $gte: startOfToday } }),
+    PaymentTransaction.distinct('user', { type: 'subscription', status: 'completed', $or: [{ paidAt: { $gte: startOfToday } }, { paidAt: null, createdAt: { $gte: startOfToday } }] }),
     PremiumMembership.countDocuments({ isCurrent: true, membershipStatus: 'active', expiresAt: { $gt: now, $lte: in7Days } }),
     PremiumMembership.countDocuments({ isCurrent: true, membershipStatus: 'active', expiresAt: { $gt: now, $lte: in30Days } }),
     PremiumMembership.aggregate([{ $match: { isCurrent: true } }, { $group: { _id: '$billingPeriod', count: { $sum: 1 } } }]),
@@ -1984,7 +2008,7 @@ const getDashboard = async () => {
     cancelledMemberships: cancelled,
     autoRenewEnabled,
     autoRenewDisabled,
-    purchasedToday,
+    purchasedToday: purchasedToday.length,
     expiringIn7Days: expiring7,
     expiringIn30Days: expiring30,
     revenueToday: net(revenueTodayRows),
@@ -2003,7 +2027,7 @@ const getDashboard = async () => {
     activePremiumUsers: active,
     expiredPremiumUsers: expired,
     cancelledSubscriptions: cancelled,
-    premiumPurchasedToday: purchasedToday,
+    premiumPurchasedToday: purchasedToday.length,
     lifetimePremiumRevenue: net(revenueLifetimeRows),
     currency: 'INR'
   };
@@ -2011,13 +2035,14 @@ const getDashboard = async () => {
 
 const getMembershipDetails = async (membershipId) => {
   if (!isObjectId(String(membershipId))) throw fail('Membership not found', 404, 'MEMBERSHIP_NOT_FOUND');
-  const membership = await PremiumMembership.findById(membershipId).populate('user', 'username email profile.displayName profile.avatar userType isPremium isVerifiedHost isCreator creatorMonetizationStatus createdAt lastSeen notificationClients pushTokens.platform pushTokens.deviceName pushTokens.appVersion pushTokens.lastUsedAt').lean();
+  const membership = await PremiumMembership.findById(membershipId).populate('user', 'username email profile.displayName profile.avatar profile.location profile.country country userType isPremium isVerifiedHost isCreator creatorMonetizationStatus createdAt lastSeen notificationClients.platform notificationClients.appVersion notificationClients.notificationPermission notificationClients.lastSeenAt pushTokens.platform pushTokens.deviceName pushTokens.appVersion pushTokens.lastUsedAt').lean();
   if (!membership) throw fail('Membership not found', 404, 'MEMBERSHIP_NOT_FOUND');
-  const reports = await Report.find({ targetType: 'user', targetId: membership.user?._id || membership.user })
-    .select('reason details status adminAction createdAt reviewedAt')
-    .sort({ createdAt: -1 })
-    .limit(25)
-    .lean();
+  const reportFilter = { targetType: 'user', targetId: membership.user?._id || membership.user };
+  const [latestReport, reportTotal, reportPending] = await Promise.all([
+    Report.findOne(reportFilter).select('createdAt').sort({ createdAt: -1 }).lean(),
+    Report.countDocuments(reportFilter),
+    Report.countDocuments({ ...reportFilter, status: 'pending' })
+  ]);
   const devices = [
     ...((membership.user?.notificationClients || []).map((client, index) => ({
       id: `client-${index + 1}`,
@@ -2039,7 +2064,7 @@ const getMembershipDetails = async (membershipId) => {
   return {
     ...serializeMembership(membership),
     devices,
-    reports: { total: reports.length, items: reports },
+    reports: { total: reportTotal, pending: reportPending, resolved: Math.max(0, reportTotal - reportPending), latestAt: latestReport?.createdAt || null },
     loginHistory: { available: false, reason: 'Login history is not retained by the current authentication data model.' }
   };
 };
@@ -2048,9 +2073,17 @@ const listPayments = async (membershipId, { page = 1, limit = 25 } = {}) => {
   if (!isObjectId(String(membershipId))) throw fail('Membership not found', 404, 'MEMBERSHIP_NOT_FOUND');
   const currentPage = Math.max(1, Number(page) || 1);
   const pageSize = Math.max(1, Math.min(100, Number(limit) || 25));
+  const membership = await PremiumMembership.findById(membershipId).select('user').lean();
+  if (!membership) throw fail('Membership not found', 404, 'MEMBERSHIP_NOT_FOUND');
+  const paymentFilter = {
+    $or: [
+      { membership: membershipId },
+      { user: membership.user, type: 'subscription', status: 'failed', $or: [{ membership: null }, { membership: { $exists: false } }] }
+    ]
+  };
   const [payments, total] = await Promise.all([
-    PaymentTransaction.find({ membership: membershipId }).sort({ paidAt: -1, createdAt: -1 }).skip((currentPage - 1) * pageSize).limit(pageSize).lean(),
-    PaymentTransaction.countDocuments({ membership: membershipId })
+    PaymentTransaction.find(paymentFilter).sort({ paidAt: -1, createdAt: -1 }).skip((currentPage - 1) * pageSize).limit(pageSize).lean(),
+    PaymentTransaction.countDocuments(paymentFilter)
   ]);
   const serialized = payments.map((payment) => ({
     id: String(payment._id),
@@ -2072,10 +2105,10 @@ const listPayments = async (membershipId, { page = 1, limit = 25 } = {}) => {
     discountAmount: payment.discountAmount,
     couponCode: payment.couponCode,
     invoiceUrl: /^https:\/\//i.test(payment.invoiceUrl || '') ? payment.invoiceUrl : '',
-    capturedAmount: payment.capturedAmount || payment.amount,
+    capturedAmount: payment.status === 'failed' ? 0 : (payment.capturedAmount > 0 ? payment.capturedAmount : payment.amount),
     refundedAmount: payment.refundedAmount,
     refundStatus: payment.refundStatus,
-    refundHistory: (payment.refundHistory || []).map((refund) => ({ refundId: refund.refundId, amount: refund.amount, status: refund.status, reason: refund.reason, createdAt: refund.createdAt })),
+    refundHistory: (payment.refundHistory || []).map((refund) => ({ refundId: refund.refundId, amount: refund.amount, status: refund.status, reservedAmount: refund.reservedAmount || 0, reason: refund.reason, createdAt: refund.createdAt })),
     paidAt: payment.paidAt,
     createdAt: payment.createdAt
   }));
