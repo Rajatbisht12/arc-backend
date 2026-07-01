@@ -63,7 +63,7 @@ const randomConnectionSchema = new mongoose.Schema({
   duration: Number, // in seconds
   endReason: {
     type: String,
-    enum: ['user_left', 'timeout', 'cleanup', 'system', 'partner_left', null],
+    enum: ['user_left', 'timeout', 'cleanup', 'system', 'partner_left', 'next', null],
     default: null
   },
   messages: [{

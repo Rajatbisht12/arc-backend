@@ -29,9 +29,35 @@ const creatorPayoutSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'paid', 'failed', 'held'],
+    enum: ['pending', 'approved', 'processing', 'paid', 'completed', 'failed', 'held', 'cancelled', 'rejected'],
     default: 'pending',
     index: true
+  },
+  approvedAt: {
+    type: Date
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  processedAt: {
+    type: Date
+  },
+  processedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  cancelledAt: {
+    type: Date
+  },
+  cancelledBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  cancellationReason: {
+    type: String,
+    default: '',
+    maxlength: 500
   },
   failureReason: {
     type: String,
@@ -40,6 +66,10 @@ const creatorPayoutSchema = new mongoose.Schema({
   },
   paidAt: {
     type: Date
+  },
+  paidBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
   /** Fraud/hold flag */
   heldReason: {

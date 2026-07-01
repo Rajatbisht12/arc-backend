@@ -24,6 +24,10 @@ const earningsSnapshotSchema = new mongoose.Schema({
   },
   /** Inputs used for calculation (for audit) */
   inputs: {
+    totalClipViews: { type: Number, default: 0 },
+    totalOrganicClipViews: { type: Number, default: 0 },
+    totalBoostedClipViews: { type: Number, default: 0 },
+    cpm: { type: Number, default: 0 },
     watchTimeMinutes: { type: Number, default: 0 },
     engagementScore: { type: Number, default: 0 },
     originalityScore: { type: Number, default: 0 },

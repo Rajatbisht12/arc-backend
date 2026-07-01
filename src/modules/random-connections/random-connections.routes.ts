@@ -80,6 +80,13 @@ const disconnectValidation = [
     .withMessage("Room ID is required")
 ];
 
+const nextMatchValidation = [
+  body("roomId")
+    .notEmpty()
+    .withMessage("Room ID is required"),
+  ...joinQueueValidation
+];
+
 // Routes (original random connections)
 router.post("/join-queue", protect, joinQueueValidation, randomConnectController.joinQueue);
 router.delete("/leave-queue", protect, randomConnectController.leaveQueue);
@@ -87,6 +94,7 @@ router.get("/current-connection", protect, randomConnectController.getCurrentCon
 router.get("/active-sessions", protect, randomConnectController.getActiveSessions);
 router.get("/daily-gender-matches-remaining", protect, randomConnectController.getDailyGenderMatchesRemaining);
 router.post("/disconnect", protect, disconnectValidation, randomConnectController.disconnectConnection);
+router.post("/next", protect, nextMatchValidation, randomConnectController.nextConnection);
 router.post("/send-message", protect, sendMessageValidation, randomConnectController.sendMessage);
 router.post("/cleanup-current", protect, randomConnectController.cleanupCurrentConnection);
 

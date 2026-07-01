@@ -225,7 +225,7 @@ const createPost = async (req, res) => {
     const post = await Post.create(postData);
     
     // Populate author info
-    await post.populate('author', 'username profile.displayName profile.avatar userType');
+    await post.populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType');
     
     // Log the created post to verify postType and achievementInfo
     log.debug('Created post:', {
@@ -434,9 +434,9 @@ const getPost = async (req, res) => {
     const postId = req.params.id;
 
     const post = await Post.findById(postId)
-      .populate('author', 'username profile.displayName profile.avatar userType')
-      .populate('likes.user', 'username profile.displayName profile.avatar')
-      .populate('comments.user', 'username profile.displayName profile.avatar');
+      .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType')
+      .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
+      .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar');
 
     if (!post) {
       return res.status(404).json({
@@ -555,9 +555,9 @@ const toggleLike = async (req, res) => {
     }
 
     const finalPost = await Post.findById(postId)
-      .populate('author', 'username profile.displayName profile.avatar userType')
-      .populate('likes.user', 'username profile.displayName profile.avatar')
-      .populate('comments.user', 'username profile.displayName profile.avatar')
+      .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType')
+      .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
+      .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar')
       .select('author content postType achievementInfo tags mentions likes comments shares attachedMusic visibility isActive hiddenByAdmin boostedAt boostExpiresAt views viewedBy createdAt updatedAt');
     if (!finalPost || finalPost.isActive === false) {
       return res.status(404).json({
@@ -638,7 +638,7 @@ const addComment = async (req, res) => {
       { $push: { comments: comment } },
       { new: true }
     )
-      .populate('comments.user', 'username profile.displayName profile.avatar')
+      .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar')
       .select('author comments boostMeta boostExpiresAt');
 
     if (!post) {
@@ -825,9 +825,9 @@ const getSavedPosts = async (req, res) => {
 
     const savedIds = savedEntries.map(item => item.post);
     const posts = await Post.find({ _id: { $in: savedIds }, isActive: true })
-      .populate('author', 'username profile.displayName profile.avatar userType')
-      .populate('likes.user', 'username profile.displayName profile.avatar')
-      .populate('comments.user', 'username profile.displayName profile.avatar');
+      .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType')
+      .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
+      .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar');
 
     const postsById = new Map(posts.map(post => [post._id.toString(), post]));
     const orderedPosts = savedEntries
@@ -874,9 +874,9 @@ const getLikedPosts = async (req, res) => {
 
     const [posts, total, user] = await Promise.all([
       Post.find({ isActive: true, 'likes.user': userId })
-        .populate('author', 'username profile.displayName profile.avatar userType')
-        .populate('likes.user', 'username profile.displayName profile.avatar')
-        .populate('comments.user', 'username profile.displayName profile.avatar')
+        .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType')
+        .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
+        .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar')
         .sort({ 'likes.likedAt': -1, createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -950,7 +950,7 @@ const updatePost = async (req, res) => {
     }
 
     await post.save();
-    await post.populate('author', 'username profile.displayName profile.avatar userType');
+    await post.populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType');
 
     res.status(200).json({
       success: true,

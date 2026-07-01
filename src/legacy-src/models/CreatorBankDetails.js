@@ -14,6 +14,13 @@ function encrypt(text) {
   return iv.toString('hex') + ':' + encrypted;
 }
 
+function hashValue(text) {
+  return crypto
+    .createHash('sha256')
+    .update(String(text || '').trim().toLowerCase())
+    .digest('hex');
+}
+
 function decrypt(encrypted) {
   if (!encrypted || !encrypted.includes(':')) return '';
   const [ivHex, encryptedText] = encrypted.split(':');
@@ -44,18 +51,64 @@ const creatorBankDetailsSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  accountNumberHash: {
+    type: String,
+    index: true
+  },
   ifsc: {
     type: String,
-    required: true,
     trim: true,
     uppercase: true,
     match: [/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC format']
+  },
+  swiftCode: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    maxlength: 11
   },
   bankName: {
     type: String,
     required: true,
     trim: true,
     maxlength: 200
+  },
+  branch: {
+    type: String,
+    trim: true,
+    maxlength: 200
+  },
+  upiId: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    maxlength: 100
+  },
+  paypalEmail: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    maxlength: 200
+  },
+  country: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    default: 'IN',
+    maxlength: 2
+  },
+  taxIdEncrypted: {
+    type: String
+  },
+  taxIdHash: {
+    type: String,
+    index: true
+  },
+  gstNumber: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    maxlength: 30
   },
   verificationStatus: {
     type: String,
@@ -81,5 +134,7 @@ creatorBankDetailsSchema.set('toObject', { virtuals: true });
 // Caller must encrypt account number before saving: use CreatorBankDetails.encryptAccountNumber(plain)
 creatorBankDetailsSchema.statics.encryptAccountNumber = encrypt;
 creatorBankDetailsSchema.statics.decryptAccountNumber = decrypt;
+creatorBankDetailsSchema.statics.encryptSensitiveValue = encrypt;
+creatorBankDetailsSchema.statics.hashSensitiveValue = hashValue;
 
 module.exports = mongoose.model('CreatorBankDetails', creatorBankDetailsSchema);

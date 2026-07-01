@@ -12,6 +12,9 @@ const setIoInstance = (ioInstance) => {
   io = ioInstance;
 };
 
+const sharedPostSelect = 'content.text content.media author likes comments shares createdAt postType';
+const sharedPostAuthorSelect = 'username profile.displayName profile.avatar profilePicture avatar profileImage avatarUrl userType role';
+
 function formatActivityStatus(lastSeen, showActivityStatus) {
   if (!showActivityStatus || !lastSeen) return null;
   const diffMs = Date.now() - new Date(lastSeen).getTime();
@@ -141,10 +144,9 @@ const sendDirectMessage = async (req, res) => {
       }
     }
 
-    // For shared post: use caption as text, or fallback to post URL (required for schema validation)
+    // For shared post: keep a schema-safe label without leaking raw post URLs into chat.
     if (sharedPostObj && !messageText.trim()) {
-      const baseUrl = (process.env.FRONTEND_URL || process.env.CLIENT_URL || 'https://www.squadhunt.in').replace(/\/+$/, '');
-      messageText = `${baseUrl}/post/${sharedPostId}`;
+      messageText = 'Shared a post';
     }
     // Ensure content.text is never empty when we have shared post (schema requires text if no media)
     if (sharedPostObj && !(messageText && messageText.trim())) {
@@ -192,7 +194,7 @@ const sendDirectMessage = async (req, res) => {
       { path: 'recipient', select: 'username profile.displayName profile.avatar' },
       { path: 'replyTo', select: 'content.text sender', populate: { path: 'sender', select: 'username profile.displayName' } },
       { path: 'forwardedFrom', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } },
-      { path: 'sharedPost', select: 'content.text content.media author', populate: { path: 'author', select: 'username profile.displayName profile.avatar' } },
+      { path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } },
       { path: 'sharedProfile', select: 'username profile.displayName profile.avatar profile.bio' }
     ]);
 
@@ -274,8 +276,8 @@ const getDirectMessages = async (req, res) => {
     .populate({ path: 'replyTo', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } })
     .populate('forwardedFrom', 'content.text content.media sender')
     .populate('forwardedFrom.sender', 'username profile.displayName profile.avatar')
-    .populate('sharedPost', 'content.text content.media author')
-    .populate('sharedPost.author', 'username profile.displayName profile.avatar')
+    .populate('sharedPost', sharedPostSelect)
+    .populate('sharedPost.author', sharedPostAuthorSelect)
     .populate('sharedProfile', 'username profile.displayName profile.avatar profile.bio')
     .populate('reactions.user', 'username profile.displayName')
     .sort({ createdAt: -1 })
@@ -742,8 +744,10 @@ const getRecentConversations = async (req, res) => {
 // Send group message
 const sendGroupMessage = async (req, res) => {
   try {
-    let { chatRoomId, text, replyTo, replyToId, forwardedFrom } = req.body;
+    let { chatRoomId, text, replyTo, replyToId, forwardedFrom, sharedPostId, sharedPostCaption } = req.body;
     replyTo = replyTo || replyToId;
+    text = text != null ? String(text) : '';
+    sharedPostId = sharedPostId != null ? (typeof sharedPostId === 'string' ? sharedPostId.trim() : String(sharedPostId)) : null;
     const senderId = req.user._id;
 
     // Check if user is member of the chat room
@@ -775,6 +779,15 @@ const sendGroupMessage = async (req, res) => {
     // Handle forwarded messages - get original message content
     let messageText = text || '';
     let mediaData = [];
+    let sharedPostObj = null;
+
+    if (sharedPostId) {
+      const post = await Post.findById(sharedPostId).select('_id author content').lean();
+      if (!post) {
+        return res.status(400).json({ success: false, message: 'Post not found' });
+      }
+      sharedPostObj = sharedPostId;
+    }
     
     if (forwardedFrom) {
       // Get the original message
@@ -806,13 +819,17 @@ const sendGroupMessage = async (req, res) => {
       }
     }
 
+    if (sharedPostObj && !messageText.trim()) {
+      messageText = 'Shared a post';
+    }
+
     // Create message
     const messageData = {
       sender: senderId,
       chatRoom: chatRoomId,
       messageType: 'group',
       content: {
-        text: messageText,
+        text: (sharedPostCaption && sharedPostCaption.trim()) ? sharedPostCaption.trim() : messageText,
         media: mediaData
       }
     };
@@ -823,6 +840,13 @@ const sendGroupMessage = async (req, res) => {
 
     if (forwardedFrom) {
       messageData.forwardedFrom = forwardedFrom;
+    }
+
+    if (sharedPostObj) {
+      messageData.sharedPost = sharedPostObj;
+      if (sharedPostCaption && sharedPostCaption.trim()) {
+        messageData.sharedPostCaption = sharedPostCaption.trim();
+      }
     }
 
     // Parse @mentions from message text
@@ -865,8 +889,11 @@ const sendGroupMessage = async (req, res) => {
       { path: 'sender', select: 'username profile.displayName profile.avatar' },
       { path: 'replyTo', select: 'content.text sender', populate: { path: 'sender', select: 'username profile.displayName' } },
       { path: 'forwardedFrom', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } },
+      { path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } },
       { path: 'mentions', select: 'username profile.displayName profile.avatar' }
     ]);
+
+    const messagePojo = message.toObject ? message.toObject() : message;
 
     // Send mention notifications
     if (mentionedUserIds.length > 0) {
@@ -896,7 +923,7 @@ const sendGroupMessage = async (req, res) => {
       if (process.env.NODE_ENV === 'development') { console.log('Emitting real-time group message to chat room:', chatRoomId);}
       io.to(`chat-${chatRoomId}`).emit('newMessage', {
         chatId: chatRoomId,
-        message: message
+        message: messagePojo
       });
       if (process.env.NODE_ENV === 'development') { console.log('Real-time group message emitted successfully');}
     } else {
@@ -907,7 +934,7 @@ const sendGroupMessage = async (req, res) => {
       success: true,
       message: 'Group message sent successfully',
       data: {
-        message
+        message: messagePojo
       }
     });
 
@@ -972,6 +999,8 @@ const getGroupMessages = async (req, res) => {
     .populate({ path: 'replyTo', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } })
     .populate('forwardedFrom', 'content.text content.media sender')
     .populate('forwardedFrom.sender', 'username profile.displayName profile.avatar')
+    .populate('sharedPost', sharedPostSelect)
+    .populate('sharedPost.author', sharedPostAuthorSelect)
     .populate('reactions.user', 'username profile.displayName')
     .populate('mentions', 'username profile.displayName profile.avatar')
     .sort({ createdAt: -1 })

@@ -16,11 +16,16 @@ const CreatorBankDetails = require('../models/CreatorBankDetails');
 const CreatorPayout = require('../models/CreatorPayout');
 const EarningsSnapshot = require('../models/EarningsSnapshot');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
+const PostEngagement = require('../models/PostEngagement');
+const PayoutCycle = require('../models/PayoutCycle');
+const MonetizationEligibility = require('../models/MonetizationEligibility');
+const CreatorEligibilityHistory = require('../models/CreatorEligibilityHistory');
+const MonetizationApplicationTimeline = require('../models/MonetizationApplicationTimeline');
 const HostVerificationApplication = require('../models/HostVerificationApplication');
 const mongoose = require('mongoose');
 const { createSystemNotification } = require('../utils/notificationService');
 const { invalidateUserCache } = require('../middleware/auth');
-const { PLATFORM_DEFAULT_CPM } = require('../services/CreatorEarningsCalculationService');
+const { PLATFORM_DEFAULT_CPM, getOrCreateCurrentCycle } = require('../services/CreatorEarningsCalculationService');
 const {
   applyManualDeliveryProgress,
   processDueManualBoostDeliveries,
@@ -920,6 +925,304 @@ const resetUserPassword = async (req, res) => {
 
 // --- Monetization (creator applications) ---
 
+const getMonetizationWindowStart = () => {
+  const start = new Date();
+  start.setDate(start.getDate() - 45);
+  return start;
+};
+
+const sumPostEngagementViews = async (source, sinceDate = null) => {
+  const match = { eventType: 'view', source };
+  if (sinceDate) match.createdAt = { $gte: sinceDate };
+  const rows = await PostEngagement.aggregate([
+    { $match: match },
+    { $group: { _id: null, views: { $sum: 1 } } }
+  ]);
+  return rows[0]?.views || 0;
+};
+
+const getCreatorStatsForUser = async (userId) => {
+  const [eligibility, bank, latestApplication, totalPayoutRows, pendingPayoutRows] = await Promise.all([
+    MonetizationEligibility.findOne({ user: userId }).lean(),
+    CreatorBankDetails.findOne({ user: userId })
+      .select('accountHolderName bankName ifsc swiftCode country lastFourDigits verificationStatus')
+      .lean(),
+    MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 }).lean(),
+    CreatorPayout.aggregate([
+      { $match: { user: new mongoose.Types.ObjectId(userId), status: { $in: ['paid', 'completed'] } } },
+      { $group: { _id: null, amount: { $sum: '$amount' } } }
+    ]),
+    CreatorPayout.aggregate([
+      { $match: { user: new mongoose.Types.ObjectId(userId), status: { $in: ['pending', 'approved', 'processing', 'held'] } } },
+      { $group: { _id: null, amount: { $sum: '$amount' } } }
+    ])
+  ]);
+
+  return {
+    eligibility: eligibility ? {
+      isEligible: eligibility.isEligible,
+      progressPercent: eligibility.progressPercent,
+      requirements: eligibility.requirements || [],
+      metrics: eligibility.metrics || {},
+      lastCalculatedAt: eligibility.lastCalculatedAt
+    } : null,
+    latestApplication: latestApplication ? {
+      _id: latestApplication._id,
+      status: latestApplication.status,
+      appliedAt: latestApplication.appliedAt,
+      reviewedAt: latestApplication.reviewedAt
+    } : null,
+    bankDetails: bank ? {
+      accountHolderName: bank.accountHolderName,
+      bankName: bank.bankName,
+      ifsc: bank.ifsc,
+      swiftCode: bank.swiftCode,
+      country: bank.country,
+      lastFourDigits: bank.lastFourDigits,
+      verificationStatus: bank.verificationStatus
+    } : null,
+    earnings: {
+      paid: totalPayoutRows[0]?.amount || 0,
+      pending: pendingPayoutRows[0]?.amount || 0
+    }
+  };
+};
+
+const recordMonetizationTimeline = async ({ applicationId, userId, action, actor, actorType = 'admin', reason = '', oldValue = null, newValue = null }) => {
+  if (!applicationId || !userId || !action) return;
+  await MonetizationApplicationTimeline.create({
+    application: applicationId,
+    user: userId,
+    action,
+    actor: actor || null,
+    actorType,
+    reason,
+    oldValue,
+    newValue
+  });
+};
+
+const csvEscape = (value) => {
+  const text = value == null ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const sendCsv = (res, filename, rows) => {
+  const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csv);
+};
+
+const getMonetizationSummary = async (req, res) => {
+  try {
+    const sinceDate = getMonetizationWindowStart();
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const [
+      totalEligibleCreators,
+      applicationsPending,
+      applicationsApproved,
+      applicationsRejected,
+      suspendedCreators,
+      creatorsCurrentlyMonetizing,
+      organicViews,
+      boostedViews,
+      monthlyRevenueRows,
+      creatorPayoutRows,
+      pendingPayoutRows,
+      platformRevenueRows
+    ] = await Promise.all([
+      MonetizationEligibility.countDocuments({ isEligible: true }),
+      MonetizationApplication.countDocuments({ status: 'pending' }),
+      MonetizationApplication.countDocuments({ status: 'approved' }),
+      MonetizationApplication.countDocuments({ status: 'rejected' }),
+      User.countDocuments({ userType: 'player', creatorMonetizationStatus: 'suspended' }),
+      User.countDocuments({ userType: 'player', isCreator: true, creatorMonetizationStatus: 'approved' }),
+      sumPostEngagementViews('organic', sinceDate),
+      sumPostEngagementViews('boost', sinceDate),
+      PaymentTransaction.aggregate([
+        { $match: { status: 'completed', type: { $in: ['boost', 'subscription'] }, createdAt: { $gte: monthStart } } },
+        { $group: { _id: null, amount: { $sum: '$amount' } } }
+      ]),
+      CreatorPayout.aggregate([
+        { $match: { status: { $in: ['paid', 'completed', 'processing', 'pending', 'approved'] } } },
+        { $group: { _id: '$status', amount: { $sum: '$amount' }, count: { $sum: 1 } } }
+      ]),
+      CreatorPayout.aggregate([
+        { $match: { status: { $in: ['pending', 'approved', 'processing', 'held'] } } },
+        { $group: { _id: null, amount: { $sum: '$amount' }, count: { $sum: 1 } } }
+      ]),
+      EarningsSnapshot.aggregate([
+        { $group: { _id: null, creatorAmount: { $sum: '$amount' } } }
+      ])
+    ]);
+
+    const creatorPayouts = creatorPayoutRows.reduce((acc, row) => {
+      acc[row._id] = { amount: row.amount, count: row.count };
+      return acc;
+    }, {});
+    const monthlyRevenue = monthlyRevenueRows[0]?.amount || 0;
+    const totalCreatorRevenue = platformRevenueRows[0]?.creatorAmount || 0;
+    const averageRpm = organicViews > 0 ? Math.round((totalCreatorRevenue / organicViews) * 1000 * 100) / 100 : 0;
+    const averageCreatorEarnings = creatorsCurrentlyMonetizing > 0
+      ? Math.round((totalCreatorRevenue / creatorsCurrentlyMonetizing) * 100) / 100
+      : 0;
+
+    res.json({
+      success: true,
+      data: {
+        totalEligibleCreators,
+        applicationsPending,
+        applicationsApproved,
+        applicationsRejected,
+        suspendedCreators,
+        creatorsCurrentlyMonetizing,
+        monthlyRevenue,
+        creatorPayouts,
+        pendingPayouts: pendingPayoutRows[0] || { amount: 0, count: 0 },
+        platformRevenue: Math.max(0, monthlyRevenue - totalCreatorRevenue),
+        creatorRevenue: totalCreatorRevenue,
+        organicViews,
+        boostedViews,
+        averageRpm,
+        averageCreatorEarnings
+      }
+    });
+  } catch (error) {
+    log.error('Get monetization summary error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to fetch monetization summary' });
+  }
+};
+
+const getCreatorAnalytics = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const sinceDate = getMonetizationWindowStart();
+    const user = await User.findById(userId)
+      .select('username email profile.displayName profile.avatar followers membership userType isCreator creatorMonetizationStatus creatorCpm')
+      .lean();
+    if (!user) return res.status(404).json({ success: false, message: 'Creator not found' });
+    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Creator analytics are only available for individual user accounts' });
+
+    const postIds = await Post.find({
+      author: userId,
+      isActive: true,
+      'content.media': { $elemMatch: { type: 'video' } }
+    }).select('_id content.text createdAt').lean();
+    const clipIds = postIds.map((post) => post._id);
+
+    const [viewRows, qualifiedClipRows, payoutRows, eligibilityHistory, timeline, stats] = await Promise.all([
+      clipIds.length ? PostEngagement.aggregate([
+        {
+          $match: {
+            post: { $in: clipIds },
+            eventType: 'view',
+            createdAt: { $gte: sinceDate }
+          }
+        },
+        { $group: { _id: '$source', views: { $sum: 1 } } }
+      ]) : [],
+      clipIds.length ? PostEngagement.aggregate([
+        {
+          $match: {
+            post: { $in: clipIds },
+            eventType: 'view',
+            source: 'organic',
+            createdAt: { $gte: sinceDate }
+          }
+        },
+        { $group: { _id: '$post', views: { $sum: 1 } } },
+        { $match: { views: { $gte: 3000 } } },
+        { $count: 'count' }
+      ]) : [],
+      CreatorPayout.find({ user: userId })
+        .populate('payoutCycle', 'cycleLabel startDate endDate')
+        .sort({ createdAt: -1 })
+        .limit(24)
+        .lean(),
+      CreatorEligibilityHistory.find({ user: userId })
+        .sort({ calculatedAt: -1 })
+        .limit(30)
+        .lean(),
+      MonetizationApplicationTimeline.find({ user: userId })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean(),
+      getCreatorStatsForUser(userId)
+    ]);
+
+    const viewsBySource = viewRows.reduce((acc, row) => {
+      acc[row._id || 'unknown'] = row.views;
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      data: {
+        creator: user,
+        followers: Array.isArray(user.followers) ? user.followers.length : 0,
+        organicViews45d: viewsBySource.organic || 0,
+        boostedViews45d: viewsBySource.boost || 0,
+        qualifiedClips45d: qualifiedClipRows[0]?.count || 0,
+        stats,
+        payoutHistory: payoutRows,
+        eligibilityHistory,
+        timeline
+      }
+    });
+  } catch (error) {
+    log.error('Get creator analytics error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to fetch creator analytics' });
+  }
+};
+
+const getCreatorBankDetailsForAdmin = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const [user, bank] = await Promise.all([
+      User.findById(userId).select('username userType profile.displayName').lean(),
+      CreatorBankDetails.findOne({ user: userId }).lean()
+    ]);
+    if (!user) return res.status(404).json({ success: false, message: 'Creator not found' });
+    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Bank details are only available for individual creator accounts' });
+    if (!bank) return res.status(404).json({ success: false, message: 'Bank details not found' });
+
+    res.locals.auditAfter = { userId, viewedCompleteBankDetails: true };
+    res.json({
+      success: true,
+      data: {
+        creator: {
+          _id: user._id,
+          username: user.username,
+          displayName: user.profile?.displayName || user.username
+        },
+        bankDetails: {
+          accountHolderName: bank.accountHolderName,
+          bankName: bank.bankName,
+          accountNumber: CreatorBankDetails.decryptAccountNumber(bank.accountNumberEncrypted),
+          ifsc: bank.ifsc,
+          swiftCode: bank.swiftCode,
+          branch: bank.branch,
+          upiId: bank.upiId,
+          paypalEmail: bank.paypalEmail,
+          country: bank.country,
+          panOrTaxId: bank.taxIdEncrypted ? CreatorBankDetails.decryptAccountNumber(bank.taxIdEncrypted) : '',
+          gstNumber: bank.gstNumber,
+          verificationStatus: bank.verificationStatus,
+          verifiedAt: bank.verifiedAt,
+          updatedAt: bank.updatedAt
+        }
+      }
+    });
+  } catch (error) {
+    log.error('Get creator bank details for admin error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to fetch creator bank details' });
+  }
+};
+
 const getMonetizationApplications = async (req, res) => {
   try {
     const { page = 1, limit = 20, status } = req.query;
@@ -927,7 +1230,7 @@ const getMonetizationApplications = async (req, res) => {
     if (status && status !== 'all') query.status = status;
 
     const applications = await MonetizationApplication.find(query)
-      .populate('user', 'username profile.displayName profile.avatar profile.bio email createdAt')
+      .populate('user', 'username profile.displayName profile.avatar profile.bio email userType createdAt')
       .sort({ appliedAt: -1 })
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit))
@@ -960,15 +1263,45 @@ const getMonetizationApplications = async (req, res) => {
         status: { $in: ['pending', 'action_taken'] }
       });
       const suspiciousViewSpike = Boolean(app?.eligibilitySnapshot?.metrics?.suspiciousViewSpike);
+      const timeline = await MonetizationApplicationTimeline.find({ application: app._id })
+        .sort({ createdAt: -1 })
+        .limit(25)
+        .lean();
+      const bankDetails = app.user?._id
+        ? await CreatorBankDetails.findOne({ user: app.user._id })
+            .select('accountHolderName bankName ifsc swiftCode country lastFourDigits verificationStatus')
+            .lean()
+        : null;
+      const metrics = app?.eligibilitySnapshot?.metrics || {};
       return {
         ...app,
         applicantStats: { followersCount, postCount, reportsAgainstUser },
+        creatorStats: {
+          followers: metrics.followersCount ?? followersCount,
+          organicViews45d: metrics.totalOrganicClipViews45d ?? 0,
+          boostedViews45d: metrics.totalBoostedClipViews45d ?? 0,
+          qualifiedClips45d: metrics.clipsWith3kOrganicViews45d ?? metrics.clipsWith3kViews45d ?? 0,
+          activeDays45d: metrics.activeDays45d ?? 0,
+          premiumStatus: Boolean(metrics.hasActivePremiumMembership),
+          country: bankDetails?.country || null,
+          email: app.user?.email || null
+        },
+        bankDetails: bankDetails ? {
+          accountHolderName: bankDetails.accountHolderName,
+          bankName: bankDetails.bankName,
+          ifsc: bankDetails.ifsc,
+          swiftCode: bankDetails.swiftCode,
+          country: bankDetails.country,
+          lastFourDigits: bankDetails.lastFourDigits,
+          verificationStatus: bankDetails.verificationStatus
+        } : null,
         contentSamples,
         fraudRiskIndicators: {
           highReportCount: reportsAgainstUser > 2,
           lowContent: postCount < 3,
           suspiciousViewSpike
-        }
+        },
+        timeline
       };
     }));
 
@@ -1000,12 +1333,28 @@ const approveMonetizationApplication = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Application is not pending' });
     }
 
+    const before = application.toObject();
     application.status = 'approved';
     application.reviewedAt = new Date();
     application.reviewedBy = adminId;
     await application.save();
 
-    await User.findByIdAndUpdate(application.user, { isCreator: true });
+    await User.findByIdAndUpdate(application.user, {
+      isCreator: true,
+      creatorMonetizationStatus: 'approved'
+    });
+    await invalidateUserCache(application.user);
+    await recordMonetizationTimeline({
+      applicationId: application._id,
+      userId: application.user,
+      action: 'approved',
+      actor: adminId,
+      reason: req.body?.adminRemark || '',
+      oldValue: { status: before.status },
+      newValue: { status: application.status }
+    });
+    res.locals.auditBefore = before;
+    res.locals.auditAfter = application.toObject();
 
     await createSystemNotification(
       application.user,
@@ -1039,6 +1388,7 @@ const rejectMonetizationApplication = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Application is not pending' });
     }
 
+    const before = application.toObject();
     const reapplyAfter = new Date();
     reapplyAfter.setDate(reapplyAfter.getDate() + (parseInt(cooldownDays) || 30));
 
@@ -1049,6 +1399,22 @@ const rejectMonetizationApplication = async (req, res) => {
     application.reviewedBy = adminId;
     application.reapplyAfter = reapplyAfter;
     await application.save();
+    await User.findByIdAndUpdate(application.user, {
+      isCreator: false,
+      creatorMonetizationStatus: 'rejected'
+    });
+    await invalidateUserCache(application.user);
+    await recordMonetizationTimeline({
+      applicationId: application._id,
+      userId: application.user,
+      action: 'rejected',
+      actor: adminId,
+      reason: application.rejectionReason,
+      oldValue: { status: before.status },
+      newValue: { status: application.status, reapplyAfter }
+    });
+    res.locals.auditBefore = before;
+    res.locals.auditAfter = application.toObject();
 
     await createSystemNotification(
       application.user,
@@ -1080,10 +1446,12 @@ const holdCreatorPayout = async (req, res) => {
     );
     if (snapshot) {
       await CreatorPayout.updateMany(
-        { user: userId, status: 'pending' },
+        { user: userId, status: { $in: ['pending', 'approved', 'processing'] } },
         { status: 'held', heldReason: reason || 'Under review' }
       );
     }
+    res.locals.auditBefore = { userId, reason };
+    res.locals.auditAfter = { userId, status: 'held' };
 
     await createSystemNotification(
       userId,
@@ -1109,19 +1477,24 @@ const getApprovedCreators = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
-    const creators = await User.find({ isCreator: true, isActive: true })
-      .select('username profile.displayName profile.avatar creatorCpm')
+    const creators = await User.find({ userType: 'player', isCreator: true, isActive: true })
+      .select('username profile.displayName profile.avatar creatorCpm creatorMonetizationStatus followers membership email')
       .sort({ createdAt: -1 })
       .limit(limit)
       .skip((page - 1) * limit)
       .lean();
 
-    const total = await User.countDocuments({ isCreator: true, isActive: true });
+    const enriched = await Promise.all(creators.map(async (creator) => ({
+      ...creator,
+      stats: await getCreatorStatsForUser(creator._id)
+    })));
+
+    const total = await User.countDocuments({ userType: 'player', isCreator: true, isActive: true });
 
     res.json({
       success: true,
       data: {
-        creators,
+        creators: enriched,
         pagination: { page, pages: Math.ceil(total / limit), total }
       }
     });
@@ -1137,10 +1510,32 @@ const revokeMonetization = async (req, res) => {
     const { userId } = req.params;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Only individual user accounts can use creator monetization' });
     if (!user.isCreator) return res.status(400).json({ success: false, message: 'User is not an approved creator' });
 
+    const before = user.toObject();
     user.isCreator = false;
+    user.creatorMonetizationStatus = 'disabled';
     await user.save();
+    const application = await MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 });
+    if (application) {
+      application.status = 'disabled';
+      application.reviewedAt = new Date();
+      application.reviewedBy = req.user._id;
+      await application.save();
+      await recordMonetizationTimeline({
+        applicationId: application._id,
+        userId,
+        action: 'disabled',
+        actor: req.user._id,
+        reason: req.body?.reason || 'Disabled by admin',
+        oldValue: { isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus },
+        newValue: { isCreator: false, creatorMonetizationStatus: 'disabled' }
+      });
+    }
+    await invalidateUserCache(userId);
+    res.locals.auditBefore = { userId, isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus };
+    res.locals.auditAfter = { userId, isCreator: user.isCreator, creatorMonetizationStatus: user.creatorMonetizationStatus };
 
     await createSystemNotification(
       userId,
@@ -1162,9 +1557,39 @@ const grantMonetization = async (req, res) => {
     const { userId } = req.params;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Only individual user accounts can use creator monetization' });
 
+    const before = user.toObject();
     user.isCreator = true;
+    user.creatorMonetizationStatus = 'approved';
     await user.save();
+    let application = await MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 });
+    if (!application) {
+      application = await MonetizationApplication.create({
+        user: userId,
+        status: 'approved',
+        reviewedAt: new Date(),
+        reviewedBy: req.user._id,
+        adminRemark: req.body?.reason || 'Granted by admin'
+      });
+    } else {
+      application.status = 'approved';
+      application.reviewedAt = new Date();
+      application.reviewedBy = req.user._id;
+      await application.save();
+    }
+    await recordMonetizationTimeline({
+      applicationId: application._id,
+      userId,
+      action: 'reactivated',
+      actor: req.user._id,
+      reason: req.body?.reason || 'Granted by admin',
+      oldValue: { isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus },
+      newValue: { isCreator: true, creatorMonetizationStatus: 'approved' }
+    });
+    await invalidateUserCache(userId);
+    res.locals.auditBefore = { userId, isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus };
+    res.locals.auditAfter = { userId, isCreator: user.isCreator, creatorMonetizationStatus: user.creatorMonetizationStatus };
 
     await createSystemNotification(
       userId,
@@ -1193,8 +1618,11 @@ const setCreatorCpm = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
+    const before = { userId, creatorCpm: user.creatorCpm };
     user.creatorCpm = cpm;
     await user.save();
+    res.locals.auditBefore = before;
+    res.locals.auditAfter = { userId, creatorCpm: user.creatorCpm };
 
     res.json({ success: true, message: 'CPM updated successfully', data: { userId, cpm } });
   } catch (error) {
@@ -1571,6 +1999,263 @@ const revokeHostVerification = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
+const listCreatorPayouts = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+    const query = {};
+    if (status && status !== 'all') query.status = status;
+
+    const payouts = await CreatorPayout.find(query)
+      .populate('user', 'username email profile.displayName profile.avatar')
+      .populate('payoutCycle', 'cycleLabel periodType startDate endDate')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .lean();
+
+    const enriched = await Promise.all(payouts.map(async (payout) => {
+      const bank = payout.user?._id
+        ? await CreatorBankDetails.findOne({ user: payout.user._id })
+            .select('accountHolderName bankName lastFourDigits ifsc swiftCode country verificationStatus')
+            .lean()
+        : null;
+      return { ...payout, bankDetails: bank || null };
+    }));
+
+    const total = await CreatorPayout.countDocuments(query);
+    res.json({
+      success: true,
+      data: {
+        payouts: enriched,
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    log.error('List creator payouts error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to fetch creator payouts' });
+  }
+};
+
+const updateCreatorPayoutStatus = async (req, res, nextStatus, fields = {}) => {
+  try {
+    const { id } = req.params;
+    const { reason = '', bankReference = '' } = req.body || {};
+    const payout = await CreatorPayout.findById(id);
+    if (!payout) return res.status(404).json({ success: false, message: 'Creator payout not found' });
+
+    const before = payout.toObject();
+    payout.status = nextStatus;
+    if (bankReference) payout.bankReference = bankReference;
+    Object.entries(fields).forEach(([key, value]) => {
+      payout[key] = typeof value === 'function' ? value(req) : value;
+    });
+    if (nextStatus === 'approved') {
+      payout.approvedAt = new Date();
+      payout.approvedBy = req.user._id;
+    }
+    if (nextStatus === 'processing') {
+      payout.processedAt = new Date();
+      payout.processedBy = req.user._id;
+    }
+    if (nextStatus === 'paid' || nextStatus === 'completed') {
+      payout.paidAt = new Date();
+      payout.paidBy = req.user._id;
+    }
+    if (nextStatus === 'failed' || nextStatus === 'rejected') {
+      payout.failureReason = reason || 'Rejected by admin';
+    }
+    if (nextStatus === 'cancelled') {
+      payout.cancelledAt = new Date();
+      payout.cancelledBy = req.user._id;
+      payout.cancellationReason = reason || 'Cancelled by admin';
+    }
+    await payout.save();
+
+    res.locals.auditBefore = before;
+    res.locals.auditAfter = payout.toObject();
+    await createSystemNotification(
+      payout.user,
+      'Creator Payout Updated',
+      `Your creator payout status is now ${payout.status}.`,
+      { type: 'creator_payout_updated', payoutId: payout._id, status: payout.status }
+    );
+
+    res.json({ success: true, message: `Payout marked ${nextStatus}`, data: { payout } });
+  } catch (error) {
+    log.error('Update creator payout error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to update creator payout' });
+  }
+};
+
+const approveCreatorPayout = (req, res) => updateCreatorPayoutStatus(req, res, 'approved');
+const markCreatorPayoutProcessing = (req, res) => updateCreatorPayoutStatus(req, res, 'processing');
+const markCreatorPayoutPaid = (req, res) => updateCreatorPayoutStatus(req, res, 'paid');
+const rejectCreatorPayout = (req, res) => updateCreatorPayoutStatus(req, res, 'rejected');
+const cancelCreatorPayout = (req, res) => updateCreatorPayoutStatus(req, res, 'cancelled');
+
+const exportCreatorPayoutsCsv = async (req, res) => {
+  try {
+    const { status } = req.query;
+    const query = {};
+    if (status && status !== 'all') query.status = status;
+    const payouts = await CreatorPayout.find(query)
+      .populate('user', 'username email profile.displayName')
+      .populate('payoutCycle', 'cycleLabel startDate endDate')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const rows = [
+      ['Creator', 'Username', 'Email', 'Cycle', 'Amount', 'Status', 'Bank Reference', 'Created At', 'Paid At']
+    ];
+    payouts.forEach((payout) => {
+      rows.push([
+        payout.user?.profile?.displayName || payout.user?.username || '',
+        payout.user?.username || '',
+        payout.user?.email || '',
+        payout.payoutCycle?.cycleLabel || '',
+        payout.amount,
+        payout.status,
+        payout.bankReference || '',
+        payout.createdAt ? new Date(payout.createdAt).toISOString() : '',
+        payout.paidAt ? new Date(payout.paidAt).toISOString() : ''
+      ]);
+    });
+    sendCsv(res, 'creator-payouts.csv', rows);
+  } catch (error) {
+    log.error('Export creator payouts error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to export creator payouts' });
+  }
+};
+
+const exportCreatorsCsv = async (req, res) => {
+  try {
+    const creators = await User.find({ userType: 'player', isCreator: true })
+      .select('username email profile.displayName creatorMonetizationStatus creatorCpm followers')
+      .sort({ createdAt: -1 })
+      .lean();
+    const rows = [
+      ['Creator', 'Username', 'Email', 'Status', 'Followers', 'CPM', 'Organic Views 45d', 'Boosted Views 45d', 'Qualified Clips', 'Active Days']
+    ];
+    for (const creator of creators) {
+      const eligibility = await MonetizationEligibility.findOne({ user: creator._id }).lean();
+      rows.push([
+        creator.profile?.displayName || creator.username,
+        creator.username,
+        creator.email || '',
+        creator.creatorMonetizationStatus || '',
+        Array.isArray(creator.followers) ? creator.followers.length : 0,
+        creator.creatorCpm || PLATFORM_DEFAULT_CPM,
+        eligibility?.metrics?.totalOrganicClipViews45d || 0,
+        eligibility?.metrics?.totalBoostedClipViews45d || 0,
+        eligibility?.metrics?.clipsWith3kOrganicViews45d || 0,
+        eligibility?.metrics?.activeDays45d || 0
+      ]);
+    }
+    sendCsv(res, 'creators.csv', rows);
+  } catch (error) {
+    log.error('Export creators error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to export creators' });
+  }
+};
+
+const suspendMonetization = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { reason = 'Suspended by admin' } = req.body || {};
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Only individual user accounts can use creator monetization' });
+
+    const before = user.toObject();
+    user.isCreator = false;
+    user.creatorMonetizationStatus = 'suspended';
+    await user.save();
+
+    const application = await MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 });
+    if (application) {
+      application.status = 'suspended';
+      application.adminRemark = String(reason).slice(0, 1000);
+      application.reviewedAt = new Date();
+      application.reviewedBy = req.user._id;
+      await application.save();
+      await recordMonetizationTimeline({
+        applicationId: application._id,
+        userId,
+        action: 'suspended',
+        actor: req.user._id,
+        reason,
+        oldValue: { isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus },
+        newValue: { isCreator: false, creatorMonetizationStatus: 'suspended' }
+      });
+    }
+
+    await invalidateUserCache(userId);
+    res.locals.auditBefore = { userId, isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus };
+    res.locals.auditAfter = { userId, isCreator: user.isCreator, creatorMonetizationStatus: user.creatorMonetizationStatus, reason };
+    await createSystemNotification(
+      userId,
+      'Creator Monetization Suspended',
+      String(reason),
+      { type: 'monetization_suspended' }
+    );
+    res.json({ success: true, message: 'Monetization suspended successfully' });
+  } catch (error) {
+    log.error('Suspend monetization error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to suspend monetization' });
+  }
+};
+
+const resumeMonetization = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { reason = 'Resumed by admin' } = req.body || {};
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Only individual user accounts can use creator monetization' });
+
+    const before = user.toObject();
+    user.isCreator = true;
+    user.creatorMonetizationStatus = 'approved';
+    await user.save();
+
+    const application = await MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 });
+    if (application) {
+      application.status = 'approved';
+      application.adminRemark = String(reason).slice(0, 1000);
+      application.reviewedAt = new Date();
+      application.reviewedBy = req.user._id;
+      await application.save();
+      await recordMonetizationTimeline({
+        applicationId: application._id,
+        userId,
+        action: 'resumed',
+        actor: req.user._id,
+        reason,
+        oldValue: { isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus },
+        newValue: { isCreator: true, creatorMonetizationStatus: 'approved' }
+      });
+    }
+
+    await invalidateUserCache(userId);
+    res.locals.auditBefore = { userId, isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus };
+    res.locals.auditAfter = { userId, isCreator: user.isCreator, creatorMonetizationStatus: user.creatorMonetizationStatus, reason };
+    await createSystemNotification(
+      userId,
+      'Creator Monetization Reactivated',
+      'Your creator monetization access has been reactivated.',
+      { type: 'monetization_reactivated' }
+    );
+    res.json({ success: true, message: 'Monetization resumed successfully' });
+  } catch (error) {
+    log.error('Resume monetization error:', { error: String(error) });
+    res.status(500).json({ success: false, message: 'Failed to resume monetization' });
+  }
+};
+
+const disableMonetization = revokeMonetization;
 
 const getAuditLogs = async (req, res) => {
   try {
@@ -2245,18 +2930,32 @@ module.exports = {
   resetUserPassword,
   getReports,
   updateReport,
+  getMonetizationSummary,
   getMonetizationApplications,
   approveMonetizationApplication,
   rejectMonetizationApplication,
   holdCreatorPayout,
+  getCreatorAnalytics,
+  getCreatorBankDetailsForAdmin,
   getApprovedCreators,
   revokeMonetization,
   grantMonetization,
+  suspendMonetization,
+  resumeMonetization,
+  disableMonetization,
   setCreatorCpm,
   getCreatorCpm,
   listWithdrawalRequests,
   approveWithdrawalRequest,
   rejectWithdrawalRequest,
+  listCreatorPayouts,
+  approveCreatorPayout,
+  markCreatorPayoutProcessing,
+  markCreatorPayoutPaid,
+  rejectCreatorPayout,
+  cancelCreatorPayout,
+  exportCreatorPayoutsCsv,
+  exportCreatorsCsv,
   getHostVerificationApplications,
   approveHostVerificationApplication,
   rejectHostVerificationApplication,

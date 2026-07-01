@@ -369,9 +369,9 @@ async function findWatchedClipIds(userId) {
 
 async function fetchCandidates(filter, { limit, page, cursor }) {
   const query = Post.find(filter)
-    .populate('author', 'username profile.displayName profile.avatar userType privacySettings.accountType')
-    .populate('likes.user', 'username profile.displayName profile.avatar')
-    .populate('comments.user', 'username profile.displayName profile.avatar')
+    .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType privacySettings.accountType')
+    .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
+    .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar')
     .sort({ createdAt: -1, _id: -1 })
     .limit(Math.max(limit * CANDIDATE_MULTIPLIER, limit + 1));
 

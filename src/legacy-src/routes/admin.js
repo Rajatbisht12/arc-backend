@@ -1,5 +1,5 @@
 const express = require('express');
-const { requireAdminWithAuth, requireSuperAdmin, auditLog } = require('../middleware/adminAuth');
+const { requireAdminWithAuth, requireSuperAdmin, requireAdminPermission, auditLog } = require('../middleware/adminAuth');
 const { 
   getDashboardStats, 
   getUserAnalytics, 
@@ -15,18 +15,32 @@ const {
   resetUserPassword,
   getReports,
   updateReport,
+  getMonetizationSummary,
   getMonetizationApplications,
   approveMonetizationApplication,
   rejectMonetizationApplication,
   holdCreatorPayout,
+  getCreatorAnalytics,
+  getCreatorBankDetailsForAdmin,
   getApprovedCreators,
   revokeMonetization,
   grantMonetization,
+  suspendMonetization,
+  resumeMonetization,
+  disableMonetization,
   setCreatorCpm,
   getCreatorCpm,
   listWithdrawalRequests,
   approveWithdrawalRequest,
   rejectWithdrawalRequest,
+  listCreatorPayouts,
+  approveCreatorPayout,
+  markCreatorPayoutProcessing,
+  markCreatorPayoutPaid,
+  rejectCreatorPayout,
+  cancelCreatorPayout,
+  exportCreatorPayoutsCsv,
+  exportCreatorsCsv,
   getHostVerificationApplications,
   approveHostVerificationApplication,
   rejectHostVerificationApplication,
@@ -64,24 +78,40 @@ router.get('/reports', auditLog('VIEW_REPORTS'), getReports);
 router.put('/reports/:reportId', auditLog('UPDATE_REPORT'), updateReport);
 
 // Monetization (creator applications)
-router.get('/monetization/applications', auditLog('VIEW_MONETIZATION_APPLICATIONS'), getMonetizationApplications);
-router.post('/monetization/applications/:applicationId/approve', auditLog('APPROVE_MONETIZATION'), approveMonetizationApplication);
-router.post('/monetization/applications/:applicationId/reject', auditLog('REJECT_MONETIZATION'), rejectMonetizationApplication);
-router.post('/monetization/payout-hold/:userId', auditLog('HOLD_CREATOR_PAYOUT'), holdCreatorPayout);
+router.get('/monetization/summary', auditLog('VIEW_MONETIZATION_SUMMARY'), requireAdminPermission('monetization:manage'), getMonetizationSummary);
+router.get('/monetization/applications', auditLog('VIEW_MONETIZATION_APPLICATIONS'), requireAdminPermission('monetization:manage'), getMonetizationApplications);
+router.post('/monetization/applications/:applicationId/approve', auditLog('APPROVE_MONETIZATION'), requireSuperAdmin, approveMonetizationApplication);
+router.post('/monetization/applications/:applicationId/reject', auditLog('REJECT_MONETIZATION'), requireSuperAdmin, rejectMonetizationApplication);
+router.post('/monetization/payout-hold/:userId', auditLog('HOLD_CREATOR_PAYOUT'), requireSuperAdmin, holdCreatorPayout);
 
 // Creator management
-router.get('/monetization/creators', getApprovedCreators);
-router.post('/monetization/revoke/:userId', revokeMonetization);
-router.post('/monetization/grant/:userId', grantMonetization);
+router.get('/monetization/creators/export.csv', auditLog('EXPORT_CREATORS'), requireAdminPermission('monetization:manage'), exportCreatorsCsv);
+router.get('/monetization/creators/:userId/bank-details', auditLog('VIEW_CREATOR_BANK_DETAILS'), requireSuperAdmin, getCreatorBankDetailsForAdmin);
+router.get('/monetization/creators/:userId/analytics', auditLog('VIEW_CREATOR_ANALYTICS'), requireAdminPermission('monetization:manage'), getCreatorAnalytics);
+router.get('/monetization/creators', auditLog('VIEW_CREATORS'), requireAdminPermission('monetization:manage'), getApprovedCreators);
+router.post('/monetization/revoke/:userId', auditLog('REVOKE_MONETIZATION'), requireSuperAdmin, revokeMonetization);
+router.post('/monetization/grant/:userId', auditLog('GRANT_MONETIZATION'), requireSuperAdmin, grantMonetization);
+router.post('/monetization/suspend/:userId', auditLog('SUSPEND_MONETIZATION'), requireSuperAdmin, suspendMonetization);
+router.post('/monetization/resume/:userId', auditLog('RESUME_MONETIZATION'), requireSuperAdmin, resumeMonetization);
+router.post('/monetization/disable/:userId', auditLog('DISABLE_MONETIZATION'), requireSuperAdmin, disableMonetization);
 
 // Per-creator CPM
-router.put('/monetization/cpm/:userId', setCreatorCpm);
-router.get('/monetization/cpm/:userId', getCreatorCpm);
+router.put('/monetization/cpm/:userId', auditLog('SET_CREATOR_CPM'), requireSuperAdmin, setCreatorCpm);
+router.get('/monetization/cpm/:userId', auditLog('VIEW_CREATOR_CPM'), requireAdminPermission('monetization:manage'), getCreatorCpm);
 
 // Withdrawal requests
-router.get('/monetization/withdrawal-requests', listWithdrawalRequests);
-router.post('/monetization/withdrawal-requests/:id/approve', approveWithdrawalRequest);
-router.post('/monetization/withdrawal-requests/:id/reject', rejectWithdrawalRequest);
+router.get('/monetization/withdrawal-requests', auditLog('VIEW_WITHDRAWALS'), requireAdminPermission('monetization:manage'), listWithdrawalRequests);
+router.post('/monetization/withdrawal-requests/:id/approve', auditLog('APPROVE_WITHDRAWAL'), requireSuperAdmin, approveWithdrawalRequest);
+router.post('/monetization/withdrawal-requests/:id/reject', auditLog('REJECT_WITHDRAWAL'), requireSuperAdmin, rejectWithdrawalRequest);
+
+// Creator payouts
+router.get('/monetization/payouts/export.csv', auditLog('EXPORT_CREATOR_PAYOUTS'), requireAdminPermission('monetization:manage'), exportCreatorPayoutsCsv);
+router.get('/monetization/payouts', auditLog('VIEW_CREATOR_PAYOUTS'), requireAdminPermission('monetization:manage'), listCreatorPayouts);
+router.post('/monetization/payouts/:id/approve', auditLog('APPROVE_CREATOR_PAYOUT'), requireSuperAdmin, approveCreatorPayout);
+router.post('/monetization/payouts/:id/processing', auditLog('PROCESS_CREATOR_PAYOUT'), requireSuperAdmin, markCreatorPayoutProcessing);
+router.post('/monetization/payouts/:id/paid', auditLog('MARK_CREATOR_PAYOUT_PAID'), requireSuperAdmin, markCreatorPayoutPaid);
+router.post('/monetization/payouts/:id/reject', auditLog('REJECT_CREATOR_PAYOUT'), requireSuperAdmin, rejectCreatorPayout);
+router.post('/monetization/payouts/:id/cancel', auditLog('CANCEL_CREATOR_PAYOUT'), requireSuperAdmin, cancelCreatorPayout);
 
 // Host verification applications
 router.get('/host-verification/applications', auditLog('VIEW_HOST_VERIFICATION_APPLICATIONS'), getHostVerificationApplications);

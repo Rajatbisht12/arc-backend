@@ -531,7 +531,7 @@ const getUser = async (req, res) => {
       isActive: true,
       visibility: { $in: ['public', 'followers'] }
     })
-    .populate('author', 'username profile.displayName profile.avatar userType')
+    .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType')
     .sort({ createdAt: -1 })
     .limit(5);
 
@@ -843,9 +843,9 @@ const getUserPosts = async (req, res) => {
       isActive: true,
       visibility: { $in: visibilityFilter }
     })
-    .populate('author', 'username profile.displayName profile.avatar userType')
-    .populate('likes.user', 'username profile.displayName profile.avatar')
-    .populate('comments.user', 'username profile.displayName profile.avatar')
+    .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType')
+    .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
+    .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit);
@@ -920,9 +920,9 @@ const getUserClips = async (req, res) => {
     };
 
     const posts = await Post.find(filter)
-      .populate('author', 'username profile.displayName profile.avatar userType')
-      .populate('likes.user', 'username profile.displayName profile.avatar')
-      .populate('comments.user', 'username profile.displayName profile.avatar')
+      .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType')
+      .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
+      .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);

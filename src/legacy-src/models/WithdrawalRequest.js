@@ -7,14 +7,18 @@ const withdrawalRequestSchema = new Schema({
   amount: { type: Number, required: true, min: 0 },
   status: {
     type: String,
-    enum: ['pending', 'approved', 'rejected'],
+    enum: ['pending', 'approved', 'processing', 'paid', 'completed', 'failed', 'cancelled', 'rejected'],
     default: 'pending',
     index: true
   },
   requestedAt: { type: Date, default: Date.now },
   bankReference: { type: String, default: '', maxlength: 100 },
   rejectionReason: { type: String, default: '', maxlength: 500 },
+  failureReason: { type: String, default: '', maxlength: 500 },
+  cancellationReason: { type: String, default: '', maxlength: 500 },
   paidAt: { type: Date },
+  processedAt: { type: Date },
+  cancelledAt: { type: Date },
   reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
 
