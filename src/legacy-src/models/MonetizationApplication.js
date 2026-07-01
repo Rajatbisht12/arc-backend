@@ -12,7 +12,7 @@ const monetizationApplicationSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'approved', 'rejected'],
+    enum: ['pending', 'approved', 'rejected', 'suspended', 'disabled', 'withdrawn'],
     default: 'pending',
     index: true
   },
@@ -46,14 +46,26 @@ const monetizationApplicationSchema = new mongoose.Schema({
       condition: String,
       current: mongoose.Schema.Types.Mixed,
       required: mongoose.Schema.Types.Mixed,
-      progressPercent: Number
+      progressPercent: Number,
+      isMet: Boolean
+    }],
+    requirements: [{
+      condition: String,
+      current: mongoose.Schema.Types.Mixed,
+      required: mongoose.Schema.Types.Mixed,
+      progressPercent: Number,
+      isMet: Boolean
     }],
     metrics: {
       followersCount: Number,
-      totalWatchTimeMinutes: Number,
-      originalContentRatio: Number,
-      accountAgeDays: Number,
-      hasPolicyViolations: Boolean
+      hasActivePremiumMembership: Boolean,
+      totalOrganicClipViews45d: Number,
+      totalBoostedClipViews45d: Number,
+      clipsWith3kOrganicViews45d: Number,
+      activeDays45d: Number,
+      creatorHealthScore: Number,
+      suspiciousViewSpike: Boolean,
+      policyViolations: Number
     }
   },
   /** Cooldown: cannot re-apply until this date (set on reject) */

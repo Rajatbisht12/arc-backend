@@ -10,9 +10,57 @@ const CreatorPayout = require('../models/CreatorPayout');
 const PayoutCycle = require('../models/PayoutCycle');
 const Post = require('../models/Post');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
+const MonetizationApplicationTimeline = require('../models/MonetizationApplicationTimeline');
 const { getOrComputeEligibility } = require('../services/MonetizationEligibilityEngine');
 const { getEstimatedEarningsForCreator, getOrCreateCurrentCycle } = require('../services/CreatorEarningsCalculationService');
 const log = require('../utils/logger');
+
+function normalizeCountry(country) {
+  return String(country || 'IN').trim().toUpperCase().slice(0, 2);
+}
+
+function maskBankDetails(bank) {
+  if (!bank) return null;
+  return {
+    accountHolderName: bank.accountHolderName,
+    bankName: bank.bankName,
+    ifsc: bank.ifsc,
+    swiftCode: bank.swiftCode,
+    branch: bank.branch,
+    upiId: bank.upiId,
+    paypalEmail: bank.paypalEmail,
+    country: bank.country || 'IN',
+    gstNumber: bank.gstNumber,
+    lastFourDigits: bank.lastFourDigits,
+    hasTaxId: Boolean(bank.taxIdEncrypted || bank.taxIdHash),
+    verificationStatus: bank.verificationStatus
+  };
+}
+
+function deriveCreatorStatus({ user, eligibility, application }) {
+  const explicitStatus = user?.creatorMonetizationStatus;
+  if (explicitStatus === 'suspended' || explicitStatus === 'disabled') return explicitStatus;
+  if (user?.isCreator) return 'approved';
+  if (application?.status === 'pending') return 'pending';
+  if (application?.status === 'rejected') return 'rejected';
+  if (application?.status === 'withdrawn') return eligibility?.isEligible ? 'eligible' : 'withdrawn';
+  if (eligibility?.isEligible) return 'eligible';
+  return 'not_eligible';
+}
+
+async function recordTimeline({ application, user, action, actor = null, actorType = 'creator', reason = '', oldValue = null, newValue = null }) {
+  if (!application || !user || !action) return;
+  await MonetizationApplicationTimeline.create({
+    application,
+    user,
+    action,
+    actor,
+    actorType,
+    reason,
+    oldValue,
+    newValue
+  });
+}
 
 // Only players can be creators
 async function assertPlayer(req, res, next) {
@@ -38,6 +86,7 @@ async function getEligibility(req, res) {
       data: {
         isEligible: eligibility.isEligible,
         failedConditions: eligibility.failedConditions,
+        requirements: eligibility.requirements || [],
         progressPercent: eligibility.progressPercent,
         metrics: eligibility.metrics,
         lastCalculatedAt: eligibility.lastCalculatedAt
@@ -128,12 +177,23 @@ async function applyForMonetization(req, res) {
     const application = await MonetizationApplication.create({
       user: userId,
       status: 'pending',
-      eligibilitySnapshot: {
-        isEligible: eligibility.isEligible,
-        progressPercent: eligibility.progressPercent,
-        failedConditions: eligibility.failedConditions,
-        metrics: eligibility.metrics
-      }
+          eligibilitySnapshot: {
+            isEligible: eligibility.isEligible,
+            progressPercent: eligibility.progressPercent,
+            failedConditions: eligibility.failedConditions,
+            requirements: eligibility.requirements || [],
+            metrics: eligibility.metrics
+          }
+    });
+
+    await User.findByIdAndUpdate(userId, { creatorMonetizationStatus: 'pending' });
+    await recordTimeline({
+      application: application._id,
+      user: userId,
+      action: 'applied',
+      actor: userId,
+      actorType: 'creator',
+      newValue: { status: 'pending', eligibilitySnapshot: application.eligibilitySnapshot }
     });
 
     res.status(201).json({
@@ -153,14 +213,83 @@ async function applyForMonetization(req, res) {
 }
 
 /**
+ * POST /api/monetization/application/withdraw
+ * Withdraw the current pending application.
+ */
+async function withdrawApplication(req, res) {
+  try {
+    const userId = req.user._id;
+    const { reason = '' } = req.body || {};
+    const application = await MonetizationApplication.findOne({ user: userId, status: 'pending' }).sort({ appliedAt: -1 });
+    if (!application) {
+      return res.status(404).json({ success: false, message: 'No pending application found to withdraw.' });
+    }
+
+    const before = application.toObject();
+    application.status = 'withdrawn';
+    application.adminRemark = String(reason || '').slice(0, 1000);
+    application.reviewedAt = new Date();
+    await application.save();
+
+    const eligibility = await getOrComputeEligibility(userId, true);
+    await User.findByIdAndUpdate(userId, {
+      creatorMonetizationStatus: eligibility?.isEligible ? 'eligible' : 'withdrawn'
+    });
+    await recordTimeline({
+      application: application._id,
+      user: userId,
+      action: 'withdrawn',
+      actor: userId,
+      actorType: 'creator',
+      reason,
+      oldValue: { status: before.status },
+      newValue: { status: application.status }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Application withdrawn successfully.',
+      data: { application: { _id: application._id, status: application.status } }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to withdraw application', error: err.message });
+  }
+}
+
+/**
+ * GET /api/monetization/application/history
+ */
+async function getApplicationHistory(req, res) {
+  try {
+    const userId = req.user._id;
+    const [applications, timeline] = await Promise.all([
+      MonetizationApplication.find({ user: userId })
+        .sort({ appliedAt: -1 })
+        .select('status adminRemark rejectionReason appliedAt reviewedAt reapplyAfter eligibilitySnapshot')
+        .lean(),
+      MonetizationApplicationTimeline.find({ user: userId })
+        .sort({ createdAt: -1 })
+        .limit(100)
+        .lean()
+    ]);
+    res.status(200).json({
+      success: true,
+      data: { applications, timeline }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to get application history', error: err.message });
+  }
+}
+
+/**
  * GET /api/monetization/dashboard
  * Earnings dashboard for approved creators: estimated earnings, payout history, next payout, bank status.
  */
 async function getDashboard(req, res) {
   try {
     const userId = req.user._id;
-    const user = await User.findById(userId).select('isCreator').lean();
-    if (!user?.isCreator) {
+    const user = await User.findById(userId).select('isCreator creatorMonetizationStatus').lean();
+    if (!user?.isCreator || user.creatorMonetizationStatus === 'suspended' || user.creatorMonetizationStatus === 'disabled') {
       return res.status(403).json({
         success: false,
         message: 'Monetization not enabled for your account. Apply and get approved first.'
@@ -182,7 +311,7 @@ async function getDashboard(req, res) {
       .lean();
 
     const bank = await CreatorBankDetails.findOne({ user: userId })
-      .select('accountHolderName ifsc bankName lastFourDigits verificationStatus')
+      .select('accountHolderName ifsc swiftCode branch upiId paypalEmail country taxIdEncrypted taxIdHash gstNumber bankName lastFourDigits verificationStatus')
       .lean();
 
     res.status(200).json({
@@ -212,16 +341,43 @@ async function getDashboard(req, res) {
           bankReference: p.bankReference,
           failureReason: p.failureReason
         })),
-        bankDetails: bank ? {
-          accountHolderName: bank.accountHolderName,
-          bankName: bank.bankName,
-          lastFourDigits: bank.lastFourDigits,
-          verificationStatus: bank.verificationStatus
-        } : null
+        bankDetails: maskBankDetails(bank)
       }
     });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Failed to get dashboard', error: err.message });
+  }
+}
+
+async function getEarnings(req, res) {
+  return getDashboard(req, res);
+}
+
+async function getPayoutHistory(req, res) {
+  try {
+    const userId = req.user._id;
+    const [payouts, withdrawals] = await Promise.all([
+      CreatorPayout.find({ user: userId })
+        .populate('payoutCycle', 'cycleLabel periodType startDate endDate')
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean(),
+      WithdrawalRequest.find({ user: userId })
+        .populate('payoutCycle', 'cycleLabel periodType startDate endDate')
+        .sort({ requestedAt: -1 })
+        .limit(50)
+        .lean()
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        payouts,
+        withdrawalRequests: withdrawals
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to get payout history', error: err.message });
   }
 }
 
@@ -233,7 +389,7 @@ async function getBankDetails(req, res) {
   try {
     const userId = req.user._id;
     const bank = await CreatorBankDetails.findOne({ user: userId })
-      .select('accountHolderName ifsc bankName lastFourDigits verificationStatus')
+      .select('accountHolderName ifsc swiftCode branch upiId paypalEmail country taxIdEncrypted taxIdHash gstNumber bankName lastFourDigits verificationStatus')
       .lean();
     if (!bank) {
       return res.status(200).json({ success: true, data: { bankDetails: null } });
@@ -241,13 +397,7 @@ async function getBankDetails(req, res) {
     res.status(200).json({
       success: true,
       data: {
-        bankDetails: {
-          accountHolderName: bank.accountHolderName,
-          bankName: bank.bankName,
-          ifsc: bank.ifsc,
-          lastFourDigits: bank.lastFourDigits,
-          verificationStatus: bank.verificationStatus
-        }
+        bankDetails: maskBankDetails(bank)
       }
     });
   } catch (err) {
@@ -262,17 +412,47 @@ async function getBankDetails(req, res) {
 async function upsertBankDetails(req, res) {
   try {
     const userId = req.user._id;
-    const { accountHolderName, accountNumber, ifsc, bankName } = req.body || {};
+    const {
+      accountHolderName,
+      accountNumber,
+      accountNumberConfirm,
+      ifsc,
+      swiftCode,
+      bankName,
+      branch,
+      upiId,
+      paypalEmail,
+      country,
+      taxId,
+      pan,
+      gstNumber
+    } = req.body || {};
+    const normalizedCountry = normalizeCountry(country);
+    const normalizedAccountNumber = String(accountNumber || '').replace(/\s/g, '');
+    const normalizedAccountNumberConfirm = String(accountNumberConfirm || '').replace(/\s/g, '');
 
-    if (!accountHolderName || !accountNumber || !ifsc || !bankName) {
+    if (!accountHolderName || !normalizedAccountNumber || !bankName) {
       return res.status(400).json({
         success: false,
-        message: 'accountHolderName, accountNumber, ifsc, and bankName are required.'
+        message: 'accountHolderName, accountNumber, and bankName are required.'
       });
     }
+    if (normalizedAccountNumberConfirm && normalizedAccountNumberConfirm !== normalizedAccountNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'Account number confirmation does not match.'
+      });
+    }
+    if (normalizedCountry === 'IN' && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(String(ifsc || '').trim().toUpperCase())) {
+      return res.status(400).json({ success: false, message: 'A valid IFSC code is required for Indian payout accounts.' });
+    }
+    if (normalizedCountry !== 'IN' && !String(swiftCode || '').trim()) {
+      return res.status(400).json({ success: false, message: 'SWIFT code is required for international payout accounts.' });
+    }
 
-    const encrypted = CreatorBankDetails.encryptAccountNumber(accountNumber.replace(/\s/g, ''));
-    const lastFour = String(accountNumber).replace(/\D/g, '').slice(-4);
+    const encrypted = CreatorBankDetails.encryptAccountNumber(normalizedAccountNumber);
+    const lastFour = normalizedAccountNumber.replace(/\D/g, '').slice(-4);
+    const taxValue = String(taxId || pan || '').trim();
 
     const bank = await CreatorBankDetails.findOneAndUpdate(
       { user: userId },
@@ -280,8 +460,17 @@ async function upsertBankDetails(req, res) {
         user: userId,
         accountHolderName: accountHolderName.trim(),
         accountNumberEncrypted: encrypted,
-        ifsc: String(ifsc).trim().toUpperCase(),
+        accountNumberHash: CreatorBankDetails.hashSensitiveValue(normalizedAccountNumber),
+        ifsc: String(ifsc || '').trim() ? String(ifsc).trim().toUpperCase() : undefined,
+        swiftCode: String(swiftCode || '').trim() ? String(swiftCode).trim().toUpperCase() : undefined,
         bankName: bankName.trim(),
+        branch: String(branch || '').trim() || undefined,
+        upiId: String(upiId || '').trim().toLowerCase() || undefined,
+        paypalEmail: String(paypalEmail || '').trim().toLowerCase() || undefined,
+        country: normalizedCountry,
+        taxIdEncrypted: taxValue ? CreatorBankDetails.encryptSensitiveValue(taxValue) : undefined,
+        taxIdHash: taxValue ? CreatorBankDetails.hashSensitiveValue(taxValue) : undefined,
+        gstNumber: String(gstNumber || '').trim() ? String(gstNumber).trim().toUpperCase() : undefined,
         lastFourDigits: lastFour,
         verificationStatus: 'pending'
       },
@@ -293,16 +482,25 @@ async function upsertBankDetails(req, res) {
       message: 'Bank details saved. They will be verified before payouts.',
       data: {
         bankDetails: {
-          accountHolderName: bank.accountHolderName,
-          bankName: bank.bankName,
-          ifsc: bank.ifsc,
-          lastFourDigits: bank.lastFourDigits,
-          verificationStatus: bank.verificationStatus
+          ...maskBankDetails(bank)
         }
       }
     });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Failed to save bank details', error: err.message });
+  }
+}
+
+async function deleteBankDetails(req, res) {
+  try {
+    const userId = req.user._id;
+    await CreatorBankDetails.deleteOne({ user: userId });
+    res.status(200).json({
+      success: true,
+      message: 'Bank details deleted successfully.'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to delete bank details', error: err.message });
   }
 }
 
@@ -315,12 +513,13 @@ async function getMonetizationStatus(req, res) {
     const userId = req.user._id;
     // forceRecalculate: true so cached eligibility is refreshed (testing: low thresholds apply)
     const [user, eligibility, application] = await Promise.all([
-      User.findById(userId).select('isCreator').lean(),
+      User.findById(userId).select('isCreator creatorMonetizationStatus').lean(),
       getOrComputeEligibility(userId, true),
       MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 }).lean()
     ]);
 
-    const isApproved = user?.isCreator === true;
+    const creatorStatus = deriveCreatorStatus({ user, eligibility, application });
+    const isApproved = creatorStatus === 'approved';
     const applicationStatus = application?.status || null;
     const reapplyAfter = application?.reapplyAfter || null;
     const rejectionReason = application?.rejectionReason || '';
@@ -330,12 +529,14 @@ async function getMonetizationStatus(req, res) {
       data: {
         isEligible: eligibility?.isEligible ?? false,
         isApproved,
+        creatorStatus,
         applicationStatus,
         reapplyAfter,
         rejectionReason,
         failedConditions: eligibility?.failedConditions ?? [],
         progressPercent: eligibility?.progressPercent ?? 0,
         metrics: eligibility?.metrics ?? {},
+        requirements: eligibility?.requirements ?? [],
         lastCalculatedAt: eligibility?.lastCalculatedAt,
         application: application ? {
           _id: application._id,
@@ -426,9 +627,14 @@ module.exports = {
   getEligibility,
   getApplication,
   applyForMonetization,
+  withdrawApplication,
+  getApplicationHistory,
   getDashboard,
+  getEarnings,
+  getPayoutHistory,
   getBankDetails,
   upsertBankDetails,
+  deleteBankDetails,
   getMonetizationStatus,
   submitWithdrawalRequest
 };

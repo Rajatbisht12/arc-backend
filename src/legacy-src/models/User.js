@@ -93,6 +93,12 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  creatorMonetizationStatus: {
+    type: String,
+    enum: ['not_eligible', 'eligible', 'pending', 'approved', 'rejected', 'suspended', 'disabled', 'withdrawn'],
+    default: 'not_eligible',
+    index: true
+  },
   creatorCpm: {
     type: Number,
     default: null,

@@ -3,6 +3,41 @@
  * Securely strips out sensitive data before sending it to the client.
  */
 
+const firstNonEmptyString = (...values) => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+};
+
+const normalizeUserAvatarFields = (dto) => {
+  if (!dto || typeof dto !== 'object') return dto;
+  const avatar = firstNonEmptyString(
+    dto.profile?.avatar,
+    dto.profile?.profilePicture,
+    dto.profileImage,
+    dto.avatarUrl,
+    dto.profilePicture,
+    dto.avatar,
+    dto.picture,
+    dto.photoURL
+  );
+
+  if (!dto.profile || typeof dto.profile !== 'object') {
+    dto.profile = {};
+  }
+
+  if (avatar) {
+    dto.profile.avatar = avatar;
+    dto.profilePicture = avatar;
+    dto.avatar = avatar;
+    dto.profileImage = avatar;
+    dto.avatarUrl = avatar;
+  }
+
+  return dto;
+};
+
 const formatUserDTO = (user, isGuest = false, isSelf = false) => {
   if (!user) return null;
   
@@ -10,6 +45,8 @@ const formatUserDTO = (user, isGuest = false, isSelf = false) => {
   const dto = typeof user.toObject === 'function' 
     ? user.toObject({ virtuals: true }) 
     : JSON.parse(JSON.stringify(user));
+
+  normalizeUserAvatarFields(dto);
 
   // ALWAYS remove these highly sensitive fields from ANY response
   delete dto.password;

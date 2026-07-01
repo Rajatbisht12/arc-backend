@@ -8,10 +8,15 @@ router.use(monetizationController.assertPlayer);
 
 router.get("/eligibility", monetizationController.getEligibility);
 router.get("/application", monetizationController.getApplication);
+router.get("/application/history", monetizationController.getApplicationHistory);
 router.post("/apply", monetizationController.applyForMonetization);
+router.post("/application/withdraw", monetizationController.withdrawApplication);
 router.get("/dashboard", monetizationController.getDashboard);
+router.get("/earnings", monetizationController.getEarnings);
+router.get("/payout-history", monetizationController.getPayoutHistory);
 router.get("/bank-details", monetizationController.getBankDetails);
 router.put("/bank-details", monetizationController.upsertBankDetails);
+router.delete("/bank-details", monetizationController.deleteBankDetails);
 router.get("/status", monetizationController.getMonetizationStatus);
 router.post("/withdrawal-request", protect, monetizationController.assertPlayer, monetizationController.submitWithdrawalRequest);
 

@@ -376,6 +376,7 @@ async function createBoostOrder(req, res) {
       success: true,
       data: {
         orderId: order.id,
+        keyId: process.env.RAZORPAY_KEY_ID,
         campaignId: campaign._id,
         amount: order.amount,
         currency: order.currency,
@@ -385,8 +386,21 @@ async function createBoostOrder(req, res) {
       }
     });
   } catch (error) {
-    console.error('Error creating boost order:', error);
-    res.status(500).json({ success: false, message: 'Failed to create payment order' });
+    console.error('Error creating boost order:', {
+      message: error?.message || String(error),
+      postId: req.body?.postId,
+      userId: req.user?._id
+    });
+
+    if (String(error?.message || '').includes('RAZORPAY_KEY_ID')) {
+      return res.status(503).json({
+        success: false,
+        code: 'PAYMENT_GATEWAY_NOT_CONFIGURED',
+        message: 'Payment gateway is not configured. Please contact support.'
+      });
+    }
+
+    res.status(500).json({ success: false, code: 'BOOST_ORDER_CREATE_FAILED', message: 'Failed to create payment order' });
   }
 }
 
