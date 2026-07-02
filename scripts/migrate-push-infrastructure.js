@@ -178,7 +178,13 @@ const verifyIndexes = async (Model) => {
       JSON.stringify(normalizeObject(options.partialFilterExpression || null)) &&
     Number(index.expireAfterSeconds ?? -1) === Number(options.expireAfterSeconds ?? -1)
   ));
-  if (missing.length) throw new Error(`${Model.modelName} is missing ${missing.length} declared index(es)`);
+  if (missing.length) {
+    for (const [key, options] of missing) {
+      console.error(`missing declared index on ${Model.modelName}: key=${JSON.stringify(key)} options=${JSON.stringify({ unique: options.unique, sparse: options.sparse, partialFilterExpression: options.partialFilterExpression, expireAfterSeconds: options.expireAfterSeconds })}`);
+    }
+    console.error(`actual ${Model.modelName} indexes: ${JSON.stringify(actual.map((index) => ({ name: index.name, key: index.key, unique: index.unique, sparse: index.sparse, partialFilterExpression: index.partialFilterExpression, expireAfterSeconds: index.expireAfterSeconds })))}`);
+    throw new Error(`${Model.modelName} is missing ${missing.length} declared index(es)`);
+  }
   console.log(`verified ${Model.modelName}: ${Model.schema.indexes().length} declared indexes`);
 };
 

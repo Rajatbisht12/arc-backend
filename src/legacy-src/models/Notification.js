@@ -116,7 +116,10 @@ notificationSchema.index({ recipient: 1, createdAt: -1 });
 notificationSchema.index({ recipient: 1, isRead: 1 });
 notificationSchema.index({ recipient: 1, deletedAt: 1, archivedAt: 1, createdAt: -1 });
 notificationSchema.index({ type: 1, createdAt: -1 });
-notificationSchema.index({ broadcastRecipient: 1 }, { unique: true, sparse: true });
+notificationSchema.index(
+  { broadcastRecipient: 1 },
+  { unique: true, partialFilterExpression: { broadcastRecipient: { $type: 'objectId' } } }
+);
 notificationSchema.index({ 'data.broadcastId': 1, createdAt: -1 });
 notificationSchema.index({ pushDeliveryState: 1, pushDeliveryNextAttemptAt: 1, pushDeliveryLeaseAt: 1 });
 notificationSchema.index(
@@ -233,4 +236,5 @@ notificationSchema.methods.markAsRead = async function() {
   return await this.save();
 };
 
-module.exports = mongoose.model('Notification', notificationSchema);
+module.exports = mongoose.models.Notification ||
+  mongoose.model('Notification', notificationSchema);
