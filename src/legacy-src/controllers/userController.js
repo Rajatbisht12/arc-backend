@@ -76,7 +76,7 @@ const getUsers = async (req, res) => {
     }
 
     // If searching for followers, filter to only show users that the current user follows
-    if (followers === 'true' && req.user) {
+    if (followers === 'true' && req.user && !isGuest) {
       const followedIds = await Follow.find({ follower: req.user._id }).distinct('following');
       if (followedIds.length > 0) {
         filter._id = { $in: followedIds };
@@ -325,7 +325,13 @@ const getUser = async (req, res) => {
     const { identifier } = req.params;
 
     // ── Redis profile cache (only anonymous views; logged-in views include viewer-specific relationship data) ──
-    const requestingUserId = req.user?._id?.toString?.() || req.user?._id || null;
+    // Guest JWTs carry a non-Mongo installation-scoped id. They are anonymous
+    // viewers for profile/privacy purposes and must never be used in ObjectId
+    // queries (FollowRequest/User.findById would otherwise throw a CastError).
+    const isGuest = !req.user || req.user.userType === 'guest';
+    const requestingUserId = isGuest
+      ? null
+      : req.user?._id?.toString?.() || req.user?._id || null;
     const cacheKey = profileCacheKey(identifier);
     if (!requestingUserId) {
       const cached = await getJson(cacheKey);
@@ -351,7 +357,7 @@ const getUser = async (req, res) => {
     }
 
     // If profile owner has blocked the requesting user, don't show profile
-    if (req.user && user.blockedUsers?.length) {
+    if (!isGuest && req.user && user.blockedUsers?.length) {
       const blockedIds = user.blockedUsers.map(id => id.toString());
       if (blockedIds.includes(req.user._id.toString())) {
         return res.status(404).json({
@@ -361,13 +367,15 @@ const getUser = async (req, res) => {
       }
     }
 
-    const privacyRelationship = await resolvePrivacyAccess({ viewer: req.user, targetUser: user });
+    const privacyRelationship = await resolvePrivacyAccess({
+      viewer: isGuest ? null : req.user,
+      targetUser: user
+    });
     if (privacyRelationship.blocked) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    const isGuest = !req.user || req.user.userType === 'guest';
     const isSelf = privacyRelationship.isSelf;
-    const pendingFollowRequest = !isSelf && req.user?._id
+    const pendingFollowRequest = !isGuest && !isSelf && req.user?._id
       ? await FollowRequest.exists({ requester: req.user._id, target: user._id, status: 'pending' })
       : null;
 
@@ -617,7 +625,7 @@ const getUser = async (req, res) => {
       : [];
 
     let isBlockedByMe = false;
-    if (req.user) {
+    if (!isGuest && req.user) {
       const current = await User.findById(req.user._id).select('blockedUsers').lean();
       if (current?.blockedUsers?.length) {
         isBlockedByMe = current.blockedUsers.some(id => id.toString() === user._id.toString());
@@ -1064,7 +1072,11 @@ const getUserPosts = async (req, res) => {
     }
 
     const userId = user._id.toString();
-    const relationship = await resolvePrivacyAccess({ viewer: req.user, targetUser: user });
+    const isGuestViewer = !req.user || req.user.userType === 'guest';
+    const relationship = await resolvePrivacyAccess({
+      viewer: isGuestViewer ? null : req.user,
+      targetUser: user
+    });
     if (!relationship.access.canViewPosts) {
       return privacyDenied(res, user, relationship.access, 'Posts are not available for this account');
     }
@@ -1094,7 +1106,7 @@ const getUserPosts = async (req, res) => {
       visibility: { $in: visibilityFilter }
     });
 
-    const isGuest = req.user && req.user.userType === 'guest';
+    const isGuest = isGuestViewer;
 
     res.status(200).json({
       success: true,
@@ -1143,7 +1155,11 @@ const getUserClips = async (req, res) => {
     }
 
     const userId = user._id.toString();
-    const relationship = await resolvePrivacyAccess({ viewer: req.user, targetUser: user });
+    const isGuestViewer = !req.user || req.user.userType === 'guest';
+    const relationship = await resolvePrivacyAccess({
+      viewer: isGuestViewer ? null : req.user,
+      targetUser: user
+    });
     if (!relationship.access.canViewClips) {
       return privacyDenied(res, user, relationship.access, 'Clips are not available for this account');
     }
@@ -1169,7 +1185,7 @@ const getUserClips = async (req, res) => {
 
     const total = await Post.countDocuments(filter);
 
-    const isGuest = req.user && req.user.userType === 'guest';
+    const isGuest = isGuestViewer;
 
     res.status(200).json({
       success: true,
