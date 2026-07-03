@@ -4,16 +4,11 @@ const safeAsyncHandler = (handler) => {
     try {
       await handler(req, res, next);
     } catch (error) {
-      console.error(`🚨 Random Connection Error in ${handler.name || 'unknown'}:`, error);
-      
-      // Don't crash the server, just log and send error response
-      if (!res.headersSent) {
-        res.status(500).json({
-          success: false,
-          message: 'Internal server error occurred',
-          error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
-        });
-      }
+      console.error(`Unhandled API error in ${handler.name || 'anonymous handler'}:`, error);
+      if (res.headersSent) return next(error);
+      // Preserve the original error. The global error middleware maps known
+      // Mongoose/parser/auth failures to their recoverable HTTP status.
+      return next(error);
     }
   };
 };

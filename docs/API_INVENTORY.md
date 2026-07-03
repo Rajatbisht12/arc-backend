@@ -1,0 +1,523 @@
+# API Inventory
+
+Generated from the mounted Express routers on 2026-07-03T06:00:18.619Z.
+
+- HTTP endpoints: **443**
+- Socket event handlers/emissions: **61**
+- Access classes: `admin`: 110, `authenticated`: 284, `authenticated-onboarding`: 4, `public`: 23, `public-optional-auth`: 9, `user-or-guest`: 13
+
+> This is a static registration inventory. Runtime health and behavioral coverage are reported separately; inclusion here does not imply an endpoint has a live-database integration test.
+
+## HTTP endpoints
+
+| Method | Path | Access | Source |
+|---|---|---|---|
+| GET | `/` | public | `src/app.ts:64` |
+| GET | `/api/admin/activities` | admin | `src/modules/admin/admin.routes.ts:61` |
+| GET | `/api/admin/analytics/users` | admin | `src/modules/admin/admin.routes.ts:59` |
+| GET | `/api/admin/audit-logs` | admin | `src/modules/admin/admin.routes.ts:62` |
+| POST | `/api/admin/auth/login` | public | `src/modules/admin/admin-login.routes.ts:33` |
+| GET | `/api/admin/boost-campaigns` | admin | `src/modules/admin/admin.routes.ts:77` |
+| PATCH | `/api/admin/boost-campaigns/:campaignId/delivery/adjust` | admin | `src/modules/admin/admin.routes.ts:82` |
+| POST | `/api/admin/boost-campaigns/:campaignId/delivery/configure` | admin | `src/modules/admin/admin.routes.ts:80` |
+| POST | `/api/admin/boost-campaigns/:campaignId/delivery/control` | admin | `src/modules/admin/admin.routes.ts:81` |
+| POST | `/api/admin/boost-campaigns/:campaignId/manual-delivery` | admin | `src/modules/admin/admin.routes.ts:79` |
+| PUT | `/api/admin/boost-campaigns/:campaignId/status` | admin | `src/modules/admin/admin.routes.ts:83` |
+| GET | `/api/admin/boost-delivery` | admin | `src/modules/admin/admin.routes.ts:78` |
+| GET | `/api/admin/broadcast-templates` | admin | `src/modules/admin/broadcast-template.routes.ts:25` |
+| POST | `/api/admin/broadcast-templates` | admin | `src/modules/admin/broadcast-template.routes.ts:26` |
+| DELETE | `/api/admin/broadcast-templates/:id` | admin | `src/modules/admin/broadcast-template.routes.ts:28` |
+| PATCH | `/api/admin/broadcast-templates/:id` | admin | `src/modules/admin/broadcast-template.routes.ts:27` |
+| GET | `/api/admin/broadcasts` | admin | `src/modules/admin/broadcast.routes.ts:37` |
+| POST | `/api/admin/broadcasts` | admin | `src/modules/admin/broadcast.routes.ts:38` |
+| DELETE | `/api/admin/broadcasts/:id` | admin | `src/modules/admin/broadcast.routes.ts:41` |
+| GET | `/api/admin/broadcasts/:id` | admin | `src/modules/admin/broadcast.routes.ts:39` |
+| PATCH | `/api/admin/broadcasts/:id` | admin | `src/modules/admin/broadcast.routes.ts:40` |
+| GET | `/api/admin/broadcasts/:id/analytics` | admin | `src/modules/admin/broadcast.routes.ts:47` |
+| POST | `/api/admin/broadcasts/:id/cancel` | admin | `src/modules/admin/broadcast.routes.ts:46` |
+| POST | `/api/admin/broadcasts/:id/duplicate` | admin | `src/modules/admin/broadcast.routes.ts:42` |
+| POST | `/api/admin/broadcasts/:id/preview` | admin | `src/modules/admin/broadcast.routes.ts:43` |
+| GET | `/api/admin/broadcasts/:id/recipients` | admin | `src/modules/admin/broadcast.routes.ts:48` |
+| POST | `/api/admin/broadcasts/:id/retry-failed` | admin | `src/modules/admin/broadcast.routes.ts:45` |
+| POST | `/api/admin/broadcasts/:id/send` | admin | `src/modules/admin/broadcast.routes.ts:44` |
+| GET | `/api/admin/broadcasts/dashboard` | admin | `src/modules/admin/broadcast.routes.ts:34` |
+| GET | `/api/admin/broadcasts/delivery-logs` | admin | `src/modules/admin/broadcast.routes.ts:35` |
+| POST | `/api/admin/broadcasts/preview` | admin | `src/modules/admin/broadcast.routes.ts:36` |
+| GET | `/api/admin/dashboard` | admin | `src/modules/admin/admin.routes.ts:57` |
+| GET | `/api/admin/health` | admin | `src/modules/admin/admin.routes.ts:60` |
+| GET | `/api/admin/host-verification/applications` | admin | `src/modules/admin/admin.routes.ts:110` |
+| POST | `/api/admin/host-verification/applications/:id/approve` | admin | `src/modules/admin/admin.routes.ts:111` |
+| POST | `/api/admin/host-verification/applications/:id/reject` | admin | `src/modules/admin/admin.routes.ts:117` |
+| POST | `/api/admin/host-verification/revoke/:userId` | admin | `src/modules/admin/admin.routes.ts:124` |
+| GET | `/api/admin/host-verification/verified-hosts` | admin | `src/modules/admin/admin.routes.ts:123` |
+| GET | `/api/admin/monetization/applications` | admin | `src/modules/admin/admin.routes.ts:85` |
+| POST | `/api/admin/monetization/applications/:applicationId/approve` | admin | `src/modules/admin/admin.routes.ts:86` |
+| POST | `/api/admin/monetization/applications/:applicationId/reject` | admin | `src/modules/admin/admin.routes.ts:87` |
+| GET | `/api/admin/monetization/cpm/:userId` | admin | `src/modules/admin/admin.routes.ts:99` |
+| PUT | `/api/admin/monetization/cpm/:userId` | admin | `src/modules/admin/admin.routes.ts:98` |
+| GET | `/api/admin/monetization/creators` | admin | `src/modules/admin/admin.routes.ts:92` |
+| GET | `/api/admin/monetization/creators/:userId/analytics` | admin | `src/modules/admin/admin.routes.ts:91` |
+| GET | `/api/admin/monetization/creators/:userId/bank-details` | admin | `src/modules/admin/admin.routes.ts:90` |
+| GET | `/api/admin/monetization/creators/export.csv` | admin | `src/modules/admin/admin.routes.ts:89` |
+| POST | `/api/admin/monetization/disable/:userId` | admin | `src/modules/admin/admin.routes.ts:97` |
+| POST | `/api/admin/monetization/grant/:userId` | admin | `src/modules/admin/admin.routes.ts:94` |
+| POST | `/api/admin/monetization/payout-hold/:userId` | admin | `src/modules/admin/admin.routes.ts:88` |
+| GET | `/api/admin/monetization/payouts` | admin | `src/modules/admin/admin.routes.ts:104` |
+| POST | `/api/admin/monetization/payouts/:id/approve` | admin | `src/modules/admin/admin.routes.ts:105` |
+| POST | `/api/admin/monetization/payouts/:id/cancel` | admin | `src/modules/admin/admin.routes.ts:109` |
+| POST | `/api/admin/monetization/payouts/:id/paid` | admin | `src/modules/admin/admin.routes.ts:107` |
+| POST | `/api/admin/monetization/payouts/:id/processing` | admin | `src/modules/admin/admin.routes.ts:106` |
+| POST | `/api/admin/monetization/payouts/:id/reject` | admin | `src/modules/admin/admin.routes.ts:108` |
+| GET | `/api/admin/monetization/payouts/export.csv` | admin | `src/modules/admin/admin.routes.ts:103` |
+| POST | `/api/admin/monetization/resume/:userId` | admin | `src/modules/admin/admin.routes.ts:96` |
+| POST | `/api/admin/monetization/revoke/:userId` | admin | `src/modules/admin/admin.routes.ts:93` |
+| GET | `/api/admin/monetization/summary` | admin | `src/modules/admin/admin.routes.ts:84` |
+| POST | `/api/admin/monetization/suspend/:userId` | admin | `src/modules/admin/admin.routes.ts:95` |
+| GET | `/api/admin/monetization/withdrawal-requests` | admin | `src/modules/admin/admin.routes.ts:100` |
+| POST | `/api/admin/monetization/withdrawal-requests/:id/approve` | admin | `src/modules/admin/admin.routes.ts:101` |
+| POST | `/api/admin/monetization/withdrawal-requests/:id/reject` | admin | `src/modules/admin/admin.routes.ts:102` |
+| GET | `/api/admin/posts` | admin | `src/modules/admin/admin.routes.ts:71` |
+| DELETE | `/api/admin/posts/:postId` | admin | `src/modules/admin/admin.routes.ts:72` |
+| GET | `/api/admin/premium-memberships` | admin | `src/modules/admin/premium-membership.routes.ts:23` |
+| GET | `/api/admin/premium-memberships/:id` | admin | `src/modules/admin/premium-membership.routes.ts:28` |
+| POST | `/api/admin/premium-memberships/:id/auto-renew` | admin | `src/modules/admin/premium-membership.routes.ts:34` |
+| POST | `/api/admin/premium-memberships/:id/cancel` | admin | `src/modules/admin/premium-membership.routes.ts:31` |
+| POST | `/api/admin/premium-memberships/:id/change-plan` | admin | `src/modules/admin/premium-membership.routes.ts:30` |
+| POST | `/api/admin/premium-memberships/:id/extend` | admin | `src/modules/admin/premium-membership.routes.ts:29` |
+| GET | `/api/admin/premium-memberships/:id/login-history` | admin | `src/modules/admin/premium-membership.routes.ts:27` |
+| GET | `/api/admin/premium-memberships/:id/payments` | admin | `src/modules/admin/premium-membership.routes.ts:25` |
+| POST | `/api/admin/premium-memberships/:id/reconcile` | admin | `src/modules/admin/premium-membership.routes.ts:36` |
+| POST | `/api/admin/premium-memberships/:id/refund` | admin | `src/modules/admin/premium-membership.routes.ts:35` |
+| POST | `/api/admin/premium-memberships/:id/remove` | admin | `src/modules/admin/premium-membership.routes.ts:32` |
+| POST | `/api/admin/premium-memberships/:id/resume` | admin | `src/modules/admin/premium-membership.routes.ts:33` |
+| GET | `/api/admin/premium-memberships/:id/timeline` | admin | `src/modules/admin/premium-membership.routes.ts:26` |
+| GET | `/api/admin/premium-memberships/dashboard` | admin | `src/modules/admin/premium-membership.routes.ts:21` |
+| GET | `/api/admin/premium-memberships/eligible-users` | admin | `src/modules/admin/premium-membership.routes.ts:22` |
+| POST | `/api/admin/premium-memberships/grant` | admin | `src/modules/admin/premium-membership.routes.ts:24` |
+| GET | `/api/admin/push/deliveries` | admin | `src/modules/admin/push.routes.ts:287` |
+| GET | `/api/admin/push/devices` | admin | `src/modules/admin/push.routes.ts:191` |
+| GET | `/api/admin/push/requests` | admin | `src/modules/admin/push.routes.ts:147` |
+| POST | `/api/admin/push/test` | admin | `src/modules/admin/push.routes.ts:378` |
+| GET | `/api/admin/push/voip-deliveries` | admin | `src/modules/admin/push.routes.ts:335` |
+| GET | `/api/admin/reports` | admin | `src/modules/admin/admin.routes.ts:75` |
+| PUT | `/api/admin/reports/:reportId` | admin | `src/modules/admin/admin.routes.ts:76` |
+| GET | `/api/admin/search` | admin | `src/modules/admin/admin.routes.ts:58` |
+| GET | `/api/admin/tournaments` | admin | `src/modules/admin/admin.routes.ts:73` |
+| DELETE | `/api/admin/tournaments/:tournamentId` | admin | `src/modules/admin/admin.routes.ts:74` |
+| GET | `/api/admin/users` | admin | `src/modules/admin/admin.routes.ts:63` |
+| DELETE | `/api/admin/users/:userId` | admin | `src/modules/admin/admin.routes.ts:70` |
+| PUT | `/api/admin/users/:userId/controls` | admin | `src/modules/admin/admin.routes.ts:66` |
+| GET | `/api/admin/users/:userId/inspection` | admin | `src/modules/admin/admin.routes.ts:64` |
+| POST | `/api/admin/users/:userId/premium/grant` | admin | `src/modules/admin/admin.routes.ts:67` |
+| POST | `/api/admin/users/:userId/premium/remove` | admin | `src/modules/admin/admin.routes.ts:68` |
+| PUT | `/api/admin/users/:userId/reset-password` | admin | `src/modules/admin/admin.routes.ts:69` |
+| PUT | `/api/admin/users/:userId/status` | admin | `src/modules/admin/admin.routes.ts:65` |
+| GET | `/api/ai-coach/analytics` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:39` |
+| POST | `/api/ai-coach/analyze` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:60` |
+| GET | `/api/ai-coach/cache/stats` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:57` |
+| POST | `/api/ai-coach/chat` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:8` |
+| DELETE | `/api/ai-coach/conversation/:conversationId` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:54` |
+| GET | `/api/ai-coach/conversation/:conversationId` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:45` |
+| PUT | `/api/ai-coach/conversation/:conversationId/rename` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:46` |
+| POST | `/api/ai-coach/multiple` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:11` |
+| POST | `/api/ai-coach/rate` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:28` |
+| GET | `/api/ai-coach/status` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:22` |
+| GET | `/api/ai-coach/suggestions` | authenticated | `src/modules/ai-coach/ai-coach.routes.ts:25` |
+| POST | `/api/ai-recruitment/analyze-application` | authenticated | `src/modules/ai-recruitment/ai-recruitment.routes.ts:44` |
+| POST | `/api/ai-recruitment/generate-post` | authenticated | `src/modules/ai-recruitment/ai-recruitment.routes.ts:53` |
+| POST | `/api/ai-recruitment/generate-questions` | authenticated | `src/modules/ai-recruitment/ai-recruitment.routes.ts:56` |
+| POST | `/api/ai-recruitment/match-players` | authenticated | `src/modules/ai-recruitment/ai-recruitment.routes.ts:41` |
+| POST | `/api/ai-recruitment/rank-candidates` | authenticated | `src/modules/ai-recruitment/ai-recruitment.routes.ts:59` |
+| POST | `/api/ai-recruitment/smart-search` | authenticated | `src/modules/ai-recruitment/ai-recruitment.routes.ts:28` |
+| DELETE | `/api/auth/account` | authenticated | `src/modules/auth/auth.routes.ts:177` |
+| POST | `/api/auth/apple/mobile` | public | `src/modules/auth/auth.routes.ts:183` |
+| PUT | `/api/auth/change-password` | authenticated | `src/modules/auth/auth.routes.ts:176` |
+| GET | `/api/auth/check-email` | public | `src/modules/auth/auth.routes.ts:156` |
+| POST | `/api/auth/check-password-same` | authenticated | `src/modules/auth/auth.routes.ts:161` |
+| GET | `/api/auth/check-username` | public | `src/modules/auth/auth.routes.ts:155` |
+| POST | `/api/auth/complete-google-profile` | authenticated-onboarding | `src/modules/auth/auth.routes.ts:180` |
+| POST | `/api/auth/complete-profile` | authenticated-onboarding | `src/modules/auth/auth.routes.ts:179` |
+| GET | `/api/auth/google` | public | `src/modules/auth/auth.routes.ts:185` |
+| GET | `/api/auth/google/callback` | public | `src/modules/auth/auth.routes.ts:188` |
+| GET | `/api/auth/google/mobile` | public | `src/modules/auth/auth.routes.ts:187` |
+| POST | `/api/auth/google/token` | public | `src/modules/auth/auth.routes.ts:182` |
+| POST | `/api/auth/guest-token` | public | `src/modules/auth/auth.routes.ts:171` |
+| POST | `/api/auth/login` | public | `src/modules/auth/auth.routes.ts:170` |
+| POST | `/api/auth/logout` | authenticated-onboarding | `src/modules/auth/auth.routes.ts:178` |
+| GET | `/api/auth/me` | authenticated-onboarding | `src/modules/auth/auth.routes.ts:172` |
+| PUT | `/api/auth/profile` | authenticated | `src/modules/auth/auth.routes.ts:173` |
+| POST | `/api/auth/register` | public | `src/modules/auth/auth.routes.ts:169` |
+| POST | `/api/auth/reset-password-otp` | public | `src/modules/auth/auth.routes.ts:160` |
+| POST | `/api/auth/send-otp` | public | `src/modules/auth/auth.routes.ts:157` |
+| POST | `/api/auth/upload-banner` | authenticated | `src/modules/auth/auth.routes.ts:175` |
+| POST | `/api/auth/upload-profile-picture` | authenticated | `src/modules/auth/auth.routes.ts:174` |
+| POST | `/api/auth/verify-otp-login` | public | `src/modules/auth/auth.routes.ts:159` |
+| POST | `/api/auth/verify-otp-register` | public | `src/modules/auth/auth.routes.ts:158` |
+| POST | `/api/calls/accept` | authenticated | `src/legacy-src/routes/calls.js:53` |
+| POST | `/api/calls/end` | authenticated | `src/legacy-src/routes/calls.js:69` |
+| POST | `/api/calls/group-token` | authenticated | `src/legacy-src/routes/calls.js:90` |
+| POST | `/api/calls/initiate` | authenticated | `src/legacy-src/routes/calls.js:44` |
+| POST | `/api/calls/reject` | authenticated | `src/legacy-src/routes/calls.js:61` |
+| GET | `/api/calls/sessions/:callId` | authenticated | `src/legacy-src/routes/calls.js:84` |
+| POST | `/api/calls/sessions/:callId/accept` | authenticated | `src/legacy-src/routes/calls.js:85` |
+| POST | `/api/calls/sessions/:callId/decline` | authenticated | `src/legacy-src/routes/calls.js:86` |
+| POST | `/api/calls/sessions/:callId/end` | authenticated | `src/legacy-src/routes/calls.js:87` |
+| GET | `/api/calls/sessions/pending` | authenticated | `src/legacy-src/routes/calls.js:83` |
+| POST | `/api/calls/token` | authenticated | `src/legacy-src/routes/calls.js:41` |
+| GET | `/api/challenges` | public-optional-auth | `src/modules/challenges/challenges.routes.ts:59` |
+| POST | `/api/challenges` | authenticated | `src/modules/challenges/challenges.routes.ts:63` |
+| DELETE | `/api/challenges/:id` | authenticated | `src/modules/challenges/challenges.routes.ts:67` |
+| GET | `/api/challenges/:id` | public-optional-auth | `src/modules/challenges/challenges.routes.ts:62` |
+| PUT | `/api/challenges/:id` | authenticated | `src/modules/challenges/challenges.routes.ts:66` |
+| POST | `/api/challenges/:id/distribute-rewards` | authenticated | `src/modules/challenges/challenges.routes.ts:68` |
+| POST | `/api/challenges/:id/join` | authenticated | `src/modules/challenges/challenges.routes.ts:64` |
+| PUT | `/api/challenges/:id/progress` | authenticated | `src/modules/challenges/challenges.routes.ts:65` |
+| GET | `/api/challenges/my/challenges` | authenticated | `src/modules/challenges/challenges.routes.ts:60` |
+| GET | `/api/challenges/my/participations` | authenticated | `src/modules/challenges/challenges.routes.ts:61` |
+| GET | `/api/chat/:chatId/messages` | authenticated | `src/modules/chat/chat.routes.ts:7` |
+| POST | `/api/chat/messages` | authenticated | `src/modules/chat/chat.routes.ts:8` |
+| GET | `/api/feedback` | admin | `src/modules/feedback/feedback.routes.ts:41` |
+| POST | `/api/feedback` | public | `src/modules/feedback/feedback.routes.ts:30` |
+| DELETE | `/api/feedback/:id` | admin | `src/modules/feedback/feedback.routes.ts:53` |
+| PUT | `/api/feedback/:id/status` | admin | `src/modules/feedback/feedback.routes.ts:43` |
+| GET | `/api/feedback/stats` | admin | `src/modules/feedback/feedback.routes.ts:42` |
+| GET | `/api/health` | public | `src/modules/health/health.routes.ts:5` |
+| POST | `/api/host-verification/apply` | authenticated | `src/modules/host-verification/host-verification.routes.ts:8` |
+| GET | `/api/host-verification/status` | authenticated | `src/modules/host-verification/host-verification.routes.ts:21` |
+| GET | `/api/knowledge` | admin | `src/modules/knowledge/knowledge.routes.ts:16` |
+| DELETE | `/api/knowledge/:id` | admin | `src/modules/knowledge/knowledge.routes.ts:19` |
+| GET | `/api/knowledge/:id` | admin | `src/modules/knowledge/knowledge.routes.ts:17` |
+| PUT | `/api/knowledge/:id` | admin | `src/modules/knowledge/knowledge.routes.ts:18` |
+| POST | `/api/knowledge/add` | admin | `src/modules/knowledge/knowledge.routes.ts:14` |
+| POST | `/api/knowledge/bulk-add` | admin | `src/modules/knowledge/knowledge.routes.ts:15` |
+| GET | `/api/knowledge/stats` | admin | `src/modules/knowledge/knowledge.routes.ts:11` |
+| POST | `/api/knowledge/test-retrieval` | admin | `src/modules/knowledge/knowledge.routes.ts:10` |
+| POST | `/api/leave-requests/team/:teamId/leave-request` | authenticated | `src/modules/leave-requests/leave-requests.routes.ts:8` |
+| DELETE | `/api/leave-requests/team/:teamId/leave-request/:requestId` | authenticated | `src/modules/leave-requests/leave-requests.routes.ts:42` |
+| PATCH | `/api/leave-requests/team/:teamId/leave-request/:requestId` | authenticated | `src/modules/leave-requests/leave-requests.routes.ts:30` |
+| GET | `/api/leave-requests/team/:teamId/leave-requests` | authenticated | `src/modules/leave-requests/leave-requests.routes.ts:18` |
+| GET | `/api/leave-requests/user/leave-requests` | authenticated | `src/modules/leave-requests/leave-requests.routes.ts:27` |
+| GET | `/api/membership` | authenticated | `src/modules/membership/membership.routes.ts:24` |
+| POST | `/api/membership/cancel` | authenticated | `src/modules/membership/membership.routes.ts:29` |
+| POST | `/api/membership/payment/create-order` | authenticated | `src/modules/membership/membership.routes.ts:25` |
+| POST | `/api/membership/payment/verify` | authenticated | `src/modules/membership/membership.routes.ts:26` |
+| GET | `/api/membership/plans` | public | `src/modules/membership/membership.routes.ts:23` |
+| POST | `/api/membership/subscription/create` | authenticated | `src/modules/membership/membership.routes.ts:27` |
+| POST | `/api/membership/subscription/verify` | authenticated | `src/modules/membership/membership.routes.ts:28` |
+| POST | `/api/messages/:messageId/invite-response` | authenticated | `src/modules/messages/messages.routes.ts:125` |
+| POST | `/api/messages/:messageId/reaction` | authenticated | `src/modules/messages/messages.routes.ts:124` |
+| POST | `/api/messages/call-summary` | authenticated | `src/modules/messages/messages.routes.ts:121` |
+| POST | `/api/messages/chat/:userId/mute` | authenticated | `src/modules/messages/messages.routes.ts:127` |
+| POST | `/api/messages/chat/:userId/pin` | authenticated | `src/modules/messages/messages.routes.ts:131` |
+| POST | `/api/messages/direct` | authenticated | `src/modules/messages/messages.routes.ts:88` |
+| DELETE | `/api/messages/direct/:userId` | authenticated | `src/modules/messages/messages.routes.ts:122` |
+| GET | `/api/messages/direct/:userId` | authenticated | `src/modules/messages/messages.routes.ts:89` |
+| POST | `/api/messages/direct/:userId/mute` | authenticated | `src/modules/messages/messages.routes.ts:129` |
+| POST | `/api/messages/group` | authenticated | `src/modules/messages/messages.routes.ts:118` |
+| POST | `/api/messages/group/:chatRoomId/pin` | authenticated | `src/modules/messages/messages.routes.ts:132` |
+| POST | `/api/messages/join/:inviteToken` | authenticated | `src/modules/messages/messages.routes.ts:105` |
+| GET | `/api/messages/join/:inviteToken/preview` | public | `src/modules/messages/messages.routes.ts:98` |
+| POST | `/api/messages/mark-read` | authenticated | `src/modules/messages/messages.routes.ts:120` |
+| POST | `/api/messages/pin` | authenticated | `src/modules/messages/messages.routes.ts:136` |
+| GET | `/api/messages/preferences` | authenticated | `src/modules/messages/messages.routes.ts:126` |
+| GET | `/api/messages/recent` | authenticated | `src/modules/messages/messages.routes.ts:90` |
+| POST | `/api/messages/report` | authenticated | `src/modules/messages/messages.routes.ts:134` |
+| GET | `/api/messages/rooms` | authenticated | `src/modules/messages/messages.routes.ts:92` |
+| POST | `/api/messages/rooms` | authenticated | `src/modules/messages/messages.routes.ts:91` |
+| DELETE | `/api/messages/rooms/:chatRoomId` | authenticated | `src/modules/messages/messages.routes.ts:123` |
+| GET | `/api/messages/rooms/:chatRoomId` | authenticated | `src/modules/messages/messages.routes.ts:119` |
+| PUT | `/api/messages/rooms/:chatRoomId` | authenticated | `src/modules/messages/messages.routes.ts:106` |
+| POST | `/api/messages/rooms/:chatRoomId/invite-dm` | authenticated | `src/modules/messages/messages.routes.ts:96` |
+| GET | `/api/messages/rooms/:chatRoomId/invite-link` | authenticated | `src/modules/messages/messages.routes.ts:94` |
+| POST | `/api/messages/rooms/:chatRoomId/leave` | authenticated | `src/modules/messages/messages.routes.ts:93` |
+| POST | `/api/messages/rooms/:chatRoomId/members` | authenticated | `src/modules/messages/messages.routes.ts:115` |
+| DELETE | `/api/messages/rooms/:chatRoomId/members/:memberId` | authenticated | `src/modules/messages/messages.routes.ts:117` |
+| PUT | `/api/messages/rooms/:chatRoomId/members/:memberId/role` | authenticated | `src/modules/messages/messages.routes.ts:116` |
+| POST | `/api/messages/rooms/:chatRoomId/mute` | authenticated | `src/modules/messages/messages.routes.ts:130` |
+| PUT | `/api/messages/rooms/:chatRoomId/permissions` | authenticated | `src/modules/messages/messages.routes.ts:97` |
+| POST | `/api/messages/rooms/:chatRoomId/reset-invite-link` | authenticated | `src/modules/messages/messages.routes.ts:95` |
+| GET | `/api/monetization/application` | authenticated | `src/modules/monetization/monetization.routes.ts:10` |
+| GET | `/api/monetization/application/history` | authenticated | `src/modules/monetization/monetization.routes.ts:11` |
+| POST | `/api/monetization/application/withdraw` | authenticated | `src/modules/monetization/monetization.routes.ts:13` |
+| POST | `/api/monetization/apply` | authenticated | `src/modules/monetization/monetization.routes.ts:12` |
+| DELETE | `/api/monetization/bank-details` | authenticated | `src/modules/monetization/monetization.routes.ts:19` |
+| GET | `/api/monetization/bank-details` | authenticated | `src/modules/monetization/monetization.routes.ts:17` |
+| PUT | `/api/monetization/bank-details` | authenticated | `src/modules/monetization/monetization.routes.ts:18` |
+| GET | `/api/monetization/dashboard` | authenticated | `src/modules/monetization/monetization.routes.ts:14` |
+| GET | `/api/monetization/earnings` | authenticated | `src/modules/monetization/monetization.routes.ts:15` |
+| GET | `/api/monetization/eligibility` | authenticated | `src/modules/monetization/monetization.routes.ts:9` |
+| GET | `/api/monetization/payout-history` | authenticated | `src/modules/monetization/monetization.routes.ts:16` |
+| GET | `/api/monetization/status` | authenticated | `src/modules/monetization/monetization.routes.ts:20` |
+| POST | `/api/monetization/withdrawal-request` | authenticated | `src/modules/monetization/monetization.routes.ts:21` |
+| GET | `/api/music/search` | user-or-guest | `src/modules/music/music.routes.ts:128` |
+| GET | `/api/notifications` | authenticated | `src/modules/notifications/notifications.routes.ts:887` |
+| DELETE | `/api/notifications/:id` | authenticated | `src/modules/notifications/notifications.routes.ts:1048` |
+| PUT | `/api/notifications/:id/archive` | authenticated | `src/modules/notifications/notifications.routes.ts:1018` |
+| POST | `/api/notifications/:id/click` | authenticated | `src/modules/notifications/notifications.routes.ts:842` |
+| POST | `/api/notifications/:id/delivered` | authenticated | `src/modules/notifications/notifications.routes.ts:777` |
+| POST | `/api/notifications/:id/open` | authenticated | `src/modules/notifications/notifications.routes.ts:806` |
+| PUT | `/api/notifications/:id/read` | authenticated | `src/modules/notifications/notifications.routes.ts:974` |
+| PUT | `/api/notifications/:id/unarchive` | authenticated | `src/modules/notifications/notifications.routes.ts:1033` |
+| DELETE | `/api/notifications/client-context` | authenticated | `src/modules/notifications/notifications.routes.ts:502` |
+| POST | `/api/notifications/client-context` | authenticated | `src/modules/notifications/notifications.routes.ts:392` |
+| GET | `/api/notifications/push-deliveries` | authenticated | `src/modules/notifications/notifications.routes.ts:583` |
+| GET | `/api/notifications/push-status` | authenticated | `src/modules/notifications/notifications.routes.ts:525` |
+| POST | `/api/notifications/push-test` | authenticated | `src/modules/notifications/notifications.routes.ts:611` |
+| DELETE | `/api/notifications/push-token` | authenticated | `src/modules/notifications/notifications.routes.ts:458` |
+| POST | `/api/notifications/push-token` | authenticated | `src/modules/notifications/notifications.routes.ts:213` |
+| PUT | `/api/notifications/read-all` | authenticated | `src/modules/notifications/notifications.routes.ts:999` |
+| DELETE | `/api/notifications/voip-token` | authenticated | `src/modules/notifications/notifications.routes.ts:360` |
+| POST | `/api/notifications/voip-token` | authenticated | `src/modules/notifications/notifications.routes.ts:320` |
+| GET | `/api/payments/boost/campaigns` | authenticated | `src/modules/payments/payments.routes.ts:109` |
+| POST | `/api/payments/boost/create-order` | authenticated | `src/modules/payments/payments.routes.ts:110` |
+| POST | `/api/payments/boost/verify` | authenticated | `src/modules/payments/payments.routes.ts:111` |
+| GET | `/api/payments/history` | authenticated | `src/modules/payments/payments.routes.ts:96` |
+| POST | `/api/payments/razorpay/webhook` | public | `src/modules/payments/payments.routes.ts:94` |
+| POST | `/api/payments/subscription/create` | authenticated | `src/modules/payments/payments.routes.ts:101` |
+| POST | `/api/payments/subscription/create-order` | authenticated | `src/modules/payments/payments.routes.ts:99` |
+| POST | `/api/payments/subscription/verify` | authenticated | `src/modules/payments/payments.routes.ts:100` |
+| POST | `/api/payments/subscription/verify-recurring` | authenticated | `src/modules/payments/payments.routes.ts:102` |
+| POST | `/api/payments/tournament/create-order` | authenticated | `src/modules/payments/payments.routes.ts:105` |
+| POST | `/api/payments/tournament/verify` | authenticated | `src/modules/payments/payments.routes.ts:106` |
+| GET | `/api/posts` | user-or-guest | `src/modules/posts/posts.routes.ts:49` |
+| POST | `/api/posts` | authenticated | `src/modules/posts/posts.routes.ts:48` |
+| DELETE | `/api/posts/:id` | authenticated | `src/modules/posts/posts.routes.ts:61` |
+| GET | `/api/posts/:id` | user-or-guest | `src/modules/posts/posts.routes.ts:53` |
+| PUT | `/api/posts/:id` | authenticated | `src/modules/posts/posts.routes.ts:60` |
+| POST | `/api/posts/:id/boost` | authenticated | `src/modules/posts/posts.routes.ts:63` |
+| POST | `/api/posts/:id/comment` | authenticated | `src/modules/posts/posts.routes.ts:56` |
+| POST | `/api/posts/:id/like` | authenticated | `src/modules/posts/posts.routes.ts:55` |
+| POST | `/api/posts/:id/report` | authenticated | `src/modules/posts/posts.routes.ts:62` |
+| POST | `/api/posts/:id/save` | authenticated | `src/modules/posts/posts.routes.ts:58` |
+| POST | `/api/posts/:id/share` | authenticated | `src/modules/posts/posts.routes.ts:57` |
+| POST | `/api/posts/:id/view` | authenticated | `src/modules/posts/posts.routes.ts:54` |
+| GET | `/api/posts/clips` | user-or-guest | `src/modules/posts/posts.routes.ts:50` |
+| POST | `/api/posts/interaction` | authenticated | `src/modules/posts/posts.routes.ts:59` |
+| GET | `/api/posts/liked` | authenticated | `src/modules/posts/posts.routes.ts:52` |
+| GET | `/api/posts/saved` | authenticated | `src/modules/posts/posts.routes.ts:51` |
+| GET | `/api/random-connections/active-sessions` | authenticated | `src/modules/random-connections/random-connections.routes.ts:100` |
+| POST | `/api/random-connections/cleanup-current` | authenticated | `src/modules/random-connections/random-connections.routes.ts:104` |
+| GET | `/api/random-connections/current-connection` | authenticated | `src/modules/random-connections/random-connections.routes.ts:99` |
+| GET | `/api/random-connections/daily-gender-matches-remaining` | authenticated | `src/modules/random-connections/random-connections.routes.ts:41` |
+| POST | `/api/random-connections/disconnect` | authenticated | `src/modules/random-connections/random-connections.routes.ts:101` |
+| GET | `/api/random-connections/entitlements` | authenticated | `src/modules/random-connections/random-connections.routes.ts:40` |
+| POST | `/api/random-connections/join-queue` | authenticated | `src/modules/random-connections/random-connections.routes.ts:97` |
+| DELETE | `/api/random-connections/leave-queue` | authenticated | `src/modules/random-connections/random-connections.routes.ts:98` |
+| POST | `/api/random-connections/next` | authenticated | `src/modules/random-connections/random-connections.routes.ts:102` |
+| GET | `/api/random-connections/queue-status` | authenticated | `src/modules/random-connections/random-connections.routes.ts:16` |
+| POST | `/api/random-connections/send-message` | authenticated | `src/modules/random-connections/random-connections.routes.ts:103` |
+| POST | `/api/random-connections/v2/cleanup-current` | authenticated | `src/modules/random-connections/random-connections.routes.ts:112` |
+| GET | `/api/random-connections/v2/current-connection` | authenticated | `src/modules/random-connections/random-connections.routes.ts:110` |
+| POST | `/api/random-connections/v2/disconnect` | authenticated | `src/modules/random-connections/random-connections.routes.ts:111` |
+| POST | `/api/random-connections/v2/join-queue` | authenticated | `src/modules/random-connections/random-connections.routes.ts:108` |
+| DELETE | `/api/random-connections/v2/leave-queue` | authenticated | `src/modules/random-connections/random-connections.routes.ts:109` |
+| PUT | `/api/recruitment/applications/:applicationId/status` | authenticated | `src/modules/recruitment/recruitment.routes.ts:43` |
+| GET | `/api/recruitment/applications/my` | authenticated | `src/modules/recruitment/recruitment.routes.ts:40` |
+| GET | `/api/recruitment/applications/team` | authenticated | `src/modules/recruitment/recruitment.routes.ts:41` |
+| GET | `/api/recruitment/player-profiles` | authenticated | `src/modules/recruitment/recruitment.routes.ts:27` |
+| POST | `/api/recruitment/player-profiles` | authenticated | `src/modules/recruitment/recruitment.routes.ts:26` |
+| DELETE | `/api/recruitment/player-profiles/:id` | authenticated | `src/modules/recruitment/recruitment.routes.ts:31` |
+| GET | `/api/recruitment/player-profiles/:id` | public-optional-auth | `src/modules/recruitment/recruitment.routes.ts:28` |
+| PUT | `/api/recruitment/player-profiles/:id` | authenticated | `src/modules/recruitment/recruitment.routes.ts:30` |
+| POST | `/api/recruitment/player-profiles/:profileId/interest` | authenticated | `src/modules/recruitment/recruitment.routes.ts:38` |
+| GET | `/api/recruitment/profile/:code` | public-optional-auth | `src/modules/recruitment/recruitment.routes.ts:29` |
+| POST | `/api/recruitment/profile/:profileId/interest` | authenticated | `src/modules/recruitment/recruitment.routes.ts:39` |
+| GET | `/api/recruitment/recruitment/:code` | public-optional-auth | `src/modules/recruitment/recruitment.routes.ts:19` |
+| POST | `/api/recruitment/recruitment/:recruitmentId/apply` | authenticated | `src/modules/recruitment/recruitment.routes.ts:36` |
+| POST | `/api/recruitment/recruitment/:recruitmentId/withdraw` | authenticated | `src/modules/recruitment/recruitment.routes.ts:37` |
+| GET | `/api/recruitment/team-applications` | authenticated | `src/modules/recruitment/recruitment.routes.ts:42` |
+| GET | `/api/recruitment/team-recruitments` | authenticated | `src/modules/recruitment/recruitment.routes.ts:18` |
+| POST | `/api/recruitment/team-recruitments` | authenticated | `src/modules/recruitment/recruitment.routes.ts:17` |
+| DELETE | `/api/recruitment/team-recruitments/:id` | authenticated | `src/modules/recruitment/recruitment.routes.ts:24` |
+| GET | `/api/recruitment/team-recruitments/:id` | public-optional-auth | `src/modules/recruitment/recruitment.routes.ts:20` |
+| PUT | `/api/recruitment/team-recruitments/:id` | authenticated | `src/modules/recruitment/recruitment.routes.ts:21` |
+| POST | `/api/recruitment/team-recruitments/:id/close` | authenticated | `src/modules/recruitment/recruitment.routes.ts:22` |
+| POST | `/api/recruitment/team-recruitments/:id/reopen` | authenticated | `src/modules/recruitment/recruitment.routes.ts:23` |
+| DELETE | `/api/recruitment/team-recruitments/:recruitmentId/apply` | authenticated | `src/modules/recruitment/recruitment.routes.ts:34` |
+| POST | `/api/recruitment/team-recruitments/:recruitmentId/apply` | authenticated | `src/modules/recruitment/recruitment.routes.ts:33` |
+| POST | `/api/recruitment/team-recruitments/:recruitmentId/withdraw` | authenticated | `src/modules/recruitment/recruitment.routes.ts:35` |
+| POST | `/api/reports` | authenticated | `src/modules/reports/reports.routes.ts:7` |
+| GET | `/api/scrims` | authenticated | `src/modules/scrims/scrims.routes.ts:7` |
+| POST | `/api/scrims` | authenticated | `src/modules/scrims/scrims.routes.ts:8` |
+| DELETE | `/api/scrims/:id` | authenticated | `src/modules/scrims/scrims.routes.ts:15` |
+| GET | `/api/scrims/:id` | authenticated | `src/modules/scrims/scrims.routes.ts:13` |
+| PUT | `/api/scrims/:id` | authenticated | `src/modules/scrims/scrims.routes.ts:14` |
+| POST | `/api/scrims/:id/assign-special-prize` | authenticated | `src/modules/scrims/scrims.routes.ts:23` |
+| POST | `/api/scrims/:id/broadcast` | authenticated | `src/modules/scrims/scrims.routes.ts:24` |
+| PUT | `/api/scrims/:id/cancel` | authenticated | `src/modules/scrims/scrims.routes.ts:20` |
+| POST | `/api/scrims/:id/generate-final-result` | authenticated | `src/modules/scrims/scrims.routes.ts:22` |
+| POST | `/api/scrims/:id/join` | authenticated | `src/modules/scrims/scrims.routes.ts:17` |
+| POST | `/api/scrims/:id/leave` | authenticated | `src/modules/scrims/scrims.routes.ts:18` |
+| POST | `/api/scrims/:id/matches/:matchNumber/results` | authenticated | `src/modules/scrims/scrims.routes.ts:19` |
+| POST | `/api/scrims/:id/prize-distribution` | authenticated | `src/modules/scrims/scrims.routes.ts:21` |
+| GET | `/api/scrims/code/:code` | public-optional-auth | `src/modules/scrims/scrims.routes.ts:10` |
+| POST | `/api/stories` | authenticated | `src/modules/stories/stories.routes.ts:11` |
+| DELETE | `/api/stories/:storyId` | authenticated | `src/modules/stories/stories.routes.ts:15` |
+| GET | `/api/stories/:storyId` | authenticated | `src/modules/stories/stories.routes.ts:12` |
+| POST | `/api/stories/:storyId/view` | authenticated | `src/modules/stories/stories.routes.ts:13` |
+| GET | `/api/stories/:storyId/views` | authenticated | `src/modules/stories/stories.routes.ts:14` |
+| GET | `/api/stories/feed` | authenticated | `src/modules/stories/stories.routes.ts:9` |
+| GET | `/api/stories/user/:userId` | authenticated | `src/modules/stories/stories.routes.ts:10` |
+| GET | `/api/tournaments` | authenticated | `src/modules/tournaments/tournaments.routes.ts:25` |
+| POST | `/api/tournaments` | authenticated | `src/modules/tournaments/tournaments.routes.ts:26` |
+| DELETE | `/api/tournaments/:id` | authenticated | `src/modules/tournaments/tournaments.routes.ts:34` |
+| GET | `/api/tournaments/:id` | authenticated | `src/modules/tournaments/tournaments.routes.ts:32` |
+| PUT | `/api/tournaments/:id` | authenticated | `src/modules/tournaments/tournaments.routes.ts:33` |
+| POST | `/api/tournaments/:id/assign-groups` | authenticated | `src/modules/tournaments/tournaments.routes.ts:40` |
+| POST | `/api/tournaments/:id/assign-participant` | authenticated | `src/modules/tournaments/tournaments.routes.ts:54` |
+| POST | `/api/tournaments/:id/assign-special-prize` | authenticated | `src/modules/tournaments/tournaments.routes.ts:75` |
+| POST | `/api/tournaments/:id/auto-assign-round-2` | authenticated | `src/modules/tournaments/tournaments.routes.ts:72` |
+| POST | `/api/tournaments/:id/broadcast-schedule` | authenticated | `src/modules/tournaments/tournaments.routes.ts:63` |
+| PUT | `/api/tournaments/:id/cancel` | authenticated | `src/modules/tournaments/tournaments.routes.ts:43` |
+| POST | `/api/tournaments/:id/create-round-2` | authenticated | `src/modules/tournaments/tournaments.routes.ts:71` |
+| POST | `/api/tournaments/:id/generate-final-result` | authenticated | `src/modules/tournaments/tournaments.routes.ts:74` |
+| POST | `/api/tournaments/:id/group-message` | authenticated | `src/modules/tournaments/tournaments.routes.ts:45` |
+| DELETE | `/api/tournaments/:id/group-message/:groupId/:round/:messageIndex` | authenticated | `src/modules/tournaments/tournaments.routes.ts:49` |
+| GET | `/api/tournaments/:id/group-messages` | authenticated | `src/modules/tournaments/tournaments.routes.ts:47` |
+| POST | `/api/tournaments/:id/join` | authenticated | `src/modules/tournaments/tournaments.routes.ts:36` |
+| POST | `/api/tournaments/:id/join-duo` | authenticated | `src/modules/tournaments/tournaments.routes.ts:37` |
+| POST | `/api/tournaments/:id/leave` | authenticated | `src/modules/tournaments/tournaments.routes.ts:38` |
+| POST | `/api/tournaments/:id/leave-team` | authenticated | `src/modules/tournaments/tournaments.routes.ts:39` |
+| POST | `/api/tournaments/:id/next-round` | authenticated | `src/modules/tournaments/tournaments.routes.ts:67` |
+| POST | `/api/tournaments/:id/open-registration` | authenticated | `src/modules/tournaments/tournaments.routes.ts:76` |
+| GET | `/api/tournaments/:id/participants` | authenticated | `src/modules/tournaments/tournaments.routes.ts:52` |
+| POST | `/api/tournaments/:id/prize-distribution` | authenticated | `src/modules/tournaments/tournaments.routes.ts:73` |
+| GET | `/api/tournaments/:id/qualification-settings` | authenticated | `src/modules/tournaments/tournaments.routes.ts:70` |
+| POST | `/api/tournaments/:id/qualification-settings` | authenticated | `src/modules/tournaments/tournaments.routes.ts:69` |
+| GET | `/api/tournaments/:id/qualification-status` | authenticated | `src/modules/tournaments/tournaments.routes.ts:68` |
+| POST | `/api/tournaments/:id/qualify` | authenticated | `src/modules/tournaments/tournaments.routes.ts:66` |
+| POST | `/api/tournaments/:id/recreate-groups` | authenticated | `src/modules/tournaments/tournaments.routes.ts:56` |
+| POST | `/api/tournaments/:id/remove-participant` | authenticated | `src/modules/tournaments/tournaments.routes.ts:53` |
+| POST | `/api/tournaments/:id/results` | authenticated | `src/modules/tournaments/tournaments.routes.ts:64` |
+| GET | `/api/tournaments/:id/results/:round` | authenticated | `src/modules/tournaments/tournaments.routes.ts:65` |
+| PUT | `/api/tournaments/:id/round-settings` | authenticated | `src/modules/tournaments/tournaments.routes.ts:55` |
+| GET | `/api/tournaments/:id/schedule` | authenticated | `src/modules/tournaments/tournaments.routes.ts:58` |
+| POST | `/api/tournaments/:id/schedule` | authenticated | `src/modules/tournaments/tournaments.routes.ts:57` |
+| PUT | `/api/tournaments/:id/schedule-config` | authenticated | `src/modules/tournaments/tournaments.routes.ts:62` |
+| POST | `/api/tournaments/:id/schedule-matches` | authenticated | `src/modules/tournaments/tournaments.routes.ts:42` |
+| DELETE | `/api/tournaments/:id/schedule/:matchId` | authenticated | `src/modules/tournaments/tournaments.routes.ts:60` |
+| PUT | `/api/tournaments/:id/schedule/:matchId` | authenticated | `src/modules/tournaments/tournaments.routes.ts:59` |
+| DELETE | `/api/tournaments/:id/schedule/round/:round` | authenticated | `src/modules/tournaments/tournaments.routes.ts:61` |
+| POST | `/api/tournaments/:id/start` | authenticated | `src/modules/tournaments/tournaments.routes.ts:41` |
+| POST | `/api/tournaments/:id/start-match` | authenticated | `src/modules/tournaments/tournaments.routes.ts:50` |
+| POST | `/api/tournaments/:id/tournament-message` | authenticated | `src/modules/tournaments/tournaments.routes.ts:44` |
+| DELETE | `/api/tournaments/:id/tournament-message/:messageIndex` | authenticated | `src/modules/tournaments/tournaments.routes.ts:48` |
+| GET | `/api/tournaments/:id/tournament-messages` | authenticated | `src/modules/tournaments/tournaments.routes.ts:46` |
+| POST | `/api/tournaments/:id/update-match-result` | authenticated | `src/modules/tournaments/tournaments.routes.ts:51` |
+| GET | `/api/tournaments/by-name/:tournamentName/:hostUsername` | public-optional-auth | `src/modules/tournaments/tournaments.routes.ts:29` |
+| GET | `/api/tournaments/code/:code` | public-optional-auth | `src/modules/tournaments/tournaments.routes.ts:28` |
+| GET | `/api/tournaments/hosting-limits` | authenticated | `src/modules/tournaments/tournaments.routes.ts:22` |
+| GET | `/api/users` | user-or-guest | `src/modules/users/users.routes.ts:14` |
+| GET | `/api/users/:id/clips` | user-or-guest | `src/modules/users/users.routes.ts:49` |
+| DELETE | `/api/users/:id/follow` | authenticated | `src/modules/users/users.routes.ts:45` |
+| POST | `/api/users/:id/follow` | authenticated | `src/modules/users/users.routes.ts:44` |
+| GET | `/api/users/:id/followers` | user-or-guest | `src/modules/users/users.routes.ts:46` |
+| GET | `/api/users/:id/following` | user-or-guest | `src/modules/users/users.routes.ts:47` |
+| GET | `/api/users/:id/posts` | user-or-guest | `src/modules/users/users.routes.ts:48` |
+| GET | `/api/users/:identifier` | user-or-guest | `src/modules/users/users.routes.ts:43` |
+| GET | `/api/users/:identifier/tournaments` | user-or-guest | `src/modules/users/users.routes.ts:33` |
+| POST | `/api/users/:teamId/leave-request` | authenticated | `src/modules/users/users.routes.ts:58` |
+| GET | `/api/users/:teamId/leave-requests` | authenticated | `src/modules/users/users.routes.ts:59` |
+| GET | `/api/users/:teamId/pending-invites` | authenticated | `src/modules/users/users.routes.ts:57` |
+| DELETE | `/api/users/:teamId/roster/:game/:playerId` | authenticated | `src/modules/users/users.routes.ts:52` |
+| DELETE | `/api/users/:teamId/roster/:game/leave` | authenticated | `src/modules/users/users.routes.ts:51` |
+| POST | `/api/users/:teamId/roster/add` | authenticated | `src/modules/users/users.routes.ts:50` |
+| DELETE | `/api/users/:teamId/staff/:playerId` | authenticated | `src/modules/users/users.routes.ts:56` |
+| POST | `/api/users/:teamId/staff/add` | authenticated | `src/modules/users/users.routes.ts:53` |
+| POST | `/api/users/:teamId/staff/add-by-username` | authenticated | `src/modules/users/users.routes.ts:54` |
+| DELETE | `/api/users/:teamId/staff/cancel-by-username` | authenticated | `src/modules/users/users.routes.ts:55` |
+| GET | `/api/users/:userId/dm-privacy` | authenticated | `src/modules/users/users.routes.ts:39` |
+| GET | `/api/users/:username/tournament-history` | user-or-guest | `src/modules/users/users.routes.ts:34` |
+| GET | `/api/users/avatar/:userId` | public | `src/modules/users/users.routes.ts:17` |
+| DELETE | `/api/users/block/:username` | authenticated | `src/modules/users/users.routes.ts:20` |
+| POST | `/api/users/block/:username` | authenticated | `src/modules/users/users.routes.ts:19` |
+| GET | `/api/users/blocked` | authenticated | `src/modules/users/users.routes.ts:18` |
+| POST | `/api/users/create-team` | authenticated | `src/modules/users/users.routes.ts:16` |
+| POST | `/api/users/follow-requests/:requestId/accept` | authenticated | `src/modules/users/users.routes.ts:41` |
+| POST | `/api/users/follow-requests/:requestId/reject` | authenticated | `src/modules/users/users.routes.ts:42` |
+| GET | `/api/users/follow-requests/incoming` | authenticated | `src/modules/users/users.routes.ts:40` |
+| GET | `/api/users/gaming-stats` | authenticated | `src/modules/users/users.routes.ts:27` |
+| POST | `/api/users/gaming-stats` | authenticated | `src/modules/users/users.routes.ts:28` |
+| DELETE | `/api/users/gaming-stats/:statId` | authenticated | `src/modules/users/users.routes.ts:30` |
+| PUT | `/api/users/gaming-stats/:statId` | authenticated | `src/modules/users/users.routes.ts:29` |
+| POST | `/api/users/gaming-stats/sync-coc` | authenticated | `src/modules/users/users.routes.ts:31` |
+| POST | `/api/users/gaming-stats/sync-cr` | authenticated | `src/modules/users/users.routes.ts:32` |
+| POST | `/api/users/leave-requests/:requestId/approve` | authenticated | `src/modules/users/users.routes.ts:60` |
+| POST | `/api/users/leave-requests/:requestId/reject` | authenticated | `src/modules/users/users.routes.ts:61` |
+| GET | `/api/users/notification-settings` | authenticated | `src/modules/users/users.routes.ts:37` |
+| PUT | `/api/users/notification-settings` | authenticated | `src/modules/users/users.routes.ts:38` |
+| GET | `/api/users/privacy-settings` | authenticated | `src/modules/users/users.routes.ts:35` |
+| PUT | `/api/users/privacy-settings` | authenticated | `src/modules/users/users.routes.ts:36` |
+| DELETE | `/api/users/roster-invite/:inviteId` | authenticated | `src/modules/users/users.routes.ts:21` |
+| GET | `/api/users/roster-invites` | authenticated | `src/modules/users/users.routes.ts:23` |
+| POST | `/api/users/roster-invites/:inviteId/accept` | authenticated | `src/modules/users/users.routes.ts:24` |
+| POST | `/api/users/roster-invites/:inviteId/decline` | authenticated | `src/modules/users/users.routes.ts:25` |
+| GET | `/api/users/search` | user-or-guest | `src/modules/users/users.routes.ts:15` |
+| DELETE | `/api/users/staff-invite/:inviteId` | authenticated | `src/modules/users/users.routes.ts:26` |
+| GET | `/health` | public | `src/app.ts:65` |
+
+## Socket events
+
+| Direction | Event | Source |
+|---|---|---|
+| outbound | `broadcast_message` | `src/legacy-src/controllers/tournamentController.js:447` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:467` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:482` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:488` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:496` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:513` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:526` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:547` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:561` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:680` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:745` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:759` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:763` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:767` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:772` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:811` |
+| outbound | `call-error` | `src/modules/legacy/legacy.socket.ts:855` |
+| inbound | `call-request` | `src/modules/legacy/legacy.socket.ts:453` |
+| inbound | `call-signal` | `src/modules/legacy/legacy.socket.ts:688` |
+| outbound | `chat:error` | `src/modules/chat/chat.socket.ts:159` |
+| outbound | `chat:error` | `src/modules/chat/chat.socket.ts:185` |
+| outbound | `chat:error` | `src/modules/chat/chat.socket.ts:192` |
+| outbound | `connection-matched` | `src/legacy-src/controllers/randomConnectionController.js:191` |
+| outbound | `connection-matched` | `src/legacy-src/controllers/randomConnectionController.js:197` |
+| inbound | `disconnect` | `src/infrastructure/websocket/socket.ts:133` |
+| inbound | `disconnect` | `src/modules/legacy/legacy.socket.ts:871` |
+| inbound | `group-call-join` | `src/modules/legacy/legacy.socket.ts:801` |
+| outbound | `group-call-joined` | `src/modules/legacy/legacy.socket.ts:832` |
+| inbound | `group-call-leave` | `src/modules/legacy/legacy.socket.ts:865` |
+| outbound | `group-call-not-found` | `src/modules/legacy/legacy.socket.ts:807` |
+| inbound | `group-call-request` | `src/modules/legacy/legacy.socket.ts:752` |
+| inbound | `group-call-signal` | `src/modules/legacy/legacy.socket.ts:841` |
+| inbound | `join-chat-room` | `src/modules/chat/chat.socket.ts:148` |
+| inbound | `join-random-queue` | `src/modules/legacy/legacy.socket.ts:318` |
+| inbound | `join-random-room` | `src/modules/legacy/legacy.socket.ts:334` |
+| inbound | `join-user-room` | `src/infrastructure/websocket/socket.ts:110` |
+| inbound | `leave-chat-room` | `src/modules/chat/chat.socket.ts:163` |
+| inbound | `leave-random-queue` | `src/modules/legacy/legacy.socket.ts:327` |
+| inbound | `leave-random-room` | `src/modules/legacy/legacy.socket.ts:354` |
+| inbound | `media-state` | `src/modules/legacy/legacy.socket.ts:439` |
+| inbound | `ping` | `src/infrastructure/websocket/socket.ts:122` |
+| outbound | `pong` | `src/infrastructure/websocket/socket.ts:122` |
+| outbound | `presence:snapshot` | `src/modules/presence/presence.socket.ts:89` |
+| inbound | `presence:subscribe` | `src/modules/presence/presence.socket.ts:42` |
+| inbound | `presence:unsubscribe` | `src/modules/presence/presence.socket.ts:98` |
+| inbound | `random-connection-message` | `src/modules/legacy/legacy.socket.ts:372` |
+| outbound | `random-session-error` | `src/modules/legacy/legacy.socket.ts:341` |
+| outbound | `random-session-error` | `src/modules/legacy/legacy.socket.ts:365` |
+| outbound | `random-session-error` | `src/modules/legacy/legacy.socket.ts:379` |
+| outbound | `random-session-error` | `src/modules/legacy/legacy.socket.ts:400` |
+| outbound | `random-session-error` | `src/modules/legacy/legacy.socket.ts:417` |
+| inbound | `random-session-ready` | `src/modules/legacy/legacy.socket.ts:360` |
+| outbound | `random-session-timer-sync` | `src/modules/legacy/legacy.socket.ts:351` |
+| outbound | `room-joined` | `src/modules/legacy/legacy.socket.ts:346` |
+| inbound | `send-message` | `src/modules/chat/chat.socket.ts:179` |
+| outbound | `tournament_updated` | `src/legacy-src/controllers/tournamentController.js:381` |
+| inbound | `typing-start` | `src/modules/chat/chat.socket.ts:209` |
+| inbound | `typing-stop` | `src/modules/chat/chat.socket.ts:210` |
+| inbound | `video-state-change` | `src/modules/legacy/legacy.socket.ts:426` |
+| inbound | `webrtc-request-offer` | `src/modules/legacy/legacy.socket.ts:410` |
+| inbound | `webrtc-signal` | `src/modules/legacy/legacy.socket.ts:390` |

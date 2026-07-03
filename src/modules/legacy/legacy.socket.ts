@@ -86,6 +86,8 @@ const callRequestWindows = new Map<string, number[]>();
 const CALL_REQUEST_WINDOW_MS = 60_000;
 const CALL_REQUEST_MAX_PER_WINDOW = 8;
 let randomMatchLoopStarted = false;
+let randomMatchTickRunning = false;
+let randomMatchTimer: NodeJS.Timeout | null = null;
 const callSignalDebugEnabled = process.env.CALL_SIGNAL_DEBUG === "true";
 const traceCallSignal = (stage: string, meta: Record<string, unknown>) => {
   if (!callSignalDebugEnabled) return;
@@ -886,12 +888,23 @@ export const startLegacyBackgroundJobs = (io: Server): void => {
   );
 
   if (randomConnectController?.matchUsersFromQueue) {
-    setInterval(async () => {
+    randomMatchTimer = setInterval(async () => {
+      if (randomMatchTickRunning) return;
+      randomMatchTickRunning = true;
       try {
         await randomConnectController.matchUsersFromQueue?.(io);
       } catch {
         // Swallow transient DB/network errors — the next tick will retry
+      } finally {
+        randomMatchTickRunning = false;
       }
     }, 3000);
   }
+};
+
+export const stopLegacyBackgroundJobs = (): void => {
+  if (randomMatchTimer) clearInterval(randomMatchTimer);
+  randomMatchTimer = null;
+  randomMatchTickRunning = false;
+  randomMatchLoopStarted = false;
 };

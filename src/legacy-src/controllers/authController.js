@@ -8,6 +8,7 @@ const { uploadAvatar, uploadImage } = require('../utils/cloudinary');
 const { sendOTPEmail } = require('../utils/email');
 const { enqueuePasswordSecurityEmail } = require('../utils/securityEmail');
 const log = require('../utils/logger');
+const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const { invalidateUserCache } = require('../middleware/auth');
 const { invalidateProfileCache } = require('../utils/profileCache');
 const { evictPresenceAudience } = require('../utils/presencePrivacy');
@@ -289,11 +290,7 @@ const register = async (req, res) => {
         const uploadResult = await uploadAvatar(req.file);
         avatarData.avatar = uploadResult.url;
       } catch (uploadError) {
-        return res.status(400).json({
-          success: false,
-          message: 'Failed to upload avatar',
-          error: uploadError.message
-        });
+        return respondToMediaUploadError(res, uploadError, 'Failed to upload avatar');
       }
     }
 
@@ -364,24 +361,26 @@ const register = async (req, res) => {
   }
 };
 
-// Check if new password matches old password (for forgot password flow)
+// Check whether an authenticated user's candidate password matches their own
+// current password. Never accept an email/user id from the request body: doing
+// so turns this endpoint into a cross-account password oracle.
 const checkPasswordSame = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const userId = req.user?._id;
 
-    if (!email || !password) {
+    if (!userId || typeof password !== 'string' || !password) {
       return res.status(400).json({
         success: false,
         isSame: false,
-        message: 'Email and password are required'
+        message: 'Password is required'
       });
     }
 
-    const cleanEmail = email.toLowerCase();
-    const user = await User.findOne({ email: cleanEmail }).select('+password');
+    const user = await User.findById(userId).select('+password');
 
     if (!user || !user.password) {
-      // User not found or no password set (e.g. Google-only user)
+      // OAuth-only users do not have a local password to compare.
       return res.json({
         success: true,
         isSame: false
@@ -649,11 +648,7 @@ const updateProfile = async (req, res) => {
         const uploadResult = await uploadAvatar(req.file);
         updates['profile.avatar'] = uploadResult.url;
       } catch (uploadError) {
-        return res.status(400).json({
-          success: false,
-          message: 'Failed to upload avatar',
-          error: uploadError.message
-        });
+        return respondToMediaUploadError(res, uploadError, 'Failed to upload avatar');
       }
     }
 
@@ -1381,6 +1376,13 @@ const googleTokenLogin = async (req, res) => {
     });
   } catch (error) {
     log.error('Google token login error:', { error: String(error) });
+    const providerStatus = Number(error?.response?.status);
+    if ([400, 401, 403].includes(providerStatus)) {
+      return res.status(401).json({ success: false, message: 'Google login failed' });
+    }
+    if (error?.isAxiosError) {
+      return res.status(502).json({ success: false, message: 'Google authentication service is unavailable' });
+    }
     return res.status(500).json({ success: false, message: 'Google login failed' });
   }
 };

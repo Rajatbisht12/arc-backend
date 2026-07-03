@@ -1,7 +1,9 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 const Notification = require('../models/Notification');
 const { sanitizeNotificationsForViewer } = require('../utils/notificationPrivacy');
+const { normalizePagination } = require('../utils/pagination');
 
 const router = express.Router();
 
@@ -9,10 +11,18 @@ const router = express.Router();
 const getNotifications = async (req, res) => {
   try {
     const userId = req.user._id;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = normalizePagination(req.query, {
+      defaultLimit: 20,
+      maxLimit: 100
+    });
     const { isRead } = req.query;
+
+    if (isRead !== undefined && isRead !== 'true' && isRead !== 'false') {
+      return res.status(400).json({
+        success: false,
+        message: 'isRead must be true or false'
+      });
+    }
 
     const filter = { recipient: userId };
     if (isRead !== undefined) {
@@ -48,8 +58,7 @@ const getNotifications = async (req, res) => {
     console.error('Error fetching notifications:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch notifications',
-      error: error.message
+      message: 'Failed to fetch notifications'
     });
   }
 };
@@ -59,6 +68,10 @@ const markAsRead = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid notification identifier' });
+    }
 
     const notification = await Notification.findOne({ _id: id, recipient: userId });
     
@@ -77,10 +90,10 @@ const markAsRead = async (req, res) => {
     });
 
   } catch (error) {
+    console.error('Error marking notification as read:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to mark notification as read',
-      error: error.message
+      message: 'Failed to mark notification as read'
     });
   }
 };
@@ -104,10 +117,10 @@ const markAllAsRead = async (req, res) => {
     });
 
   } catch (error) {
+    console.error('Error marking all notifications as read:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to mark all notifications as read',
-      error: error.message
+      message: 'Failed to mark all notifications as read'
     });
   }
 };
@@ -117,6 +130,10 @@ const deleteNotification = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user._id;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid notification identifier' });
+    }
 
     const notification = await Notification.findOne({ _id: id, recipient: userId });
     
@@ -135,10 +152,10 @@ const deleteNotification = async (req, res) => {
     });
 
   } catch (error) {
+    console.error('Error deleting notification:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete notification',
-      error: error.message
+      message: 'Failed to delete notification'
     });
   }
 };

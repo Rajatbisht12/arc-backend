@@ -17,6 +17,15 @@ if (!KEY_ID || !KEY_SECRET) {
   process.exit(1);
 }
 
+if (!process.argv.includes('--apply')) {
+  console.error('Refusing to create a provider transaction without --apply');
+  process.exit(1);
+}
+if (!KEY_ID.startsWith('rzp_test_')) {
+  console.error('Refusing to run with a non-test Razorpay key');
+  process.exit(1);
+}
+
 const razorpay = new Razorpay({ key_id: KEY_ID, key_secret: KEY_SECRET });
 
 function apiCall(path, body) {
@@ -50,7 +59,7 @@ function apiCall(path, body) {
 
 async function run() {
   console.log('\n── Razorpay Test Transaction ──────────────────');
-  console.log('Key ID :', KEY_ID);
+  console.log('Using a validated Razorpay test key');
 
   // Step 1: Create order
   console.log('\n[1/3] Creating order (₹99)...');
@@ -98,4 +107,5 @@ async function run() {
 
 run().catch((err) => {
   console.error('\nScript error:', err.message);
+  process.exitCode = 1;
 });

@@ -39,7 +39,7 @@ const creatorEligibilityHistorySchema = new mongoose.Schema({
     default: 'scheduled_recalculation',
     index: true
   },
-  calculatedAt: { type: Date, default: Date.now, index: true }
+  calculatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
 creatorEligibilityHistorySchema.index({ user: 1, calculatedAt: -1 });

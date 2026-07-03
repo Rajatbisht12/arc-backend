@@ -2,10 +2,15 @@ const CryptoJS = require('crypto-js');
 
 // Sync this flag with frontend to enable/disable easily for debugging
 const ENCRYPTION_ENABLED = process.env.ENABLE_PAYLOAD_ENCRYPTION === 'true';
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'arc_super_secret_key_2026_demo!!';
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+
+if (ENCRYPTION_ENABLED && (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32)) {
+    throw new Error('ENABLE_PAYLOAD_ENCRYPTION requires ENCRYPTION_KEY with at least 32 characters');
+}
 
 const encrypt = (data) => {
     try {
+        if (!ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY is not configured');
         const jsonString = JSON.stringify(data);
         return CryptoJS.AES.encrypt(jsonString, ENCRYPTION_KEY).toString();
     } catch (e) {
@@ -16,6 +21,7 @@ const encrypt = (data) => {
 
 const decrypt = (ciphertext) => {
     try {
+        if (!ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY is not configured');
         const bytes = CryptoJS.AES.decrypt(ciphertext, ENCRYPTION_KEY);
         const decryptedStr = bytes.toString(CryptoJS.enc.Utf8);
         return decryptedStr ? JSON.parse(decryptedStr) : null;

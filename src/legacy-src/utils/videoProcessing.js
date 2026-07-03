@@ -6,22 +6,41 @@ const { randomUUID } = require('crypto');
 const log = require('./logger');
 
 const STORY_MAX_SECONDS = 30;
+const FFMPEG_TIMEOUT_MS = 90_000;
+const MAX_FFMPEG_STDERR_BYTES = 64 * 1024;
 
 const runFfmpeg = (args) => new Promise((resolve, reject) => {
   const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
+  let settled = false;
+
+  const settle = (callback, value) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    callback(value);
+  };
+
+  const timeout = setTimeout(() => {
+    child.kill('SIGKILL');
+    const error = new Error('Video processing timed out');
+    error.code = 'FFMPEG_TIMEOUT';
+    settle(reject, error);
+  }, FFMPEG_TIMEOUT_MS);
 
   child.stderr.on('data', (chunk) => {
-    stderr += chunk.toString();
+    if (Buffer.byteLength(stderr) >= MAX_FFMPEG_STDERR_BYTES) return;
+    const remaining = MAX_FFMPEG_STDERR_BYTES - Buffer.byteLength(stderr);
+    stderr += chunk.toString().slice(0, remaining);
   });
 
-  child.on('error', reject);
+  child.on('error', error => settle(reject, error));
   child.on('close', (code) => {
     if (code === 0) {
-      resolve();
+      settle(resolve);
       return;
     }
-    reject(new Error(stderr || `ffmpeg exited with code ${code}`));
+    settle(reject, new Error(stderr || `ffmpeg exited with code ${code}`));
   });
 });
 
@@ -33,12 +52,15 @@ const processStoryVideo = async (file) => {
   try {
     await fs.writeFile(inputPath, file.buffer);
     await runFfmpeg([
+      '-nostdin',
+      '-loglevel', 'error',
       '-y',
       '-i', inputPath,
       '-t', String(STORY_MAX_SECONDS),
       '-vf', "scale='if(gt(iw,720),720,trunc(iw/2)*2)':-2",
       '-c:v', 'libx264',
       '-preset', 'veryfast',
+      '-threads', '2',
       '-profile:v', 'main',
       '-level', '4.0',
       '-pix_fmt', 'yuv420p',
@@ -77,5 +99,6 @@ const processStoryVideo = async (file) => {
 
 module.exports = {
   STORY_MAX_SECONDS,
+  FFMPEG_TIMEOUT_MS,
   processStoryVideo,
 };

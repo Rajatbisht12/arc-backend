@@ -7,14 +7,17 @@ const { uploadMultipleFiles } = require('../utils/cloudinary');
 const { createMessageNotification } = require('../utils/notificationService');
 const { getCallSessionForParticipant } = require('../services/callSessionService');
 const log = require('../utils/logger');
+const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const {
   idString,
+  buildPrivacyAccess,
   normalizePrivacySettings,
   resolvePrivacyAccess,
   resolvePostAccess,
   filterPostsForViewer
 } = require('../utils/privacyPolicy');
 const { revokeChatRoomAccess } = require('../utils/realtimePrivacy');
+const { normalizePagination } = require('../utils/pagination');
 const {
   isCurrentGroupMember,
   getGroupMembershipWindow,
@@ -259,11 +262,7 @@ const sendDirectMessage = async (req, res) => {
             size: req.files.find(f => f.size).size
           }));
         } catch (uploadError) {
-          return res.status(400).json({
-            success: false,
-            message: 'Failed to upload media files',
-            error: uploadError.message
-          });
+          return respondToMediaUploadError(res, uploadError, 'Failed to upload media files');
         }
       }
     }
@@ -597,9 +596,7 @@ const createChatRoom = async (req, res) => {
 const getChatRooms = async (req, res) => {
   try {
     const userId = req.user._id;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = normalizePagination(req.query, { defaultLimit: 20, maxLimit: 50 });
 
     const chatRooms = await ChatRoom.find({
       $or: [
@@ -749,9 +746,7 @@ const getRecentConversations = async (req, res) => {
     const userObjectId = mongoose.Types.ObjectId.isValid(userId)
       ? new mongoose.Types.ObjectId(userId)
       : userId;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = normalizePagination(req.query, { defaultLimit: 20, maxLimit: 50 });
     // Prevent stale/empty inbox caused by cache revalidation on route changes.
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.set('Pragma', 'no-cache');
@@ -806,57 +801,70 @@ const getRecentConversations = async (req, res) => {
       }
     ]);
 
-    // Populate user information for each conversation
-    const populatedConversations = await Promise.all(
-      conversations.map(async (conv) => {
-        const otherUser = await User.findById(conv._id)
-          .select('username profile.displayName profile.avatar role userType lastSeen privacySettings blockedUsers isActive')
-          .lean();
+    const conversationUserIds = conversations.map((conversation) => conversation._id).filter(Boolean);
+    const [conversationUsers, followedUserIds, unreadRows] = await Promise.all([
+      User.find({ _id: { $in: conversationUserIds }, isActive: true })
+        .select('username profile.displayName profile.avatar role userType lastSeen privacySettings blockedUsers isActive')
+        .lean(),
+      Follow.find({ follower: userObjectId, following: { $in: conversationUserIds } }).distinct('following'),
+      Message.aggregate([
+        {
+          $match: {
+            messageType: 'direct',
+            sender: { $in: conversationUserIds },
+            recipient: userObjectId,
+            'readBy.user': { $ne: userObjectId },
+            deletedForEveryone: { $ne: true },
+            $or: [
+              { deletedForUsers: { $exists: false } },
+              { deletedForUsers: { $size: 0 } },
+              { deletedForUsers: { $not: { $elemMatch: { user: userObjectId } } } }
+            ]
+          }
+        },
+        { $group: { _id: '$sender', count: { $sum: 1 } } }
+      ])
+    ]);
+    const usersById = new Map(conversationUsers.map((user) => [idString(user), user]));
+    const followedIds = new Set(followedUserIds.map(idString));
+    const unreadBySender = new Map(unreadRows.map((row) => [idString(row._id), Number(row.count) || 0]));
+    const viewerBlockedIds = new Set((req.user?.blockedUsers || []).map(idString));
 
-        if (!otherUser || !otherUser.isActive) return null;
-
-        const presenceAccess = await resolvePrivacyAccess({
-          viewer: req.user,
-          targetUser: otherUser,
-          existingConversation: true
-        });
-
-        // Get unread count
-        const unreadCount = await Message.countDocuments({
-          messageType: 'direct',
-          sender: conv._id,
-          recipient: userObjectId,
-          'readBy.user': { $ne: userObjectId },
-          deletedForEveryone: { $ne: true },
-          $or: [
-            { deletedForUsers: { $exists: false } },
-            { deletedForUsers: { $size: 0 } },
-            { deletedForUsers: { $not: { $elemMatch: { user: userObjectId } } } }
-          ]
-        });
-
-        return {
-          _id: `direct_${conv._id}`,
-          participants: [{
-            _id: otherUser._id,
-            username: otherUser.username || otherUser.profile?.displayName,
-            profilePicture: otherUser.profile?.avatar,
-            role: otherUser.role || otherUser.userType,
-            canSeeOnlineStatus: presenceAccess.access.canSeeOnlineStatus,
-            activityStatus: presenceAccess.access.canSeeOnlineStatus
-              ? formatActivityStatus(otherUser.lastSeen, otherUser.privacySettings)
-              : null
-          }],
-          lastMessage: {
-            content: conv.lastMessage.content,
-            sender: conv.lastMessage.sender,
-            createdAt: conv.lastMessage.createdAt
-          },
-          unreadCount,
-          messageCount: conv.messageCount
-        };
-      })
-    );
+    // Build the response from three bounded bulk queries rather than issuing
+    // user/follow/unread queries for every conversation in the page.
+    const populatedConversations = conversations.map((conv) => {
+      const otherUserId = idString(conv._id);
+      const otherUser = usersById.get(otherUserId);
+      if (!otherUser) return null;
+      const blocked = viewerBlockedIds.has(otherUserId)
+        || (otherUser.blockedUsers || []).map(idString).includes(idString(userObjectId));
+      const privacyAccess = buildPrivacyAccess({
+        settings: otherUser.privacySettings,
+        isFollower: followedIds.has(otherUserId),
+        existingConversation: true,
+        blocked
+      });
+      return {
+        _id: `direct_${conv._id}`,
+        participants: [{
+          _id: otherUser._id,
+          username: otherUser.username || otherUser.profile?.displayName,
+          profilePicture: otherUser.profile?.avatar,
+          role: otherUser.role || otherUser.userType,
+          canSeeOnlineStatus: privacyAccess.canSeeOnlineStatus,
+          activityStatus: privacyAccess.canSeeOnlineStatus
+            ? formatActivityStatus(otherUser.lastSeen, otherUser.privacySettings)
+            : null
+        }],
+        lastMessage: {
+          content: conv.lastMessage.content,
+          sender: conv.lastMessage.sender,
+          createdAt: conv.lastMessage.createdAt
+        },
+        unreadCount: unreadBySender.get(otherUserId) || 0,
+        messageCount: conv.messageCount
+      };
+    });
 
     // Filter out null entries (deleted users)
     const validConversations = populatedConversations.filter(conv => conv !== null);
@@ -1037,11 +1045,7 @@ const sendGroupMessage = async (req, res) => {
             publicId: result.publicId
           }));
         } catch (uploadError) {
-          return res.status(400).json({
-            success: false,
-            message: 'Failed to upload media files',
-            error: uploadError.message
-          });
+          return respondToMediaUploadError(res, uploadError, 'Failed to upload media files');
         }
       }
     }
@@ -2984,7 +2988,7 @@ const getGroupInviteLink = async (req, res) => {
       await chatRoom.save();
     }
 
-    const baseUrl = process.env.CLIENT_URL || 'https://arc.squadhunt.com';
+    const baseUrl = process.env.CLIENT_URL || 'https://squadhunt.in';
     const inviteLink = `${baseUrl}/join/${chatRoom.inviteToken}`;
 
     res.json({ success: true, inviteLink, token: chatRoom.inviteToken });
@@ -3013,7 +3017,7 @@ const resetGroupInviteLink = async (req, res) => {
     chatRoom.inviteToken = crypto.randomBytes(16).toString('hex');
     await chatRoom.save();
 
-    const baseUrl = process.env.CLIENT_URL || 'https://arc.squadhunt.com';
+    const baseUrl = process.env.CLIENT_URL || 'https://squadhunt.in';
     const inviteLink = `${baseUrl}/join/${chatRoom.inviteToken}`;
 
     res.json({ success: true, inviteLink, token: chatRoom.inviteToken });

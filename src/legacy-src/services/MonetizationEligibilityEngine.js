@@ -12,6 +12,7 @@ const MonetizationEligibility = require('../models/MonetizationEligibility');
 const CreatorEligibilityHistory = require('../models/CreatorEligibilityHistory');
 const CreatorDailyActivity = require('../models/CreatorDailyActivity');
 const mongoose = require('mongoose');
+const { buildUniquePostViewPipeline } = require('./postEngagementAnalytics');
 
 // Configurable thresholds (short-form clip creator monetization)
 const THRESHOLDS = {
@@ -239,28 +240,18 @@ async function calculateEligibility(userId) {
   const clipIds = clips.map((clip) => clip._id);
   const [organicViewRows, boostedViewRows] = clipIds.length > 0
     ? await Promise.all([
-        PostEngagement.aggregate([
-          {
-            $match: {
-              post: { $in: clipIds },
-              eventType: 'view',
-              source: 'organic',
-              createdAt: { $gte: sinceDate }
-            }
-          },
-          { $group: { _id: '$post', views: { $sum: 1 } } }
-        ]),
-        PostEngagement.aggregate([
-          {
-            $match: {
-              post: { $in: clipIds },
-              eventType: 'view',
-              source: 'boost',
-              createdAt: { $gte: sinceDate }
-            }
-          },
-          { $group: { _id: '$post', views: { $sum: 1 } } }
-        ])
+        PostEngagement.aggregate(buildUniquePostViewPipeline({
+          postIds: clipIds,
+          source: 'organic',
+          sinceDate,
+          groupBy: 'post'
+        })),
+        PostEngagement.aggregate(buildUniquePostViewPipeline({
+          postIds: clipIds,
+          source: 'boost',
+          sinceDate,
+          groupBy: 'post'
+        }))
       ])
     : [[], []];
 

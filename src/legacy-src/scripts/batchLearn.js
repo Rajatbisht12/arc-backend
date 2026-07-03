@@ -10,7 +10,8 @@ const { batchLearn } = require('../utils/autoLearning');
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-social-platform');
+    if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
+    await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ MongoDB Connected');
   } catch (error) {
     console.error('❌ MongoDB Connection Error:', error.message);
@@ -20,6 +21,7 @@ const connectDB = async () => {
 
 const runBatchLearning = async () => {
   try {
+    if (!process.argv.includes('--apply')) throw new Error('Refusing to mutate the knowledge base without --apply');
     await connectDB();
     
     console.log('\n🧠 Starting Batch Learning Process...\n');

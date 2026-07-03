@@ -5,6 +5,7 @@ import { backendMiddlewarePath } from "./legacy.paths";
 type MaybeMiddlewareModule = {
   encryptionMiddleware?: (req: Request, res: Response, next: NextFunction) => void;
   handleValidationErrors?: (req: Request, res: Response, next: NextFunction) => void;
+  generalLimiter?: (req: Request, res: Response, next: NextFunction) => void;
   default?: (err: unknown, req: Request, res: Response, next: NextFunction) => void;
 };
 
@@ -43,6 +44,10 @@ const safeRequire = <T>(modulePath: string): T | null => {
 
 export const registerLegacyMiddleware = (app: Express): void => {
   app.use(privacyResponseHeaders);
+  const rateLimits = safeRequire<MaybeMiddlewareModule>(path.join(backendMiddlewarePath, "rateLimiter.js"));
+  if (rateLimits?.generalLimiter) {
+    app.use("/api", rateLimits.generalLimiter);
+  }
   const encryption = safeRequire<MaybeMiddlewareModule>(path.join(backendMiddlewarePath, "encryption.js"));
   if (encryption?.encryptionMiddleware) {
     app.use(encryption.encryptionMiddleware);

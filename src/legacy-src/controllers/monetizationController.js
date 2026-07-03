@@ -14,6 +14,7 @@ const MonetizationApplicationTimeline = require('../models/MonetizationApplicati
 const { getOrComputeEligibility } = require('../services/MonetizationEligibilityEngine');
 const { getEstimatedEarningsForCreator, getOrCreateCurrentCycle } = require('../services/CreatorEarningsCalculationService');
 const log = require('../utils/logger');
+const { sendInternalError } = require('../utils/internalErrorResponse');
 
 function normalizeCountry(country) {
   return String(country || 'IN').trim().toUpperCase().slice(0, 2);
@@ -93,7 +94,13 @@ async function getEligibility(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to get eligibility', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization eligibility lookup failed',
+      publicMessage: 'Failed to get eligibility',
+      error: err
+    });
   }
 }
 
@@ -129,7 +136,13 @@ async function getApplication(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to get application', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization application lookup failed',
+      publicMessage: 'Failed to get application',
+      error: err
+    });
   }
 }
 
@@ -208,7 +221,13 @@ async function applyForMonetization(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to submit application', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization application submission failed',
+      publicMessage: 'Failed to submit application',
+      error: err
+    });
   }
 }
 
@@ -252,7 +271,13 @@ async function withdrawApplication(req, res) {
       data: { application: { _id: application._id, status: application.status } }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to withdraw application', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization application withdrawal failed',
+      publicMessage: 'Failed to withdraw application',
+      error: err
+    });
   }
 }
 
@@ -277,7 +302,13 @@ async function getApplicationHistory(req, res) {
       data: { applications, timeline }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to get application history', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization application history lookup failed',
+      publicMessage: 'Failed to get application history',
+      error: err
+    });
   }
 }
 
@@ -345,7 +376,13 @@ async function getDashboard(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to get dashboard', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization dashboard lookup failed',
+      publicMessage: 'Failed to get dashboard',
+      error: err
+    });
   }
 }
 
@@ -377,7 +414,13 @@ async function getPayoutHistory(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to get payout history', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization payout history lookup failed',
+      publicMessage: 'Failed to get payout history',
+      error: err
+    });
   }
 }
 
@@ -401,7 +444,13 @@ async function getBankDetails(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to get bank details', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization bank details lookup failed',
+      publicMessage: 'Failed to get bank details',
+      error: err
+    });
   }
 }
 
@@ -487,7 +536,13 @@ async function upsertBankDetails(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to save bank details', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization bank details update failed',
+      publicMessage: 'Failed to save bank details',
+      error: err
+    });
   }
 }
 
@@ -500,7 +555,13 @@ async function deleteBankDetails(req, res) {
       message: 'Bank details deleted successfully.'
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to delete bank details', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization bank details deletion failed',
+      publicMessage: 'Failed to delete bank details',
+      error: err
+    });
   }
 }
 
@@ -547,7 +608,13 @@ async function getMonetizationStatus(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to get status', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization status lookup failed',
+      publicMessage: 'Failed to get status',
+      error: err
+    });
   }
 }
 
@@ -615,10 +682,16 @@ async function submitWithdrawalRequest(req, res) {
       }
     });
   } catch (err) {
-    if (err.code === 11000) {
+    if (err?.code === 11000) {
       return res.status(400).json({ success: false, message: 'A withdrawal request for this cycle already exists.' });
     }
-    res.status(500).json({ success: false, message: 'Failed to submit withdrawal request', error: err.message });
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization withdrawal request submission failed',
+      publicMessage: 'Failed to submit withdrawal request',
+      error: err
+    });
   }
 }
 

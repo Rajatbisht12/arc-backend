@@ -736,6 +736,10 @@ test('production hardening contracts cover retries, audit, indexes, and provider
   assert(!trackEventSource.includes("update.$set['push.status']"), 'Web open must use the atomic delivery ACK path');
   assert(!trackEventSource.includes('{ $inc: { [`metrics.'), 'engagement metrics must use authoritative refresh');
   assert(serviceSource.includes('const reconcileAcknowledgedNotificationFailures'));
+  assert(
+    !serviceSource.includes('$setOnInsert: { broadcast, occurrenceKey, broadcastRecipient, recipient, channel, stage'),
+    'notification failure upserts must not update recipient through both $setOnInsert and $set'
+  );
   assert(serviceSource.includes("from: BroadcastRecipient.collection.name"));
   assert(controllerSource.includes('BroadcastPushReceipt.aggregate'));
   assert(controllerSource.includes('BroadcastEvent.aggregate'));

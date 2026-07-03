@@ -4,9 +4,11 @@ import { requireHardcodedAdminAuth } from "../admin/admin-auth.middleware";
 
 const router = Router();
 
-// Public routes (for testing)
-router.post("/test-retrieval", knowledgeController.testRetrieval);
-router.get("/stats", knowledgeController.getStats);
+// Diagnostic retrieval and corpus statistics expose internal knowledge records
+// and can trigger non-trivial database work. They are operational/admin tools,
+// not public product APIs.
+router.post("/test-retrieval", requireHardcodedAdminAuth, knowledgeController.testRetrieval);
+router.get("/stats", requireHardcodedAdminAuth, knowledgeController.getStats);
 
 // Admin-only routes
 router.post("/add", requireHardcodedAdminAuth, knowledgeController.addKnowledge);

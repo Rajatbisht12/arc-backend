@@ -5,6 +5,8 @@ const { calculateBGMIPoints } = require('../utils/bgmiPoints');
 const mongoose = require('mongoose');
 const log = require('../utils/logger');
 const { sanitizePublicScrim } = require('../utils/tournamentPublicDto');
+const { normalizePagination } = require('../utils/pagination');
+const { normalizeQuerySearch, escapeRegex } = require('../utils/searchQuery');
 
 const uniqueRecipientIds = (values = []) =>
   Array.from(new Set(values.map((value) => String(value?._id || value)).filter(Boolean)));
@@ -13,6 +15,8 @@ const idString = (value) => String(value?._id || value || '');
 
 const SCRIM_MATCH_COUNTS = Object.freeze([1, 2, 3, 4, 5, 6]);
 const SCRIM_TYPES = new Set(['Daily', 'Weekly']);
+const SCRIM_STATUSES = new Set(['Open', 'Full', 'In Progress', 'Completed', 'Cancelled']);
+const SCRIM_LIST_FILTERS = new Set(['hosted', 'participating', 'all', 'completed']);
 const SCRIM_FORMATS = new Set(['Solo', 'Squad']);
 const SCRIM_BROADCAST_TYPES = new Set(['info', 'warning', 'match_starting', 'custom']);
 const SCRIM_PRIZE_CURRENCIES = new Set(['INR', 'USD']);
@@ -21,6 +25,41 @@ const TIME_OF_DAY_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_SCRIM_TIMEZONE = 'Asia/Kolkata';
 const MAX_BROADCAST_MESSAGE_LENGTH = 2000;
+
+const normalizeScrimPrizes = ({ prizeDistribution = [], specialPrizes = [], prizePool = 0 }) => {
+  if (!Array.isArray(prizeDistribution) || !Array.isArray(specialPrizes)) {
+    return { error: 'Prize distribution and special prizes must be arrays' };
+  }
+  if (prizeDistribution.length > 100 || specialPrizes.length > 100 ||
+      prizeDistribution.some((entry) => !entry || typeof entry !== 'object' || Array.isArray(entry)) ||
+      specialPrizes.some((entry) => !entry || typeof entry !== 'object' || Array.isArray(entry))) {
+    return { error: 'Invalid prize entries' };
+  }
+  const distribution = prizeDistribution.map((entry) => ({
+    rank: Number(entry.rank),
+    label: String(entry.label || '').trim().slice(0, 120),
+    amount: Number(entry.amount || 0),
+    percentage: Number(entry.percentage || 0)
+  }));
+  const special = specialPrizes.map((entry) => ({
+    category: typeof entry.category === 'string' ? entry.category.trim().slice(0, 120) : '',
+    amount: Number(entry.amount || 0),
+    ...(entry.winnerId ? { winnerId: entry.winnerId } : {}),
+    ...(entry.winnerName ? { winnerName: String(entry.winnerName).slice(0, 120) } : {})
+  }));
+  const ranks = distribution.map((entry) => entry.rank);
+  const categories = special.map((entry) => entry.category.toLowerCase());
+  const amounts = [...distribution, ...special].map((entry) => entry.amount);
+  const percentages = distribution.map((entry) => entry.percentage);
+  if (ranks.some((rank) => !Number.isInteger(rank) || rank < 1) || new Set(ranks).size !== ranks.length ||
+      categories.some((category) => !category) || new Set(categories).size !== categories.length ||
+      amounts.some((amount) => !Number.isFinite(amount) || amount < 0) ||
+      percentages.some((percentage) => !Number.isFinite(percentage) || percentage < 0 || percentage > 100) ||
+      amounts.reduce((sum, amount) => sum + amount, 0) > Number(prizePool || 0)) {
+    return { error: 'Invalid or over-budget prize distribution' };
+  }
+  return { value: { prizeDistribution: distribution, specialPrizes: special } };
+};
 
 const DAILY_TIME_SLOTS_BY_MATCH_COUNT = Object.freeze({
   1: new Set(['1-2', '2-3', '3-4', '4-5', '5-6', '6-7', '7-8', '8-9', '9-10']),
@@ -71,6 +110,10 @@ const validateScrimCreationInput = (payload = {}, options = {}) => {
   const now = options.now instanceof Date ? options.now : new Date();
   const name = typeof payload.name === 'string' ? payload.name.trim() : '';
   if (!name) return { error: 'Scrim name is required' };
+  if (name.length > 200) return { error: 'Scrim name cannot exceed 200 characters' };
+  if (payload.description !== undefined && (typeof payload.description !== 'string' || payload.description.length > 5000)) {
+    return { error: 'Scrim description must be text and cannot exceed 5000 characters' };
+  }
 
   const scrimType = typeof payload.scrimType === 'string' ? payload.scrimType.trim() : '';
   if (!SCRIM_TYPES.has(scrimType)) return { error: 'Scrim type must be either Daily or Weekly' };
@@ -145,6 +188,12 @@ const validateScrimCreationInput = (payload = {}, options = {}) => {
   if (normalizedPrizePoolType === 'with_prize' && requestedPrizePool <= 0) {
     return { error: 'Prize pool amount must be greater than zero for prize scrims' };
   }
+  const prizes = normalizeScrimPrizes({
+    prizeDistribution: payload.prizeDistribution || [],
+    specialPrizes: payload.specialPrizes || [],
+    prizePool: normalizedPrizePoolType === 'with_prize' ? requestedPrizePool : 0
+  });
+  if (prizes.error) return prizes;
 
   return {
     value: {
@@ -160,6 +209,8 @@ const validateScrimCreationInput = (payload = {}, options = {}) => {
       prizePoolType: normalizedPrizePoolType,
       prizePool: normalizedPrizePoolType === 'with_prize' ? requestedPrizePool : 0,
       prizePoolCurrency,
+      prizeDistribution: prizes.value.prizeDistribution,
+      specialPrizes: prizes.value.specialPrizes,
       matches: payload.matches.map((match, index) => ({
         matchNumber: index + 1,
         map: match.map,
@@ -305,11 +356,7 @@ const findScrimByIdOrCode = async (idOrCode) => {
 // Create new scrim
 const createScrim = async (req, res) => {
   try {
-    const {
-      description,
-      prizeDistribution,
-      specialPrizes
-    } = req.body;
+    const { description } = req.body;
 
     const hostId = req.user._id;
 
@@ -368,8 +415,8 @@ const createScrim = async (req, res) => {
       prizePool: normalized.prizePool,
       prizePoolType: normalized.prizePoolType,
       prizePoolCurrency: normalized.prizePoolCurrency,
-      prizeDistribution: (prizeDistribution || []).filter(p => p.rank && p.amount),
-      specialPrizes: (specialPrizes || []).filter(p => p.category && p.category.trim() !== '' && p.amount),
+      prizeDistribution: normalized.prizeDistribution,
+      specialPrizes: normalized.specialPrizes,
       host: hostId,
       status: 'Open',
       matches: normalized.matches.map((match) => ({
@@ -424,11 +471,16 @@ const createScrim = async (req, res) => {
 // Get all scrims
 const getScrims = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 100;
-    const skip = (page - 1) * limit;
-
-    const { scrimType, status, search, filter } = req.query;
+    const { page, limit, skip } = normalizePagination(req.query, { defaultLimit: 100, maxLimit: 100 });
+    const scrimType = typeof req.query.scrimType === 'string' ? req.query.scrimType.trim() : '';
+    const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+    const filter = typeof req.query.filter === 'string' ? req.query.filter.trim() : '';
+    const search = normalizeQuerySearch(req.query.search);
+    if ((req.query.scrimType !== undefined && (typeof req.query.scrimType !== 'string' || (scrimType && !SCRIM_TYPES.has(scrimType)))) ||
+        (req.query.status !== undefined && (typeof req.query.status !== 'string' || (status && !SCRIM_STATUSES.has(status)))) ||
+        (req.query.filter !== undefined && (typeof req.query.filter !== 'string' || (filter && !SCRIM_LIST_FILTERS.has(filter))))) {
+      return res.status(400).json({ success: false, message: 'Invalid scrim filter' });
+    }
 
     // Build filter object
     const queryFilter = {};
@@ -473,9 +525,9 @@ const getScrims = async (req, res) => {
 
     if (search) {
       queryFilter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { scrimCode: { $regex: search, $options: 'i' } }
+        { name: { $regex: escapeRegex(search), $options: 'i' } },
+        { description: { $regex: escapeRegex(search), $options: 'i' } },
+        { scrimCode: { $regex: escapeRegex(search), $options: 'i' } }
       ];
     }
 
@@ -980,6 +1032,13 @@ const updateScrim = async (req, res) => {
     });
   } catch (error) {
     log.error('Error updating scrim:', { error: String(error) });
+    if (error?.name === 'ValidationError' || error?.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid scrim update',
+        errors: error?.errors ? Object.values(error.errors).map((entry) => entry.message) : undefined
+      });
+    }
     res.status(500).json({
       success: false,
       message: 'Failed to update scrim',
@@ -1092,8 +1151,16 @@ const updateScrimPrizeDistribution = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Only host can update prize distribution' });
     }
 
-    if (prizeDistribution) scrim.prizeDistribution = prizeDistribution;
-    if (specialPrizes) scrim.specialPrizes = specialPrizes;
+    const prizes = normalizeScrimPrizes({
+      prizeDistribution: prizeDistribution ?? scrim.prizeDistribution ?? [],
+      specialPrizes: specialPrizes ?? scrim.specialPrizes ?? [],
+      prizePool: scrim.prizePool
+    });
+    if (prizes.error) {
+      return res.status(400).json({ success: false, message: prizes.error });
+    }
+    scrim.prizeDistribution = prizes.value.prizeDistribution;
+    scrim.specialPrizes = prizes.value.specialPrizes;
 
     await scrim.save();
 
@@ -1107,6 +1174,9 @@ const updateScrimPrizeDistribution = async (req, res) => {
     });
   } catch (error) {
     log.error('Error updating scrim prize distribution:', { error: String(error) });
+    if (error?.name === 'ValidationError' || error?.name === 'CastError') {
+      return res.status(400).json({ success: false, message: 'Invalid prize distribution' });
+    }
     res.status(500).json({ success: false, message: 'Failed to update prize distribution' });
   }
 };
@@ -1169,6 +1239,11 @@ const generateScrimFinalResult = async (req, res) => {
 const assignScrimSpecialPrize = async (req, res) => {
   try {
     const { category, winnerId, winnerName } = req.body;
+    if (typeof category !== 'string' || !category.trim() || category.length > 120 ||
+        typeof winnerId !== 'string' || !mongoose.Types.ObjectId.isValid(winnerId) ||
+        (winnerName !== undefined && (typeof winnerName !== 'string' || winnerName.length > 120))) {
+      return res.status(400).json({ success: false, message: 'Valid special prize winner details are required' });
+    }
     const scrim = await findScrimByIdOrCode(req.params.id);
 
     if (!scrim) {
@@ -1179,7 +1254,7 @@ const assignScrimSpecialPrize = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Only host can assign special prizes' });
     }
 
-    const prizeIndex = scrim.specialPrizes.findIndex(p => p.category === category);
+    const prizeIndex = scrim.specialPrizes.findIndex(p => p.category === category.trim());
     if (prizeIndex === -1) {
       return res.status(404).json({ success: false, message: 'Special prize category not found' });
     }

@@ -6,6 +6,7 @@ const RecruitmentApplication = require('../models/RecruitmentApplication');
 const User = require('../models/User');
 const safeAsyncHandler = require('../utils/safeAsyncHandler');
 const log = require('../utils/logger');
+const { escapeRegex } = require('../utils/searchQuery');
 const {
   addPlayerProfileIntegrityFilters,
   listCanonicalRecruitmentRecords
@@ -137,6 +138,13 @@ const matchPlayersToTeam = safeAsyncHandler(async (req, res) => {
         return res.status(404).json({
           success: false,
           message: 'Recruitment post not found'
+        });
+      }
+
+      if (!recruitment.team?._id) {
+        return res.status(404).json({
+          success: false,
+          message: 'Recruitment team is no longer available'
         });
       }
 
@@ -435,8 +443,21 @@ const analyzeApplication = safeAsyncHandler(async (req, res) => {
       });
     }
 
+    if (!application.recruitment?._id || !application.applicant?._id) {
+      return res.status(404).json({
+        success: false,
+        message: 'Application references are no longer available'
+      });
+    }
+
     // Verify team ownership
     const recruitment = await TeamRecruitment.findById(application.recruitment._id);
+    if (!recruitment?.team) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recruitment post is no longer available'
+      });
+    }
     if (recruitment.team.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -1092,6 +1113,13 @@ const rankCandidates = safeAsyncHandler(async (req, res) => {
       });
     }
 
+    if (!recruitment.team) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recruitment team is no longer available'
+      });
+    }
+
     // Verify ownership
     if (recruitment.team.toString() !== userId.toString()) {
       return res.status(403).json({
@@ -1100,7 +1128,8 @@ const rankCandidates = safeAsyncHandler(async (req, res) => {
       });
     }
 
-    if (!recruitment.applicants || recruitment.applicants.length === 0) {
+    const validApplicants = (recruitment.applicants || []).filter((applicant) => applicant.user?._id);
+    if (validApplicants.length === 0) {
       return res.status(200).json({
         success: true,
         message: 'No applicants to rank',
@@ -1112,7 +1141,7 @@ const rankCandidates = safeAsyncHandler(async (req, res) => {
 
     // Get applicant profiles with comprehensive data
     const applicantData = await Promise.all(
-      recruitment.applicants.map(async (applicant) => {
+      validApplicants.map(async (applicant) => {
         const user = applicant.user;
         const profile = await PlayerProfile.findOne({
           player: user._id,
@@ -1309,7 +1338,7 @@ const smartSearch = safeAsyncHandler(async (req, res) => {
 
     if (searchType === 'players' && role) {
       query.game = game;
-      query.role = { $regex: role, $options: 'i' };
+      query.role = { $regex: escapeRegex(role), $options: 'i' };
     } else if (searchType === 'staff' && role) {
       query.staffRole = role;
     } else if (searchType === 'players') {

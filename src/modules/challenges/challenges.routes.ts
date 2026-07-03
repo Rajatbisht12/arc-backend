@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { body } from "express-validator";
-import { challengesController, protect, publicOptionalAuth } from "./challenges.legacy-adapters";
+import { body, param } from "express-validator";
+import { challengesController, handleValidationErrors, protect, publicOptionalAuth } from "./challenges.legacy-adapters";
 
 const router = Router();
 
@@ -54,16 +54,17 @@ const validateChallenge = [
 const validateProgressUpdate = [
   body("progressValue").isNumeric().withMessage("Progress value must be a number").isFloat({ min: 0 }).withMessage("Progress value cannot be negative")
 ];
+const validateChallengeId = [param("id").isMongoId().withMessage("Invalid challenge ID")];
 
 router.get("/", publicOptionalAuth, challengesController.getChallenges);
 router.get("/my/challenges", protect, challengesController.getMyChallenges);
 router.get("/my/participations", protect, challengesController.getMyParticipations);
-router.get("/:id", publicOptionalAuth, challengesController.getChallenge);
-router.post("/", protect, ...validateChallenge, challengesController.createChallenge);
-router.post("/:id/join", protect, challengesController.joinChallenge);
-router.put("/:id/progress", protect, ...validateProgressUpdate, challengesController.updateProgress);
-router.put("/:id", protect, challengesController.updateChallenge);
-router.delete("/:id", protect, challengesController.deleteChallenge);
-router.post("/:id/distribute-rewards", protect, challengesController.distributeRewards);
+router.get("/:id", publicOptionalAuth, validateChallengeId, handleValidationErrors, challengesController.getChallenge);
+router.post("/", protect, ...validateChallenge, handleValidationErrors, challengesController.createChallenge);
+router.post("/:id/join", protect, validateChallengeId, handleValidationErrors, challengesController.joinChallenge);
+router.put("/:id/progress", protect, validateChallengeId, ...validateProgressUpdate, handleValidationErrors, challengesController.updateProgress);
+router.put("/:id", protect, validateChallengeId, handleValidationErrors, challengesController.updateChallenge);
+router.delete("/:id", protect, validateChallengeId, handleValidationErrors, challengesController.deleteChallenge);
+router.post("/:id/distribute-rewards", protect, validateChallengeId, handleValidationErrors, challengesController.distributeRewards);
 
 export default router;

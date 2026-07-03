@@ -1,5 +1,5 @@
 /**
- * Quick script to list existing users and optionally create a test user.
+ * Read-only script to list a small sample of existing users.
  * Usage:  node scripts/check-users.js
  */
 require('dotenv').config();
@@ -8,6 +8,7 @@ const User = require('../models/User');
 
 async function main() {
   try {
+    if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('Connected to MongoDB\n');
 
@@ -19,47 +20,18 @@ async function main() {
     } else {
       console.log(`Found ${users.length} user(s):\n`);
       users.forEach((u, i) => {
-        console.log(`  ${i + 1}. username: ${u.username}  |  email: ${u.email}  |  type: ${u.userType}  |  active: ${u.isActive}`);
+        const [localPart = '', domain = ''] = String(u.email || '').split('@');
+        const maskedEmail = domain
+          ? `${localPart.slice(0, 2)}***@${domain}`
+          : '(none)';
+        console.log(`  ${i + 1}. username: ${u.username}  |  email: ${maskedEmail}  |  type: ${u.userType}  |  active: ${u.isActive}`);
       });
       console.log('');
     }
 
-    // Check if test user already exists
-    const testEmail = 'test@test.com';
-    const existing = await User.findOne({ email: testEmail });
-    
-    if (existing) {
-      console.log(`✅ Test user already exists: ${existing.username} (${testEmail})`);
-      // Reset the password for the test user
-      existing.password = 'test1234';
-      await existing.save();
-      console.log('   Password has been reset to: test1234');
-    } else {
-      // Create a test user
-      const testUser = await User.create({
-        username: 'testuser',
-        email: testEmail,
-        password: 'test1234',
-        userType: 'player',
-        profile: {
-          displayName: 'Test User',
-        },
-        playerInfo: {
-          games: [],
-          achievements: [],
-          lookingForTeam: false,
-          preferredRoles: [],
-          skillLevel: 'beginner'
-        }
-      });
-      console.log(`✅ Created test user!`);
-      console.log(`   Email:    ${testEmail}`);
-      console.log(`   Username: testuser`);
-      console.log(`   Password: test1234`);
-    }
-
   } catch (err) {
     console.error('Error:', err.message);
+    process.exitCode = 1;
   } finally {
     await mongoose.disconnect();
     console.log('\nDone.');

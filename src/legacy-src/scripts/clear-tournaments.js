@@ -5,8 +5,12 @@ require('dotenv').config();
 
 const clearAllTournaments = async () => {
   try {
+    if (!process.argv.includes('--apply') || process.env.CONFIRM_DESTRUCTIVE_OPERATION !== 'CLEAR_TOURNAMENTS') {
+      throw new Error('Requires --apply and CONFIRM_DESTRUCTIVE_OPERATION=CLEAR_TOURNAMENTS');
+    }
+    if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
     // Connect to database
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-social-platform');
+    await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ Connected to database');
 
     // Delete all tournaments
@@ -14,19 +18,15 @@ const clearAllTournaments = async () => {
     console.log(`\n✅ Deleted ${result.deletedCount} tournament(s) successfully!`);
 
   } catch (error) {
-    console.error('❌ Error clearing tournaments:', error);
+    console.error('❌ Error clearing tournaments:', error.message);
+    process.exitCode = 1;
   } finally {
-    await mongoose.disconnect();
+    if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
     console.log('Database connection closed');
-    process.exit(0);
   }
 };
 
 // Confirm before running
 console.log('⚠️  WARNING: This will delete ALL tournaments from the database!');
-console.log('Press Ctrl+C to cancel, or wait 3 seconds to continue...\n');
-
-setTimeout(() => {
-  clearAllTournaments();
-}, 3000);
+clearAllTournaments();
 

@@ -6,19 +6,13 @@ import morgan from "morgan";
 import mongoose from "mongoose";
 import passport from "passport";
 import { env } from "./config/env";
+import { isAllowedOrigin } from "./config/cors";
 import { registerModules } from "./modules";
 import { registerLegacyErrorHandlers } from "./modules/legacy/legacy.middleware";
 
 export const createApp = () => {
   const app = express();
   app.set("trust proxy", 1);
-  const allowedOrigins = env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean);
-  const officialFrontendOrigins = new Set([
-    "https://squadhunt.in",
-    "https://www.squadhunt.in",
-    "https://admin.squadhunt.in"
-  ]);
-
   app.use(helmet({
     crossOriginOpenerPolicy: { policy: "unsafe-none" }
   }));
@@ -28,8 +22,11 @@ export const createApp = () => {
       origin: (origin, callback) => {
         // Allow server-to-server and same-origin requests with no Origin header.
         if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin) || officialFrontendOrigins.has(origin)) return callback(null, true);
-        return callback(new Error(`Origin ${origin} not allowed by CORS`));
+        if (isAllowedOrigin(origin)) return callback(null, true);
+        const error = new Error("Origin not allowed by CORS") as Error & { statusCode?: number; code?: string };
+        error.statusCode = 403;
+        error.code = "CORS_ORIGIN_DENIED";
+        return callback(error);
       },
       credentials: true
     })
@@ -51,7 +48,7 @@ export const createApp = () => {
   app.use(passport.initialize());
 
   app.use((req, res, next) => {
-    if (req.path === "/api/health" || req.path === "/api/simple-health" || req.path === "/api/test-connection") {
+    if (req.path === "/health" || req.path === "/api/health" || req.path === "/api/simple-health" || req.path === "/api/test-connection") {
       return next();
     }
     if (mongoose.connection.readyState !== 1) {
@@ -64,7 +61,13 @@ export const createApp = () => {
   });
 
   app.get("/", (_req, res) => res.json({ success: true, message: "ARC Backend running" }));
-  app.get("/health", (_req, res) => res.json({ status: "ok" }));
+  app.get("/health", (_req, res) => res.json({
+    success: true,
+    service: "arc-modular-backend",
+    status: "ok",
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString()
+  }));
 
   registerModules(app);
   registerLegacyErrorHandlers(app);

@@ -35,6 +35,7 @@ const { invalidateProfileCache } = require('../utils/profileCache');
 const { evictPresenceAudience } = require('../utils/presencePrivacy');
 const { disconnectUserSockets } = require('../utils/realtimePrivacy');
 const { PLATFORM_DEFAULT_CPM, getOrCreateCurrentCycle } = require('../services/CreatorEarningsCalculationService');
+const { buildUniquePostViewPipeline } = require('../services/postEngagementAnalytics');
 const {
   applyManualDeliveryProgress,
   processDueManualBoostDeliveries,
@@ -114,6 +115,9 @@ const growthSeries = async (model, match = {}, days = 14) => {
 };
 
 const normalizeLimit = (value, fallback = 20, max = 100) => Math.min(max, Math.max(1, parseInt(value, 10) || fallback));
+const normalizePage = (value) => Math.min(10000, Math.max(1, parseInt(value, 10) || 1));
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normalizeSearchPattern = (value, maxLength = 100) => escapeRegex(String(value || '').trim().slice(0, maxLength));
 
 const getAdminActor = (req) => ({
   username: req.user?.username || 'admin',
@@ -551,9 +555,9 @@ const getRecentActivities = async (req, res) => {
 // Get all users with pagination
 const getUsers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const search = req.query.search || '';
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 10, 100);
+    const search = normalizeSearchPattern(req.query.search);
     const userType = req.query.userType || '';
     const isActive = req.query.isActive;
 
@@ -730,9 +734,9 @@ const deleteUser = async (req, res) => {
 // Get posts with pagination
 const getPosts = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const search = req.query.search || '';
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 10, 100);
+    const search = normalizeSearchPattern(req.query.search);
     const author = req.query.author || '';
     const isActive = req.query.isActive;
 
@@ -814,7 +818,10 @@ const deletePost = async (req, res) => {
 // Tournament Management
 const getTournaments = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search, status } = req.query;
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 10, 100);
+    const search = normalizeSearchPattern(req.query.search);
+    const { status } = req.query;
     
     let query = {};
     
@@ -847,8 +854,8 @@ const getTournaments = async (req, res) => {
       pagination: {
         total,
         pages: Math.ceil(total / limit),
-        currentPage: parseInt(page),
-        limit: parseInt(limit)
+        currentPage: page,
+        limit
       }
     });
   } catch (error) {
@@ -876,7 +883,9 @@ const deleteTournament = async (req, res) => {
 // Reports: list all reports
 const getReports = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, targetType } = req.query;
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 20, 100);
+    const { status, targetType } = req.query;
     const query = {};
     if (status && status !== 'all') query.status = status;
     if (targetType && targetType !== 'all') query.targetType = targetType;
@@ -885,15 +894,15 @@ const getReports = async (req, res) => {
       .populate('reporter', 'username profile.displayName profile.avatar email')
       .populate('reviewedBy', 'username profile.displayName')
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(limit)
+      .skip((page - 1) * limit)
       .lean();
 
     const total = await Report.countDocuments(query);
 
     res.json({
       success: true,
-      data: { reports, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) }
+      data: { reports, total, page, pages: Math.ceil(total / limit) }
     });
   } catch (error) {
     log.error('Get reports error:', { error: String(error) });
@@ -1025,12 +1034,11 @@ const getMonetizationWindowStart = () => {
 };
 
 const sumPostEngagementViews = async (source, sinceDate = null) => {
-  const match = { eventType: 'view', source };
-  if (sinceDate) match.createdAt = { $gte: sinceDate };
-  const rows = await PostEngagement.aggregate([
-    { $match: match },
-    { $group: { _id: null, views: { $sum: 1 } } }
-  ]);
+  const rows = await PostEngagement.aggregate(buildUniquePostViewPipeline({
+    source,
+    sinceDate,
+    groupBy: 'total'
+  }));
   return rows[0]?.views || 0;
 };
 
@@ -1208,26 +1216,18 @@ const getCreatorAnalytics = async (req, res) => {
     const clipIds = postIds.map((post) => post._id);
 
     const [viewRows, qualifiedClipRows, payoutRows, eligibilityHistory, timeline, stats] = await Promise.all([
+      clipIds.length ? PostEngagement.aggregate(buildUniquePostViewPipeline({
+        postIds: clipIds,
+        sinceDate,
+        groupBy: 'source'
+      })) : [],
       clipIds.length ? PostEngagement.aggregate([
-        {
-          $match: {
-            post: { $in: clipIds },
-            eventType: 'view',
-            createdAt: { $gte: sinceDate }
-          }
-        },
-        { $group: { _id: '$source', views: { $sum: 1 } } }
-      ]) : [],
-      clipIds.length ? PostEngagement.aggregate([
-        {
-          $match: {
-            post: { $in: clipIds },
-            eventType: 'view',
-            source: 'organic',
-            createdAt: { $gte: sinceDate }
-          }
-        },
-        { $group: { _id: '$post', views: { $sum: 1 } } },
+        ...buildUniquePostViewPipeline({
+          postIds: clipIds,
+          source: 'organic',
+          sinceDate,
+          groupBy: 'post'
+        }),
         { $match: { views: { $gte: 3000 } } },
         { $count: 'count' }
       ]) : [],
@@ -1318,21 +1318,35 @@ const getCreatorBankDetailsForAdmin = async (req, res) => {
 
 const getMonetizationApplications = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status } = req.query;
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 20, 50);
+    const { status } = req.query;
     const query = {};
     if (status && status !== 'all') query.status = status;
 
     const applications = await MonetizationApplication.find(query)
       .populate('user', 'username profile.displayName profile.avatar profile.bio email userType createdAt')
       .sort({ appliedAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(limit)
+      .skip((page - 1) * limit)
       .lean();
 
     const total = await MonetizationApplication.countDocuments(query);
 
     // Enrich with follower count and content sample (post count, recent posts)
     const enriched = await Promise.all(applications.map(async (app) => {
+      if (!app.user?._id) {
+        return {
+          ...app,
+          orphanedUser: true,
+          applicantStats: { followersCount: 0, postCount: 0, reportsAgainstUser: 0 },
+          creatorStats: null,
+          bankDetails: null,
+          contentSamples: [],
+          fraudRiskIndicators: { highReportCount: false, lowContent: true, suspiciousViewSpike: false },
+          timeline: []
+        };
+      }
       const u = await User.findById(app.user._id).select('followers').lean();
       const followersCount = (u?.followers && u.followers.length) || 0;
       const recentPosts = await Post.find({ author: app.user._id })
@@ -1403,8 +1417,8 @@ const getMonetizationApplications = async (req, res) => {
       data: {
         applications: enriched,
         total,
-        page: parseInt(page),
-        pages: Math.ceil(total / parseInt(limit))
+        page,
+        pages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
@@ -1568,8 +1582,8 @@ const holdCreatorPayout = async (req, res) => {
 // Task 5.1: List all approved creators
 const getApprovedCreators = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 20, 100);
 
     const creators = await User.find({ userType: 'player', isCreator: true, isActive: true })
       .select('username profile.displayName profile.avatar creatorCpm creatorMonetizationStatus followers membership email')
@@ -1749,7 +1763,9 @@ const getCreatorCpm = async (req, res) => {
 // Task 5.5: List withdrawal requests (admin)
 const listWithdrawalRequests = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status } = req.query;
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 20, 100);
+    const { status } = req.query;
     const query = {};
     if (status && status !== 'all') query.status = status;
 
@@ -1757,15 +1773,17 @@ const listWithdrawalRequests = async (req, res) => {
       .populate('user', 'username profile.displayName profile.avatar')
       .populate('payoutCycle', 'cycleLabel periodType endDate')
       .sort({ requestedAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(limit)
+      .skip((page - 1) * limit)
       .lean();
 
     // Enrich with bank details
     const enriched = await Promise.all(requests.map(async (r) => {
-      const bank = await CreatorBankDetails.findOne({ user: r.user._id })
-        .select('accountHolderName bankName lastFourDigits ifsc verificationStatus')
-        .lean();
+      const bank = r.user?._id
+        ? await CreatorBankDetails.findOne({ user: r.user._id })
+            .select('accountHolderName bankName lastFourDigits ifsc verificationStatus')
+            .lean()
+        : null;
       return { ...r, bankDetails: bank || null };
     }));
 
@@ -1776,8 +1794,8 @@ const listWithdrawalRequests = async (req, res) => {
       data: {
         requests: enriched,
         total,
-        page: parseInt(page),
-        pages: Math.ceil(total / parseInt(limit))
+        page,
+        pages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
@@ -1853,7 +1871,9 @@ const rejectWithdrawalRequest = async (req, res) => {
 // Task 5.1: Get host verification applications
 const getHostVerificationApplications = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status } = req.query;
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 20, 100);
+    const { status } = req.query;
     const query = {};
     
     // Status filter
@@ -1865,8 +1885,8 @@ const getHostVerificationApplications = async (req, res) => {
       .populate('user', 'username profile.displayName profile.avatar email')
       .populate('reviewedBy', 'username')
       .sort({ appliedAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(limit)
+      .skip((page - 1) * limit)
       .lean();
 
     const total = await HostVerificationApplication.countDocuments(query);
@@ -1877,9 +1897,9 @@ const getHostVerificationApplications = async (req, res) => {
         applications,
         pagination: {
           total,
-          pages: Math.ceil(total / parseInt(limit)),
-          current: parseInt(page),
-          limit: parseInt(limit)
+          pages: Math.ceil(total / limit),
+          current: page,
+          limit
         }
       }
     });
@@ -2026,8 +2046,10 @@ const rejectHostVerificationApplication = async (req, res) => {
 // Get all verified hosts
 const getVerifiedHosts = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 20, 100);
+    const search = normalizeSearchPattern(req.query.search);
+    const skip = (page - 1) * limit;
 
     const query = { isVerifiedHost: true };
     if (search) {
@@ -2042,7 +2064,7 @@ const getVerifiedHosts = async (req, res) => {
       .select('username email profile.displayName profile.avatar isVerifiedHost createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .lean();
 
     const total = await User.countDocuments(query);
@@ -2053,8 +2075,8 @@ const getVerifiedHosts = async (req, res) => {
         hosts: users,
         pagination: {
           total,
-          page: parseInt(page),
-          pages: Math.ceil(total / parseInt(limit))
+          page,
+          pages: Math.ceil(total / limit)
         }
       }
     });
@@ -2107,7 +2129,9 @@ const revokeHostVerification = async (req, res) => {
 
 const listCreatorPayouts = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status } = req.query;
+    const page = normalizePage(req.query.page);
+    const limit = normalizeLimit(req.query.limit, 20, 100);
+    const { status } = req.query;
     const query = {};
     if (status && status !== 'all') query.status = status;
 
@@ -2115,8 +2139,8 @@ const listCreatorPayouts = async (req, res) => {
       .populate('user', 'username email profile.displayName profile.avatar')
       .populate('payoutCycle', 'cycleLabel periodType startDate endDate')
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(limit)
+      .skip((page - 1) * limit)
       .lean();
 
     const enriched = await Promise.all(payouts.map(async (payout) => {
@@ -2134,8 +2158,8 @@ const listCreatorPayouts = async (req, res) => {
       data: {
         payouts: enriched,
         total,
-        page: parseInt(page),
-        pages: Math.ceil(total / parseInt(limit))
+        page,
+        pages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
@@ -2365,13 +2389,13 @@ const disableMonetization = revokeMonetization;
 
 const getAuditLogs = async (req, res) => {
   try {
-    const page = parseInt(req.query.page, 10) || 1;
+    const page = normalizePage(req.query.page);
     const limit = normalizeLimit(req.query.limit, 25, 100);
     const { action, actor, resourceType, statusCode } = req.query;
     const query = {};
 
-    if (action) query.action = { $regex: String(action), $options: 'i' };
-    if (actor) query['actor.username'] = { $regex: String(actor), $options: 'i' };
+    if (action) query.action = { $regex: normalizeSearchPattern(action), $options: 'i' };
+    if (actor) query['actor.username'] = { $regex: normalizeSearchPattern(actor), $options: 'i' };
     if (resourceType && resourceType !== 'all') query.resourceType = resourceType;
     if (statusCode) query.statusCode = parseInt(statusCode, 10);
 
@@ -2403,14 +2427,14 @@ const getAuditLogs = async (req, res) => {
 
 const globalSearch = async (req, res) => {
   try {
-    const query = String(req.query.q || '').trim();
+    const query = String(req.query.q || '').trim().slice(0, 100);
     const limit = normalizeLimit(req.query.limit, 8, 20);
 
     if (query.length < 2) {
       return res.json({ success: true, data: { query, results: {} } });
     }
 
-    const text = { $regex: query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+    const text = { $regex: escapeRegex(query), $options: 'i' };
     const objectId = mongoose.Types.ObjectId.isValid(query) ? new mongoose.Types.ObjectId(query) : null;
 
     const [
@@ -2596,7 +2620,7 @@ const removePremium = async (req, res) => {
 
 const getBoostCampaigns = async (req, res) => {
   try {
-    const page = parseInt(req.query.page, 10) || 1;
+    const page = normalizePage(req.query.page);
     const limit = normalizeLimit(req.query.limit, 20, 100);
     const { status, userId, postId } = req.query;
     const query = {};

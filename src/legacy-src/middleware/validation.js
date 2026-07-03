@@ -23,10 +23,12 @@ const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
   
   if (!errors.isEmpty()) {
+    // Never echo rejected values. Several validators handle credentials and
+    // bearer-like tokens, so returning `error.value` would disclose secrets in
+    // API responses and any downstream access/error logs.
     const errorMessages = errors.array().map(error => ({
       field: error.path,
-      message: error.msg,
-      value: error.value
+      message: error.msg
     }));
     
     return res.status(400).json({

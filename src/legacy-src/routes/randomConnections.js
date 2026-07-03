@@ -1,6 +1,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const { protect, authorize } = require('../middleware/auth');
+const { handleValidationErrors } = require('../middleware/validation');
 const {
   joinQueue,
   leaveQueue,
@@ -19,7 +20,7 @@ const { normalizePreferredGender } = require('../utils/randomConnectGender');
 const router = express.Router();
 
 // Test endpoint to check queue status (no auth required for testing)
-router.get('/queue-status', async (req, res) => {
+router.get('/queue-status', protect, async (req, res) => {
   try {
     const queueCount = await ConnectionQueue.countDocuments({ status: 'waiting' });
     const activeConnections = await RandomConnection.countDocuments({ status: 'active' });
@@ -31,10 +32,10 @@ router.get('/queue-status', async (req, res) => {
       timestamp: new Date()
     });
   } catch (error) {
+    console.error('Failed to read Random Connect queue status:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get queue status',
-      error: error.message
+      message: 'Failed to get queue status'
     });
   }
 });
@@ -91,13 +92,13 @@ const disconnectValidation = [
 ];
 
 // Routes
-router.post('/join-queue', protect, joinQueueValidation, joinQueue);
+router.post('/join-queue', protect, joinQueueValidation, handleValidationErrors, joinQueue);
 router.delete('/leave-queue', protect, leaveQueue);
 router.get('/current-connection', protect, getCurrentConnection);
 router.get('/active-sessions', protect, getActiveSessions);
 router.get('/daily-gender-matches-remaining', protect, getDailyGenderMatchesRemaining);
-router.post('/disconnect', protect, disconnectValidation, disconnectConnection);
-router.post('/send-message', protect, sendMessageValidation, sendMessage);
+router.post('/disconnect', protect, disconnectValidation, handleValidationErrors, disconnectConnection);
+router.post('/send-message', protect, sendMessageValidation, handleValidationErrors, sendMessage);
 router.post('/cleanup-current', protect, cleanupCurrentConnection);
 
 module.exports = router;

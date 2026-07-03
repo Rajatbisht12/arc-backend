@@ -4,6 +4,7 @@
 
 const HostVerificationApplication = require('../models/HostVerificationApplication');
 const log = require('../utils/logger');
+const { sendInternalError } = require('../utils/internalErrorResponse');
 
 /**
  * POST /api/host-verification/apply
@@ -60,10 +61,12 @@ async function applyForHostVerification(req, res) {
       data: { application }
     });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to submit application',
-      error: err.message
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Host verification application submission failed',
+      publicMessage: 'Failed to submit application',
+      error: err
     });
   }
 }
@@ -83,10 +86,12 @@ async function getMyHostVerificationStatus(req, res) {
       data: { application: application || null }
     });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to get application status',
-      error: err.message
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Host verification application status lookup failed',
+      publicMessage: 'Failed to get application status',
+      error: err
     });
   }
 }

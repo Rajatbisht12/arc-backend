@@ -37,8 +37,11 @@ const seedPremiumUser = async () => {
     process.exit(1);
   }
 
+  if (!process.argv.includes('--apply')) throw new Error('Refusing to seed premium access without --apply');
+  if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
+
   await mongoose.connect(
-    process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-social-platform',
+    process.env.MONGODB_URI,
     process.env.MONGODB_TLS === 'true'
       ? {
           tls: true,

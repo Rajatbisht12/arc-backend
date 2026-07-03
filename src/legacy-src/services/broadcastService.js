@@ -1339,7 +1339,7 @@ const recordNotificationFailure = async ({
   const failure = await NotificationFailure.findOneAndUpdate(
     { broadcast, occurrenceKey, broadcastRecipient, channel, stage },
     {
-      $setOnInsert: { broadcast, occurrenceKey, broadcastRecipient, recipient, channel, stage, firstFailedAt: new Date() },
+      $setOnInsert: { broadcast, occurrenceKey, broadcastRecipient, channel, stage, firstFailedAt: new Date() },
       $set: {
         recipient,
         code: safeString(code, 200),

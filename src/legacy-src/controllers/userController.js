@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const mongoose = require('mongoose');
 const crypto = require('crypto');
 const Post = require('../models/Post');
 const Tournament = require('../models/Tournament');
@@ -875,10 +876,24 @@ const toggleFollow = async (req, res) => {
   }
 };
 
+const normalizeUserListIdentifier = (identifier) => {
+  if (typeof identifier !== 'string') return '';
+  const normalized = identifier.trim();
+  // Followers/following URLs historically accept either an ObjectId or a
+  // username. Reject malformed path input before it reaches Mongoose while
+  // preserving both established forms.
+  if (!normalized || normalized.length > 64) return '';
+  return /^[0-9a-fA-F]{24}$/.test(normalized) || /^[a-zA-Z0-9_.-]+$/.test(normalized)
+    ? normalized
+    : '';
+};
+
 const getTargetPrivacy = async (req, identifier) => {
-  const target = identifier && /^[0-9a-fA-F]{24}$/.test(String(identifier))
-    ? await User.findById(identifier).select('username userType profile privacySettings blockedUsers isActive')
-    : await User.findOne({ username: identifier }).select('username userType profile privacySettings blockedUsers isActive');
+  const normalizedIdentifier = normalizeUserListIdentifier(identifier);
+  if (!normalizedIdentifier) return null;
+  const target = /^[0-9a-fA-F]{24}$/.test(normalizedIdentifier)
+    ? await User.findById(normalizedIdentifier).select('username userType profile privacySettings blockedUsers isActive')
+    : await User.findOne({ username: normalizedIdentifier }).select('username userType profile privacySettings blockedUsers isActive');
   if (!target || !target.isActive) return null;
   const relationship = await resolvePrivacyAccess({ viewer: req.user, targetUser: target });
   return { target, relationship };
@@ -891,8 +906,10 @@ const getViewerListExclusions = async (viewer) => {
     User.find({ blockedUsers: viewer._id, isActive: true }).select('_id').lean()
   ]);
   return [
-    ...(viewerRecord?.blockedUsers || []),
-    ...usersBlockingViewer.map((user) => user._id)
+    ...(Array.isArray(viewerRecord?.blockedUsers) ? viewerRecord.blockedUsers : []),
+    ...(Array.isArray(usersBlockingViewer) ? usersBlockingViewer : [])
+      .map((user) => user?._id)
+      .filter(Boolean)
   ];
 };
 
@@ -924,7 +941,9 @@ const getFollowers = async (req, res) => {
     // afterwards produced short pages and leaked hidden relationship totals.
     const excludeUserIds = await getViewerListExclusions(req.user);
     const result = await Follow.getFollowers(targetPrivacy.target._id, { page, limit, search, excludeUserIds });
-    const followers = result.users;
+    const followers = Array.isArray(result?.users)
+      ? result.users.filter((follower) => follower?._id)
+      : [];
 
     const isGuest = req.user && req.user.userType === 'guest';
     const viewerId = req.user?._id;
@@ -934,39 +953,55 @@ const getFollowers = async (req, res) => {
           FollowRequest.find({ requester: viewerId, target: { $in: followers.map(f => f._id) }, status: 'pending' }).select('target').lean()
         ])
       : [[], []];
-    const viewerFollowingIds = new Set(viewerFollows.map(f => f.following.toString()));
-    const pendingIds = new Set(pendingRequests.map(request => request.target.toString()));
+    const viewerFollowingIds = new Set((Array.isArray(viewerFollows) ? viewerFollows : [])
+      .map((follow) => follow?.following)
+      .filter(Boolean)
+      .map(String));
+    const pendingIds = new Set((Array.isArray(pendingRequests) ? pendingRequests : [])
+      .map((request) => request?.target)
+      .filter(Boolean)
+      .map(String));
 
-    const followerDtos = await Promise.all(followers.map(async (f) => {
-      const relationship = await resolvePrivacyAccess({ viewer: req.user, targetUser: f });
-      if (relationship.blocked) return null;
-      const dto = relationship.access.restricted ? minimalProfile(f) : formatUserDTO(f, isGuest, false, relationship.access.canSeeOnlineStatus);
+    const followerDtos = followers.map((f) => {
+      const id = String(f._id);
+      const isSelf = Boolean(viewerId && id === String(viewerId));
+      const isFollowing = Boolean(viewerId && !isSelf && viewerFollowingIds.has(id));
+      // Blocked users were removed by getViewerListExclusions before counting
+      // and pagination, so this access calculation can use the relationships
+      // already fetched in bulk instead of issuing one query per follower.
+      const access = buildPrivacyAccess({ settings: f.privacySettings, isSelf, isFollower: isFollowing });
+      const dto = access.restricted
+        ? minimalProfile(f)
+        : formatUserDTO(f, Boolean(isGuest), isSelf, access.canSeeOnlineStatus);
       delete dto.privacySettings;
-      dto.privacyAccess = relationship.access;
-      const id = f._id.toString();
-      dto.isFollowing = Boolean(viewerId && id !== viewerId.toString() && viewerFollowingIds.has(id));
+      dto.privacyAccess = access;
+      dto.isFollowing = isFollowing;
       const followRequestPending = pendingIds.has(id);
       dto.followStatus = dto.isFollowing ? 'accepted' : followRequestPending ? 'pending' : 'none';
       dto.privacyAccess = { ...dto.privacyAccess, canFollow: dto.privacyAccess.canFollow && !followRequestPending && !dto.isFollowing, followRequestPending };
       return dto;
-    }));
-    const visibleFollowerDtos = followerDtos.filter(Boolean);
+    });
 
     res.status(200).json({
       success: true,
       data: {
-        followers: visibleFollowerDtos,
+        followers: followerDtos,
         privacyAccess: targetPrivacy.relationship.access,
         pagination: {
           current: page,
-          total: result.pages,
-          count: visibleFollowerDtos.length,
-          totalFollowers: result.total
+          total: Number.isFinite(Number(result?.pages)) ? Number(result.pages) : 0,
+          count: followerDtos.length,
+          totalFollowers: Number.isFinite(Number(result?.total)) ? Number(result.total) : 0
         }
       }
     });
 
   } catch (error) {
+    log.error('Failed to fetch followers', {
+      targetUserId: String(req.params?.id || ''),
+      viewerUserId: String(req.user?._id || ''),
+      error: error?.stack || String(error)
+    });
     res.status(500).json({
       success: false,
       message: 'Failed to fetch followers',
@@ -3738,10 +3773,16 @@ const getBlockedUsers = async (req, res) => {
 
 // Proxy external avatar URLs (e.g. Gmail/Google) so they load in the app (avoids CORS/hotlink blocks)
 const axios = require('axios');
+const { parseAllowedAvatarUrl } = require('../utils/avatarProxyPolicy');
+
+const MAX_PROXIED_AVATAR_BYTES = 5 * 1024 * 1024;
 
 const getAvatar = async (req, res) => {
   try {
     const { userId } = req.params;
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user ID' });
+    }
     const user = await User.findById(userId).select('profile.avatar profilePicture').lean();
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
@@ -3750,28 +3791,35 @@ const getAvatar = async (req, res) => {
     if (!avatarUrl || typeof avatarUrl !== 'string') {
       return res.status(404).json({ success: false, message: 'No avatar' });
     }
-    const trimmed = avatarUrl.trim();
-    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-      return res.status(400).json({ success: false, message: 'Avatar is not an external URL' });
+    const parsedAvatarUrl = parseAllowedAvatarUrl(avatarUrl);
+    if (!parsedAvatarUrl) {
+      return res.status(400).json({ success: false, message: 'Avatar provider is not allowed' });
     }
     const response = await axios({
       method: 'get',
-      url: trimmed,
-      responseType: 'stream',
+      url: parsedAvatarUrl.toString(),
+      responseType: 'arraybuffer',
       timeout: 10000,
-      maxRedirects: 3,
+      maxRedirects: 0,
+      maxContentLength: MAX_PROXIED_AVATAR_BYTES,
+      maxBodyLength: MAX_PROXIED_AVATAR_BYTES,
+      validateStatus: (status) => status === 200,
       headers: { 'User-Agent': 'ARC-App/1.0' }
     });
-    const contentType = response.headers['content-type'] || 'image/jpeg';
+    const contentType = String(response.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (!contentType.startsWith('image/')) {
+      return res.status(415).json({ success: false, message: 'Avatar response is not an image' });
+    }
+    const image = Buffer.from(response.data);
+    if (image.length === 0 || image.length > MAX_PROXIED_AVATAR_BYTES) {
+      return res.status(413).json({ success: false, message: 'Avatar image is empty or too large' });
+    }
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    response.data.pipe(res);
+    return res.send(image);
   } catch (err) {
-    if (err.response?.status) {
-      res.status(err.response.status).json({ success: false, message: 'Failed to fetch avatar' });
-    } else {
-      res.status(500).json({ success: false, message: 'Failed to fetch avatar', error: err.message });
-    }
+    log.warn('Avatar proxy fetch failed', { error: String(err) });
+    return res.status(502).json({ success: false, message: 'Failed to fetch avatar' });
   }
 };
 

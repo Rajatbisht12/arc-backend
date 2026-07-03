@@ -1,9 +1,17 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { body, validationResult } from "express-validator";
+import rateLimit from "express-rate-limit";
 import { feedbackController } from "./feedback.legacy-adapters";
 import { requireHardcodedAdminAuth } from "../admin/admin-auth.middleware";
 
 const router = Router();
+const feedbackSubmissionLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many feedback submissions. Try again later." }
+});
 
 // Validation middleware
 const handleValidationErrors = (req: Request, res: Response, next: NextFunction): Response | void => {
@@ -12,14 +20,14 @@ const handleValidationErrors = (req: Request, res: Response, next: NextFunction)
     return res.status(400).json({
       success: false,
       message: "Validation failed",
-      errors: errors.array()
+      errors: errors.array().map((error) => ({ field: error.type === "field" ? error.path : "request", message: error.msg }))
     });
   }
   next();
 };
 
 // Public route - Submit feedback
-router.post("/", [
+router.post("/", feedbackSubmissionLimiter, [
   body("feedback")
     .trim()
     .isLength({ min: 10, max: 2000 })

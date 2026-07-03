@@ -18,7 +18,7 @@ import {
 } from "./infrastructure/jobs/queue";
 import path from "path";
 import { backendControllerPath, backendRootPath } from "./modules/legacy/legacy.paths";
-import { startLegacyBackgroundJobs } from "./modules/legacy/legacy.socket";
+import { startLegacyBackgroundJobs, stopLegacyBackgroundJobs } from "./modules/legacy/legacy.socket";
 
 const safeRequire = <T>(modulePath: string): T | null => {
   try {
@@ -71,6 +71,14 @@ const bootstrap = async () => {
 
   const app = createApp();
   const httpServer = createServer(app);
+  // Bound slow/stalled HTTP clients and keep the keep-alive window compatible
+  // with the common 60-second AWS ALB idle timeout. Socket.IO upgrades are not
+  // governed by requestTimeout after the connection is upgraded.
+  httpServer.requestTimeout = 120_000;
+  httpServer.headersTimeout = 70_000;
+  httpServer.keepAliveTimeout = 65_000;
+  httpServer.maxHeadersCount = 200;
+  httpServer.maxRequestsPerSocket = 1_000;
   const io = createSocketServer(httpServer);
   attachSocketRedisAdapter(io);
   app.set("io", io);
@@ -134,6 +142,7 @@ const bootstrap = async () => {
     // 3. Close BullMQ workers
     try {
       stopBroadcastScheduler();
+      stopLegacyBackgroundJobs();
       callSessionService?.stopCallSessionSweeper?.();
       apnsVoipPushService?.stopApnsVoipPushSweeper?.();
       premiumMembershipCron?.stopPremiumMembershipCron?.();

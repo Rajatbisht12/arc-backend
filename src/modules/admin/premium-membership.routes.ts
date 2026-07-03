@@ -4,6 +4,12 @@ import { auditLog, durableMutationAudit, requireAdminPermission } from "./admin.
 import { premiumMembershipController } from "./premium-membership.legacy-adapters";
 
 const router = Router();
+router.param("id", (_req, res, next, value) => {
+  if (!/^[a-f\d]{24}$/i.test(String(value || ""))) {
+    return res.status(400).json({ success: false, code: "INVALID_MEMBERSHIP_ID", message: "Valid membership ID is required" });
+  }
+  return next();
+});
 const mutationLimiter = rateLimit({
   windowMs: 60_000,
   max: 30,

@@ -4,6 +4,7 @@ import { backendControllerPath, backendMiddlewarePath } from "../legacy/legacy.p
 
 type ReportController = Record<string, RequestHandler>;
 type AuthMiddleware = { protect: RequestHandler };
+type ValidationMiddleware = { handleValidationErrors: RequestHandler };
 
 const loadModule = <T>(modulePath: string): T => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -12,3 +13,4 @@ const loadModule = <T>(modulePath: string): T => {
 
 export const reportController = loadModule<ReportController>(path.join(backendControllerPath, "reportController.js"));
 export const { protect } = loadModule<AuthMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
+export const { handleValidationErrors } = loadModule<ValidationMiddleware>(path.join(backendMiddlewarePath, "validation.js"));

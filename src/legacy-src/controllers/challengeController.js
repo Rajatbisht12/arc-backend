@@ -6,6 +6,10 @@ const safeAsyncHandler = require('../utils/safeAsyncHandler');
 const log = require('../utils/logger');
 const mongoose = require('mongoose');
 const { resolvePrivacyAccess, minimalProfile } = require('../utils/privacyPolicy');
+const { normalizePagination } = require('../utils/pagination');
+
+const CHALLENGE_STATUSES = new Set(['draft', 'active', 'paused', 'completed', 'cancelled']);
+const PARTICIPATION_STATUSES = new Set(['active', 'completed', 'disqualified', 'withdrawn']);
 
 const idString = (value) => String(value?._id || value || '');
 const isGuestViewer = (viewer) => !viewer?._id || viewer.userType === 'guest';
@@ -152,18 +156,33 @@ const createChallenge = safeAsyncHandler(async (req, res) => {
 
 // Get all challenges with filters
 const getChallenges = safeAsyncHandler(async (req, res) => {
-  const {
-    page = 1,
-    limit = 10,
-    game,
-    category,
-    challengeType,
-    status = 'active',
-    creator,
-    search,
-    sortBy = 'createdAt',
-    sortOrder = 'desc'
-  } = req.query;
+  const page = typeof req.query.page === 'string' ? req.query.page : '1';
+  const limit = typeof req.query.limit === 'string' ? req.query.limit : '10';
+  const game = typeof req.query.game === 'string' ? req.query.game.trim() : '';
+  const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+  const challengeType = typeof req.query.challengeType === 'string' ? req.query.challengeType.trim() : '';
+  const status = req.query.status === undefined
+    ? 'active'
+    : (typeof req.query.status === 'string' ? req.query.status.trim() : '');
+  const creator = typeof req.query.creator === 'string' ? req.query.creator.trim() : '';
+  const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 100) : '';
+  const sortBy = typeof req.query.sortBy === 'string' ? (req.query.sortBy.trim() || 'createdAt') : 'createdAt';
+  const sortOrder = typeof req.query.sortOrder === 'string' ? (req.query.sortOrder.trim() || 'desc') : 'desc';
+  const allowedGames = new Set(['BGMI', 'Valorant', 'Free Fire', 'Call of Duty Mobile', 'CS:GO', 'Fortnite', 'Apex Legends', 'League of Legends', 'Dota 2']);
+  const allowedCategories = new Set(['daily', 'weekly', 'monthly', 'special', 'tournament']);
+  const allowedChallengeTypes = new Set(['kill_count', 'win_count', 'survival_time', 'damage_dealt', 'custom']);
+  if ((req.query.page !== undefined && typeof req.query.page !== 'string') ||
+      (req.query.limit !== undefined && typeof req.query.limit !== 'string') ||
+      (req.query.game !== undefined && (typeof req.query.game !== 'string' || (game && !allowedGames.has(game)))) ||
+      (req.query.category !== undefined && (typeof req.query.category !== 'string' || (category && !allowedCategories.has(category)))) ||
+      (req.query.challengeType !== undefined && (typeof req.query.challengeType !== 'string' || (challengeType && !allowedChallengeTypes.has(challengeType)))) ||
+      (req.query.status !== undefined && (typeof req.query.status !== 'string' || (status && !CHALLENGE_STATUSES.has(status)))) ||
+      (req.query.creator !== undefined && (typeof req.query.creator !== 'string' || (creator && !mongoose.Types.ObjectId.isValid(creator)))) ||
+      (req.query.search !== undefined && typeof req.query.search !== 'string') ||
+      (req.query.sortBy !== undefined && typeof req.query.sortBy !== 'string') ||
+      (req.query.sortOrder !== undefined && (typeof req.query.sortOrder !== 'string' || !['asc', 'desc'].includes(sortOrder)))) {
+    return res.status(400).json({ success: false, message: 'Invalid challenge filter' });
+  }
 
   const pageNumber = Math.max(1, parseInt(page, 10) || 1);
   const pageLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
@@ -440,9 +459,23 @@ const joinChallenge = safeAsyncHandler(async (req, res) => {
       data: participation
     });
   } catch (error) {
-    res.status(400).json({
+    const expectedMessages = new Set([
+      'User is already participating in this challenge',
+      'Challenge has reached maximum participants',
+      'Challenge has ended'
+    ]);
+    if (!expectedMessages.has(error?.message) && error?.code !== 11000) {
+      log.error('Challenge participation creation failed', { error: String(error) });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to join challenge'
+      });
+    }
+    res.status(error?.code === 11000 ? 409 : 400).json({
       success: false,
-      message: error.message
+      message: error?.code === 11000
+        ? 'User is already participating in this challenge'
+        : error.message
     });
   }
 });
@@ -483,6 +516,18 @@ const updateProgress = safeAsyncHandler(async (req, res) => {
       data: participation
     });
   } catch (error) {
+    const expectedMessages = new Set([
+      'Cannot update progress for inactive participation',
+      'Progress cannot decrease',
+      'User is not participating in this challenge'
+    ]);
+    if (!expectedMessages.has(error?.message)) {
+      log.error('Challenge progress update failed', { error: String(error) });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update challenge progress'
+      });
+    }
     res.status(400).json({
       success: false,
       message: error.message
@@ -492,7 +537,11 @@ const updateProgress = safeAsyncHandler(async (req, res) => {
 
 // Get user's challenges (created by user)
 const getMyChallenges = safeAsyncHandler(async (req, res) => {
-  const { page = 1, limit = 10, status } = req.query;
+  const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+  if (req.query.status !== undefined && (!status || !CHALLENGE_STATUSES.has(status))) {
+    return res.status(400).json({ success: false, message: 'Invalid challenge status' });
+  }
+  const { page, limit, skip } = normalizePagination(req.query, { defaultLimit: 10, maxLimit: 50 });
   const userId = req.user._id;
 
   const query = { creator: userId };
@@ -501,8 +550,8 @@ const getMyChallenges = safeAsyncHandler(async (req, res) => {
   const challenges = await Challenge.find(query)
     .populate('creator', 'username profile.displayName profile.avatar')
     .sort({ createdAt: -1 })
-    .limit(limit * 1)
-    .skip((page - 1) * limit)
+    .limit(limit)
+    .skip(skip)
     .lean();
 
   const total = await Challenge.countDocuments(query);
@@ -524,7 +573,11 @@ const getMyChallenges = safeAsyncHandler(async (req, res) => {
 
 // Get user's participations
 const getMyParticipations = safeAsyncHandler(async (req, res) => {
-  const { page = 1, limit = 10, status } = req.query;
+  const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+  if (req.query.status !== undefined && (!status || !PARTICIPATION_STATUSES.has(status))) {
+    return res.status(400).json({ success: false, message: 'Invalid participation status' });
+  }
+  const { page, limit, skip } = normalizePagination(req.query, { defaultLimit: 10, maxLimit: 50 });
   const userId = req.user._id;
 
   const query = { participant: userId };
@@ -534,8 +587,8 @@ const getMyParticipations = safeAsyncHandler(async (req, res) => {
     .populate('challenge', 'title description game challengeType rewards startDate endDate')
     .populate('challenge.creator', 'username profile.displayName profile.avatar')
     .sort({ joinedAt: -1 })
-    .limit(limit * 1)
-    .skip((page - 1) * limit)
+    .limit(limit)
+    .skip(skip)
     .lean();
 
   const total = await ChallengeParticipation.countDocuments(query);
@@ -708,9 +761,10 @@ const distributeRewards = safeAsyncHandler(async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(400).json({
+    log.error('Challenge reward distribution failed', { error: String(error) });
+    res.status(500).json({
       success: false,
-      message: error.message
+      message: 'Failed to distribute challenge rewards'
     });
   }
 });

@@ -1,12 +1,20 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { optionalAuth, protect, userController } from "./users.legacy-adapters";
 
 const router = Router();
+const avatarProxyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many avatar requests. Try again later." }
+});
 
 router.get("/", optionalAuth, userController.getUsers);
 router.get("/search", optionalAuth, userController.getUsers);
 router.post("/create-team", protect, userController.createTeam);
-router.get("/avatar/:userId", userController.getAvatar);
+router.get("/avatar/:userId", avatarProxyLimiter, userController.getAvatar);
 router.get("/blocked", protect, userController.getBlockedUsers);
 router.post("/block/:username", protect, userController.blockUser);
 router.delete("/block/:username", protect, userController.unblockUser);
@@ -44,9 +52,9 @@ router.delete("/:teamId/roster/:game/leave", protect, userController.leaveTeam);
 router.delete("/:teamId/roster/:game/:playerId", protect, userController.removePlayerFromRoster);
 router.post("/:teamId/staff/add", protect, userController.addStaffMember);
 router.post("/:teamId/staff/add-by-username", protect, userController.addStaffMemberByUsername);
+router.delete("/:teamId/staff/cancel-by-username", protect, userController.cancelStaffInviteByUsername);
 router.delete("/:teamId/staff/:playerId", protect, userController.removeStaffMember);
 router.get("/:teamId/pending-invites", protect, userController.getTeamPendingInvites);
-router.delete("/:teamId/staff/cancel-by-username", protect, userController.cancelStaffInviteByUsername);
 router.post("/:teamId/leave-request", protect, userController.sendLeaveRequest);
 router.get("/:teamId/leave-requests", protect, userController.getTeamLeaveRequests);
 router.post("/leave-requests/:requestId/approve", protect, userController.approveLeaveRequest);

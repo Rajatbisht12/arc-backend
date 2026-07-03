@@ -13,8 +13,7 @@ const earningsSnapshotSchema = new mongoose.Schema({
   payoutCycle: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'PayoutCycle',
-    required: true,
-    index: true
+    required: true
   },
   /** Final amount for this cycle (in INR or base currency) */
   amount: {

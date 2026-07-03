@@ -11,6 +11,47 @@ const DEFAULT_LIMIT = 15;
 const MAX_LIMIT = 30;
 const MAX_EXCLUDED_IDS = 120;
 const CANDIDATE_MULTIPLIER = 8;
+const MAX_ENGAGEMENT_DURATION_MS = 24 * 60 * 60 * 1000;
+const ENGAGEMENT_CONTEXTS = new Set(['feed', 'clips', 'profile', 'search', 'post', 'unknown']);
+const ENGAGEMENT_CONTEXT_ALIASES = new Map([
+  ['team_profile', 'profile'],
+  ['team-profile', 'profile'],
+  ['profile-saved', 'profile'],
+  ['profile_saved', 'profile'],
+  ['profile-liked', 'profile'],
+  ['profile_liked', 'profile']
+]);
+
+function normalizeEngagementDuration(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.min(Math.floor(parsed), MAX_ENGAGEMENT_DURATION_MS);
+}
+
+function normalizeCompletionRate(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.min(parsed, 1);
+}
+
+function normalizeEngagementContext(value) {
+  if (typeof value !== 'string') return 'unknown';
+  const normalized = value.trim().toLowerCase();
+  return ENGAGEMENT_CONTEXT_ALIASES.get(normalized)
+    || (ENGAGEMENT_CONTEXTS.has(normalized) ? normalized : 'unknown');
+}
+
+function buildViewEngagementUpdate(payload, updatedAt = new Date()) {
+  const { durationMs, completionRate, ...insertPayload } = payload;
+  return {
+    $setOnInsert: insertPayload,
+    $max: {
+      durationMs,
+      completionRate
+    },
+    $set: { updatedAt }
+  };
+}
 
 function clampLimit(value, fallback = DEFAULT_LIMIT) {
   const parsed = parseInt(value, 10);
@@ -535,14 +576,17 @@ async function recordEngagementEvent({
   boostCampaign = null
 }) {
   if (!userId || !postId || !eventType) return;
+  const normalizedContext = normalizeEngagementContext(context);
+  const normalizedDurationMs = normalizeEngagementDuration(durationMs);
+  const normalizedCompletionRate = normalizeCompletionRate(completionRate);
   const payload = {
     user: userId,
     post: postId,
     author: authorId,
     eventType,
-    context,
-    durationMs,
-    completionRate,
+    context: normalizedContext,
+    durationMs: normalizedDurationMs,
+    completionRate: normalizedCompletionRate,
     source: source === 'boost' ? 'boost' : 'organic',
     boostCampaign,
     metadata
@@ -550,18 +594,16 @@ async function recordEngagementEvent({
 
   try {
     if (eventType === 'view') {
-      await PostEngagement.updateOne(
-        { user: userId, post: postId, eventType, context },
-        {
-          $setOnInsert: payload,
-          $set: {
-            durationMs,
-            completionRate,
-            updatedAt: new Date()
-          }
-        },
-        { upsert: true }
-      );
+      const filter = { user: userId, post: postId, eventType, context: normalizedContext };
+      const update = buildViewEngagementUpdate(payload);
+      try {
+        await PostEngagement.updateOne(filter, update, { upsert: true });
+      } catch (error) {
+        if (error?.code !== 11000) throw error;
+        // A concurrent first view won the unique-index race. Re-apply the
+        // monotonic fields so the losing request's watch progress is not lost.
+        await PostEngagement.updateOne(filter, update, { upsert: false });
+      }
       return;
     }
     await PostEngagement.create(payload);
@@ -580,5 +622,10 @@ module.exports = {
   encodeCursor,
   decodeCursor,
   parseExcludedIds,
-  buildAudienceFilter
+  buildAudienceFilter,
+  buildViewEngagementUpdate,
+  normalizeEngagementContext,
+  normalizeEngagementDuration,
+  normalizeCompletionRate,
+  MAX_ENGAGEMENT_DURATION_MS
 };

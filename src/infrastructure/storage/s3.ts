@@ -7,6 +7,49 @@ import { env } from "../../config/env";
 const s3 = new S3Client({ region: env.AWS_REGION });
 
 const BUCKET = env.AWS_S3_BUCKET ?? "";
+const MAX_REMOTE_AVATAR_BYTES = 5 * 1024 * 1024;
+const DEFAULT_REMOTE_AVATAR_HOSTS = ["googleusercontent.com", "res.cloudinary.com"];
+
+export function parseAllowedRemoteAvatarUrl(value: string): URL | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) return null;
+  if (parsed.port && parsed.port !== "443") return null;
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  const configured = String(process.env.AVATAR_PROXY_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((host) => host.trim().toLowerCase().replace(/\.$/, ""))
+    .filter(Boolean);
+  const allowed = [...DEFAULT_REMOTE_AVATAR_HOSTS, ...configured];
+  if (!allowed.some((host) => hostname === host || hostname.endsWith(`.${host}`))) return null;
+  return parsed;
+}
+
+async function readBodyWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error("Remote avatar exceeds the allowed size");
+  }
+  if (!response.body) throw new Error("Remote avatar response is empty");
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error("Remote avatar exceeds the allowed size");
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks, total);
+}
 
 function publicUrl(key: string): string {
   if (env.AWS_S3_CDN_URL) return `${env.AWS_S3_CDN_URL}/${key}`;
@@ -66,10 +109,20 @@ export async function uploadImage(
 ): Promise<UploadResult & { width: number; height: number }> {
   assertBucket();
   const key = `${folder}/${uuidv4()}.webp`;
-  const { data, info } = await sharp(file.buffer)
-    .resize(opts?.width ?? 1200, opts?.height ?? 1200, { fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 85 })
-    .toBuffer({ resolveWithObject: true });
+  let processed: { data: Buffer; info: { width: number; height: number } };
+  try {
+    processed = await sharp(file.buffer)
+      .resize(opts?.width ?? 1200, opts?.height ?? 1200, { fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 85 })
+      .toBuffer({ resolveWithObject: true });
+  } catch (cause) {
+    const error = new Error("Image could not be processed") as Error & { statusCode?: number; code?: string; cause?: unknown };
+    error.statusCode = 422;
+    error.code = "INVALID_IMAGE_MEDIA";
+    error.cause = cause;
+    throw error;
+  }
+  const { data, info } = processed;
 
   await s3.send(
     new PutObjectCommand({
@@ -95,12 +148,17 @@ export async function uploadAvatarFromUrl(
   imageUrl: string,
   folder = "gaming-social/avatars"
 ): Promise<UploadResult> {
-  const res = await fetch(imageUrl, {
+  const allowedUrl = parseAllowedRemoteAvatarUrl(imageUrl);
+  if (!allowedUrl) throw new Error("Remote avatar URL is not allowed");
+  const res = await fetch(allowedUrl, {
     headers: { "User-Agent": "Mozilla/5.0" },
     signal: AbortSignal.timeout(10_000),
+    redirect: "error",
   });
   if (!res.ok) throw new Error(`Failed to fetch avatar URL: ${res.status}`);
-  const buffer = Buffer.from(await res.arrayBuffer());
+  const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.startsWith("image/")) throw new Error("Remote avatar is not an image");
+  const buffer = await readBodyWithLimit(res, MAX_REMOTE_AVATAR_BYTES);
   return uploadAvatar({ buffer }, folder);
 }
 
@@ -166,7 +224,10 @@ export async function uploadMultipleFiles(
         const r = await uploadAudio(f, `${folder}/voice-messages`);
         return { type: "audio" as const, ...r };
       }
-      throw new Error(`Unsupported file type: ${f.mimetype}`);
+      const error = new Error("Unsupported file type") as Error & { statusCode?: number; code?: string };
+      error.statusCode = 415;
+      error.code = "UNSUPPORTED_MEDIA_TYPE";
+      throw error;
     })
   );
   return results;

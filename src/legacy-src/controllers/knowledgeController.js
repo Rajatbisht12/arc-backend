@@ -1,6 +1,25 @@
 const GamingKnowledge = require('../models/GamingKnowledge');
+const mongoose = require('mongoose');
 const { retrieveKnowledge, formatKnowledgeContext, getKnowledgeStats } = require('../utils/knowledgeRetrieval');
 const log = require('../utils/logger');
+
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const boundedInteger = (value, fallback, maximum) => {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, maximum);
+};
+const invalidKnowledgeId = (id) => !mongoose.isValidObjectId(id);
+const normalizeStringList = (value, maximumItems = 50) => {
+  if (!Array.isArray(value) || value.length > maximumItems) return null;
+  const normalized = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || item.length > 100) return null;
+    const trimmed = item.toLowerCase().trim();
+    if (trimmed) normalized.push(trimmed);
+  }
+  return normalized;
+};
 
 /**
  * Add new knowledge to database
@@ -21,16 +40,22 @@ const addKnowledge = async (req, res) => {
     } = req.body;
     
     // Validation
-    if (!question || !answer) {
+    if (typeof question !== 'string' || !question.trim() || question.length > 500
+      || typeof answer !== 'string' || !answer.trim() || answer.length > 10_000) {
       return res.status(400).json({
         success: false,
-        message: 'Question and answer are required'
+        message: 'Question and answer are required and must be within the allowed length'
       });
+    }
+    const normalizedKeywords = normalizeStringList(keywords);
+    const normalizedTags = normalizeStringList(tags);
+    if (!normalizedKeywords || !normalizedTags) {
+      return res.status(400).json({ success: false, message: 'Keywords and tags must be bounded string arrays' });
     }
     
     // Check if similar knowledge already exists
     const existing = await GamingKnowledge.findOne({
-      question: { $regex: new RegExp(question, 'i') },
+      question: { $regex: new RegExp(`^${escapeRegex(question.trim())}$`, 'i') },
       language,
       isActive: true
     });
@@ -50,8 +75,8 @@ const addKnowledge = async (req, res) => {
       topic,
       game,
       language,
-      keywords: keywords.map(k => k.toLowerCase().trim()),
-      tags: tags.map(t => t.toLowerCase().trim()),
+      keywords: normalizedKeywords,
+      tags: normalizedTags,
       skillLevel,
       priority,
       source,
@@ -90,26 +115,35 @@ const getAllKnowledge = async (req, res) => {
       search
     } = req.query;
     
-    const query = { isActive: isActive === 'true' };
+    if (!['true', 'false'].includes(String(isActive))) {
+      return res.status(400).json({ success: false, message: 'isActive must be true or false' });
+    }
+    const normalizedPage = boundedInteger(page, 1, 10_000);
+    const normalizedLimit = boundedInteger(limit, 20, 100);
+    const query = { isActive: String(isActive) === 'true' };
     
     if (topic) query.topic = topic;
     if (game) query.game = game;
     if (language) query.language = language;
     if (skillLevel) query.skillLevel = skillLevel;
     if (search) {
+      if (typeof search !== 'string' || search.length > 200) {
+        return res.status(400).json({ success: false, message: 'Search must be at most 200 characters' });
+      }
+      const safeSearch = escapeRegex(search.trim());
       query.$or = [
-        { question: { $regex: search, $options: 'i' } },
-        { answer: { $regex: search, $options: 'i' } },
-        { keywords: { $in: [new RegExp(search, 'i')] } }
+        { question: { $regex: safeSearch, $options: 'i' } },
+        { answer: { $regex: safeSearch, $options: 'i' } },
+        { keywords: { $in: [new RegExp(safeSearch, 'i')] } }
       ];
     }
-    
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const skip = (normalizedPage - 1) * normalizedLimit;
     
     const knowledge = await GamingKnowledge.find(query)
       .sort({ priority: -1, createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(normalizedLimit);
     
     const total = await GamingKnowledge.countDocuments(query);
     
@@ -117,10 +151,10 @@ const getAllKnowledge = async (req, res) => {
       success: true,
       data: knowledge,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: normalizedPage,
+        limit: normalizedLimit,
         total,
-        pages: Math.ceil(total / parseInt(limit))
+        pages: Math.ceil(total / normalizedLimit)
       }
     });
     
@@ -140,6 +174,10 @@ const getAllKnowledge = async (req, res) => {
 const getKnowledgeById = async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (invalidKnowledgeId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid knowledge ID' });
+    }
     
     const knowledge = await GamingKnowledge.findById(id);
     
@@ -171,6 +209,10 @@ const getKnowledgeById = async (req, res) => {
 const updateKnowledge = async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (invalidKnowledgeId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid knowledge ID' });
+    }
     
     // Whitelist fields to prevent NoSQL Mass Assignment / Injection
     const allowedUpdates = [
@@ -186,11 +228,25 @@ const updateKnowledge = async (req, res) => {
     });
     
     // Normalize keywords and tags if provided
-    if (updateData.keywords) {
-      updateData.keywords = updateData.keywords.map(k => k.toLowerCase().trim());
+    if (updateData.question !== undefined
+      && (typeof updateData.question !== 'string' || !updateData.question.trim() || updateData.question.length > 500)) {
+      return res.status(400).json({ success: false, message: 'Invalid question' });
     }
-    if (updateData.tags) {
-      updateData.tags = updateData.tags.map(t => t.toLowerCase().trim());
+    if (updateData.answer !== undefined
+      && (typeof updateData.answer !== 'string' || !updateData.answer.trim() || updateData.answer.length > 10_000)) {
+      return res.status(400).json({ success: false, message: 'Invalid answer' });
+    }
+    if (updateData.keywords !== undefined) {
+      updateData.keywords = normalizeStringList(updateData.keywords);
+      if (!updateData.keywords) {
+        return res.status(400).json({ success: false, message: 'Keywords must be a bounded string array' });
+      }
+    }
+    if (updateData.tags !== undefined) {
+      updateData.tags = normalizeStringList(updateData.tags);
+      if (!updateData.tags) {
+        return res.status(400).json({ success: false, message: 'Tags must be a bounded string array' });
+      }
     }
     
     const knowledge = await GamingKnowledge.findByIdAndUpdate(
@@ -228,6 +284,10 @@ const updateKnowledge = async (req, res) => {
 const deleteKnowledge = async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (invalidKnowledgeId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid knowledge ID' });
+    }
     
     const knowledge = await GamingKnowledge.findByIdAndUpdate(
       id,
@@ -263,21 +323,25 @@ const deleteKnowledge = async (req, res) => {
 const testRetrieval = async (req, res) => {
   try {
     const { query, language = 'english', topic = null, game = null, limit = 5 } = req.body;
-    
-    if (!query) {
+
+    if (typeof query !== 'string' || !query.trim()) {
       return res.status(400).json({
         success: false,
         message: 'Query is required'
       });
     }
-    
-    const knowledge = await retrieveKnowledge(query, language, topic, game, limit);
+    if (query.length > 500) {
+      return res.status(400).json({ success: false, message: 'Query must be at most 500 characters' });
+    }
+    const normalizedLimit = boundedInteger(limit, 5, 20);
+
+    const knowledge = await retrieveKnowledge(query.trim(), language, topic, game, normalizedLimit);
     const context = formatKnowledgeContext(knowledge, language);
     
     res.json({
       success: true,
       data: {
-        query,
+        query: query.trim(),
         language,
         topic,
         game,
@@ -326,10 +390,10 @@ const bulkAddKnowledge = async (req, res) => {
   try {
     const { knowledgeItems } = req.body;
     
-    if (!Array.isArray(knowledgeItems) || knowledgeItems.length === 0) {
+    if (!Array.isArray(knowledgeItems) || knowledgeItems.length === 0 || knowledgeItems.length > 100) {
       return res.status(400).json({
         success: false,
-        message: 'knowledgeItems array is required'
+        message: 'knowledgeItems must contain between 1 and 100 items'
       });
     }
     
@@ -340,11 +404,19 @@ const bulkAddKnowledge = async (req, res) => {
     
     for (const item of knowledgeItems) {
       try {
-        if (!item.question || !item.answer) {
+        if (!item || typeof item !== 'object'
+          || typeof item.question !== 'string' || !item.question.trim() || item.question.length > 500
+          || typeof item.answer !== 'string' || !item.answer.trim() || item.answer.length > 10_000) {
           results.failed.push({
             item,
-            error: 'Question and answer are required'
+            error: 'Question and answer are required and must be within the allowed length'
           });
+          continue;
+        }
+        const normalizedKeywords = normalizeStringList(item.keywords || []);
+        const normalizedTags = normalizeStringList(item.tags || []);
+        if (!normalizedKeywords || !normalizedTags) {
+          results.failed.push({ item, error: 'Keywords and tags must be bounded string arrays' });
           continue;
         }
         
@@ -354,8 +426,8 @@ const bulkAddKnowledge = async (req, res) => {
           topic: item.topic || 'general',
           game: item.game || 'general',
           language: item.language || 'english',
-          keywords: (item.keywords || []).map(k => k.toLowerCase().trim()),
-          tags: (item.tags || []).map(t => t.toLowerCase().trim()),
+          keywords: normalizedKeywords,
+          tags: normalizedTags,
           skillLevel: item.skillLevel || 'all',
           priority: item.priority || 1,
           source: item.source || 'manual',

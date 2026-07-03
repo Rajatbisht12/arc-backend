@@ -1,4 +1,12 @@
 const jwt = require('jsonwebtoken');
+const MAX_LEGACY_ACCESS_TOKEN_LIFETIME_SECONDS = 8 * 24 * 60 * 60;
+
+const isLegacyLongLivedToken = (decoded) => Boolean(
+  !decoded?.tokenType &&
+  Number.isFinite(decoded?.iat) &&
+  Number.isFinite(decoded?.exp) &&
+  decoded.exp - decoded.iat > MAX_LEGACY_ACCESS_TOKEN_LIFETIME_SECONDS
+);
 
 // Generate JWT token
 const generateToken = (payload) => {
@@ -11,8 +19,9 @@ const generateToken = (payload) => {
       throw new Error('Invalid payload for token generation');
     }
     
-    return jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRE || '7d'
+    return jwt.sign({ ...payload, tokenType: 'access' }, process.env.JWT_SECRET, {
+      algorithm: 'HS256',
+      expiresIn: process.env.JWT_EXPIRES_IN || process.env.JWT_EXPIRE || '7d'
     });
   } catch (error) {
     console.error('Token generation error:', error);
@@ -31,10 +40,14 @@ const verifyToken = (token) => {
       throw new Error('Invalid token format');
     }
     
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    if (!decoded || !decoded.id) {
-      throw new Error('Invalid token payload');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+
+    if (!decoded || !decoded.id ||
+        (decoded.tokenType && decoded.tokenType !== 'access') ||
+        isLegacyLongLivedToken(decoded)) {
+      const invalidPayload = new Error('Invalid token payload');
+      invalidPayload.name = 'JsonWebTokenError';
+      throw invalidPayload;
     }
     
     return decoded;
@@ -53,16 +66,17 @@ const verifyToken = (token) => {
 // Generate refresh token (longer expiry)
 const generateRefreshToken = (payload) => {
   try {
-    if (!process.env.JWT_SECRET) {
-      throw new Error('JWT_SECRET is not configured');
+    if (!process.env.JWT_REFRESH_SECRET) {
+      throw new Error('JWT_REFRESH_SECRET is not configured');
     }
     
     if (!payload || !payload.id) {
       throw new Error('Invalid payload for refresh token generation');
     }
     
-    return jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: '30d'
+    return jwt.sign({ ...payload, tokenType: 'refresh' }, process.env.JWT_REFRESH_SECRET, {
+      algorithm: 'HS256',
+      expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d'
     });
   } catch (error) {
     console.error('Refresh token generation error:', error);
@@ -90,14 +104,6 @@ const extractToken = (req) => {
     // Check for token in cookies
     if (req.cookies && req.cookies.token) {
       const token = req.cookies.token;
-      if (token && token.trim()) {
-        return token.trim();
-      }
-    }
-    
-    // Check for token in query parameters (for testing purposes)
-    if (req.query && req.query.token) {
-      const token = req.query.token;
       if (token && token.trim()) {
         return token.trim();
       }

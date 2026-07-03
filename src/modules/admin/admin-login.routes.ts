@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import bcrypt from "bcryptjs";
+import { createHash, timingSafeEqual } from "node:crypto";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { env } from "../../config/env";
@@ -39,16 +40,26 @@ router.post("/login", loginLimiter, async (req: Request, res: Response): Promise
     return;
   }
 
-  const { username, password } = req.body as { username?: string; password?: string };
+  const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
 
-  if (!username || !password) {
-    res.status(400).json({ success: false, message: "Username and password are required." });
+  if (!username || username.length > 100 || !password || password.length > 128) {
+    res.status(400).json({ success: false, message: "Valid username and password are required." });
     return;
   }
 
   // Constant-time username comparison to avoid user enumeration
-  const usernameMatch = username === env.ADMIN_USERNAME;
-  const passwordMatch = await bcrypt.compare(password, env.ADMIN_PASSWORD_HASH);
+  const suppliedUsernameHash = createHash("sha256").update(username).digest();
+  const configuredUsernameHash = createHash("sha256").update(env.ADMIN_USERNAME).digest();
+  const usernameMatch = timingSafeEqual(suppliedUsernameHash, configuredUsernameHash);
+  let passwordMatch = false;
+  try {
+    passwordMatch = await bcrypt.compare(password, env.ADMIN_PASSWORD_HASH);
+  } catch (error) {
+    console.error("[ADMIN LOGIN] Credential hash verification failed", error);
+    res.status(503).json({ success: false, message: "Admin login is temporarily unavailable." });
+    return;
+  }
 
   if (!usernameMatch || !passwordMatch) {
     // Always return the same error regardless of which field was wrong

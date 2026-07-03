@@ -15,6 +15,8 @@ require('dotenv').config();
 
 const removePremium = async () => {
   try {
+    if (!process.argv.includes('--apply')) throw new Error('Refusing to remove premium without --apply');
+    if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
     // Get username from command line arguments
     const username = process.argv[2];
 
@@ -26,7 +28,7 @@ const removePremium = async () => {
     }
 
     // Connect to database
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-social-platform');
+    await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ Connected to database');
 
     // Find user by username
@@ -44,7 +46,6 @@ const removePremium = async () => {
 
     console.log('\n📋 Current User Information:');
     console.log(`   Username: ${user.username}`);
-    console.log(`   Email: ${user.email}`);
     console.log(`   User Type: ${user.userType}`);
     console.log(`   Current Premium Status: ${wasPremium ? '✅ Premium' : '❌ Not Premium'}`);
     console.log(`   Current Membership Tier: ${currentTier}`);
@@ -72,9 +73,8 @@ const removePremium = async () => {
   } catch (error) {
     process.exitCode = 1;
     console.error('❌ Error removing premium:', error.message);
-    console.error('\nFull error:', error);
   } finally {
-    await mongoose.disconnect();
+    if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
     console.log('\n👋 Database connection closed');
   }
 };
