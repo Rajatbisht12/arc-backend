@@ -7,6 +7,12 @@ import { auditLog, durableMutationAudit, requireAdminPermission } from "./admin.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const controller = require(path.join(backendControllerPath, "broadcastController.js"));
 const router = Router();
+router.param("id", (_req, res, next, value) => {
+  if (!/^[a-f\d]{24}$/i.test(String(value || ""))) {
+    return res.status(400).json({ success: false, code: "INVALID_TEMPLATE_ID", message: "Valid template ID is required" });
+  }
+  return next();
+});
 
 const templateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

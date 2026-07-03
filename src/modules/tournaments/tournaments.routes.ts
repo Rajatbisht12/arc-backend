@@ -2,6 +2,22 @@ import { Router } from "express";
 import { protect, publicOptionalAuth, tournamentController } from "./tournaments.legacy-adapters";
 
 const router = Router();
+const mongoObjectIdPattern = /^[a-f\d]{24}$/i;
+
+// The public detail route intentionally accepts either a share code or an
+// ObjectId. Every other `:id` route is backed by `Tournament.findById`; reject
+// malformed identifiers before Mongoose can turn a client error into a 500.
+router.param("id", (req, res, next, value) => {
+  if (req.method === "GET" && /^\/[^/]+\/?$/.test(req.path)) return next();
+  if (!mongoObjectIdPattern.test(String(value || ""))) {
+    return res.status(400).json({
+      success: false,
+      code: "INVALID_TOURNAMENT_ID",
+      message: "Valid tournament ID is required"
+    });
+  }
+  return next();
+});
 
 router.get("/hosting-limits", protect, tournamentController.getHostingLimits);
 

@@ -4,19 +4,7 @@
  */
 
 require('dotenv').config();
-const mongoose = require('mongoose');
 const axios = require('axios');
-
-// Connect to MongoDB
-const connectDB = async () => {
-  try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-social-platform');
-    console.log('✅ MongoDB Connected');
-  } catch (error) {
-    console.error('❌ MongoDB Connection Error:', error.message);
-    process.exit(1);
-  }
-};
 
 // Test Llama
 const testLlama = async () => {
@@ -30,10 +18,8 @@ const testLlama = async () => {
       console.log('   GROQ_API_KEY=gsk_your_key_here\n');
       process.exit(1);
     }
-    
     console.log('✅ GROQ_API_KEY found');
-    console.log(`   Key: ${process.env.GROQ_API_KEY.substring(0, 10)}...\n`);
-    
+
     // Test message
     const testMessage = "How to improve aim in BGMI?";
     const conversationHistory = [];
@@ -115,7 +101,6 @@ Response Format:
       console.error('\n💡 Connection refused. Check your internet connection.');
     }
     
-    console.error('\nFull error:', error.response?.data || error);
     process.exit(1);
   }
 };
@@ -124,10 +109,8 @@ Response Format:
 (async () => {
   try {
     console.log('Starting test...');
-    await connectDB();
     await testLlama();
-    await mongoose.connection.close();
-    console.log('✅ Test completed. MongoDB connection closed.');
+    console.log('✅ Test completed.');
     process.exit(0);
   } catch (error) {
     console.error('Fatal error:', error);

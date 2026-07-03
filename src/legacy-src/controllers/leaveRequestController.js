@@ -413,10 +413,91 @@ const cancelLeaveRequest = async (req, res) => {
   }
 };
 
+// `/api/leave-requests/*` predates the canonical `/api/users/*` membership
+// endpoints. Keep the compatibility URLs, but delegate mutations and team
+// reads to the canonical implementation so both API families use the current
+// LeaveRequest schema (`player`, `game`, `reviewedBy`, `reviewNotes`) and the
+// same team-owner authorization rules.
+const canonicalMembershipController = require('./userController');
+
+const createCanonicalLeaveRequest = (req, res) => {
+  req.body = {
+    ...(req.body || {}),
+    game: 'General'
+  };
+  return canonicalMembershipController.sendLeaveRequest(req, res);
+};
+
+const getCanonicalUserLeaveRequests = async (req, res) => {
+  try {
+    const leaveRequests = await LeaveRequest.find({ player: req.user._id })
+      .populate('team', 'username profile.displayName profile.avatar')
+      .populate('reviewedBy', 'username profile.displayName')
+      .sort({ createdAt: -1 });
+    return res.status(200).json({ success: true, data: { leaveRequests } });
+  } catch (error) {
+    log.error('Error fetching canonical user leave requests:', { error: String(error) });
+    return res.status(500).json({ success: false, message: 'Failed to fetch leave requests' });
+  }
+};
+
+const respondToCanonicalLeaveRequest = async (req, res) => {
+  try {
+    const action = req.body?.action;
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'Action must be approve or reject' });
+    }
+    const leaveRequest = await LeaveRequest.findOne({
+      _id: req.params.requestId,
+      team: req.params.teamId
+    }).select('_id').lean();
+    if (!leaveRequest) {
+      return res.status(404).json({ success: false, message: 'Leave request not found' });
+    }
+    req.body = {
+      ...req.body,
+      reviewNotes: typeof req.body.adminResponse === 'string' ? req.body.adminResponse : ''
+    };
+    return action === 'approve'
+      ? canonicalMembershipController.approveLeaveRequest(req, res)
+      : canonicalMembershipController.rejectLeaveRequest(req, res);
+  } catch (error) {
+    log.error('Error responding to canonical leave request:', { error: String(error) });
+    return res.status(500).json({ success: false, message: 'Failed to respond to leave request' });
+  }
+};
+
+const cancelCanonicalLeaveRequest = async (req, res) => {
+  try {
+    const leaveRequest = await LeaveRequest.findOne({
+      _id: req.params.requestId,
+      team: req.params.teamId,
+      player: req.user._id
+    });
+    if (!leaveRequest) {
+      return res.status(404).json({ success: false, message: 'Leave request not found' });
+    }
+    if (leaveRequest.status !== 'pending') {
+      return res.status(409).json({ success: false, message: 'Leave request has already been processed' });
+    }
+    await LeaveRequest.deleteOne({ _id: leaveRequest._id, status: 'pending' });
+    if (['General', 'Staff'].includes(leaveRequest.game)) {
+      await User.updateOne(
+        { _id: req.params.teamId, 'teamInfo.staff.user': req.user._id },
+        { $set: { 'teamInfo.staff.$.leaveRequestStatus': 'none' } }
+      );
+    }
+    return res.status(200).json({ success: true, message: 'Leave request cancelled successfully' });
+  } catch (error) {
+    log.error('Error cancelling canonical leave request:', { error: String(error) });
+    return res.status(500).json({ success: false, message: 'Failed to cancel leave request' });
+  }
+};
+
 module.exports = {
-  createLeaveRequest,
-  getTeamLeaveRequests,
-  getUserLeaveRequests,
-  respondToLeaveRequest,
-  cancelLeaveRequest
+  createLeaveRequest: createCanonicalLeaveRequest,
+  getTeamLeaveRequests: canonicalMembershipController.getTeamLeaveRequests,
+  getUserLeaveRequests: getCanonicalUserLeaveRequests,
+  respondToLeaveRequest: respondToCanonicalLeaveRequest,
+  cancelLeaveRequest: cancelCanonicalLeaveRequest
 };

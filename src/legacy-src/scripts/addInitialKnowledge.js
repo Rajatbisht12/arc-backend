@@ -5,6 +5,7 @@ require('dotenv').config();
 // Connect to database
 const connectDB = async () => {
   try {
+    if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ MongoDB Connected');
   } catch (error) {
@@ -332,6 +333,7 @@ const initialKnowledge = [
 // Add knowledge function
 const addKnowledge = async () => {
   try {
+    if (!process.argv.includes('--apply')) throw new Error('Refusing to seed the knowledge base without --apply');
     await connectDB();
     
     console.log('📝 Adding initial BGMI knowledge...');

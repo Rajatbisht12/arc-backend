@@ -47,6 +47,10 @@ const EXPECTATION_FIELDS = [
   'expectedSalary', 'compensationPreference', 'preferredTeamSize', 'teamType',
   'preferredLocation', 'additionalInfo', 'contactInformation'
 ];
+const RECRUITMENT_GAMES = new Set(['BGMI', 'Valorant', 'Free Fire', 'Call of Duty Mobile', 'CS:GO', 'Fortnite', 'Apex Legends', 'League of Legends', 'Dota 2']);
+const normalizeQueryString = (value, maxLength = 200) => (
+  typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
+);
 
 const normalizeOptionalString = (value) => {
   if (typeof value !== 'string') return value;
@@ -225,16 +229,24 @@ const createTeamRecruitment = safeAsyncHandler(async (req, res) => {
 
 // Get all team recruitments with filters
 const getTeamRecruitments = safeAsyncHandler(async (req, res) => {
-  const {
-    game,
-    recruitmentType,
-    location,
-    search,
-    sortBy = 'createdAt',
-    sortOrder = 'desc',
-    my,
-    status
-  } = req.query;
+  const game = normalizeQueryString(req.query.game, 80);
+  const recruitmentType = normalizeQueryString(req.query.recruitmentType, 20);
+  const location = normalizeQueryString(req.query.location, 120);
+  const search = normalizeQueryString(req.query.search, 100);
+  const sortBy = normalizeQueryString(req.query.sortBy, 40) || 'createdAt';
+  const sortOrder = normalizeQueryString(req.query.sortOrder, 4) || 'desc';
+  const my = normalizeQueryString(req.query.my, 5);
+  const status = normalizeQueryString(req.query.status, 20);
+  if ((req.query.game !== undefined && (typeof req.query.game !== 'string' || (game && !RECRUITMENT_GAMES.has(game)))) ||
+      (req.query.recruitmentType !== undefined && (typeof req.query.recruitmentType !== 'string' || (recruitmentType && !['roster', 'staff'].includes(recruitmentType)))) ||
+      (req.query.location !== undefined && typeof req.query.location !== 'string') ||
+      (req.query.search !== undefined && typeof req.query.search !== 'string') ||
+      (req.query.sortBy !== undefined && typeof req.query.sortBy !== 'string') ||
+      (req.query.sortOrder !== undefined && (typeof req.query.sortOrder !== 'string' || !['asc', 'desc'].includes(sortOrder))) ||
+      (req.query.my !== undefined && (typeof req.query.my !== 'string' || (my && !['true', 'false'].includes(my)))) ||
+      (req.query.status !== undefined && typeof req.query.status !== 'string')) {
+    return res.status(400).json({ success: false, message: 'Invalid recruitment filter' });
+  }
   const { page, limit } = parsePagination(req.query.page, req.query.limit);
   const ownListing = my === 'true';
   const query = addTeamRecruitmentIntegrityFilters(
@@ -624,16 +636,24 @@ const createPlayerProfile = safeAsyncHandler(async (req, res) => {
 
 // Get all player profiles with filters
 const getPlayerProfiles = safeAsyncHandler(async (req, res) => {
-  const {
-    game,
-    profileType,
-    location,
-    search,
-    sortBy = 'createdAt',
-    sortOrder = 'desc',
-    my,
-    status
-  } = req.query;
+  const game = normalizeQueryString(req.query.game, 80);
+  const profileType = normalizeQueryString(req.query.profileType, 30);
+  const location = normalizeQueryString(req.query.location, 120);
+  const search = normalizeQueryString(req.query.search, 100);
+  const sortBy = normalizeQueryString(req.query.sortBy, 40) || 'createdAt';
+  const sortOrder = normalizeQueryString(req.query.sortOrder, 4) || 'desc';
+  const my = normalizeQueryString(req.query.my, 5);
+  const status = normalizeQueryString(req.query.status, 20);
+  if ((req.query.game !== undefined && (typeof req.query.game !== 'string' || (game && !RECRUITMENT_GAMES.has(game)))) ||
+      (req.query.profileType !== undefined && (typeof req.query.profileType !== 'string' || (profileType && !['looking-for-team', 'staff-position'].includes(profileType)))) ||
+      (req.query.location !== undefined && typeof req.query.location !== 'string') ||
+      (req.query.search !== undefined && typeof req.query.search !== 'string') ||
+      (req.query.sortBy !== undefined && typeof req.query.sortBy !== 'string') ||
+      (req.query.sortOrder !== undefined && (typeof req.query.sortOrder !== 'string' || !['asc', 'desc'].includes(sortOrder))) ||
+      (req.query.my !== undefined && (typeof req.query.my !== 'string' || (my && !['true', 'false'].includes(my)))) ||
+      (req.query.status !== undefined && typeof req.query.status !== 'string')) {
+    return res.status(400).json({ success: false, message: 'Invalid player profile filter' });
+  }
   const { page, limit } = parsePagination(req.query.page, req.query.limit);
   const ownListing = my === 'true';
   const query = addPlayerProfileIntegrityFilters(

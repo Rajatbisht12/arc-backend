@@ -1,45 +1,62 @@
-// Global error handler middleware
+// Global error handler middleware. Controllers should forward unexpected
+// failures here so HTTP/parser/Mongoose errors are classified consistently and
+// internal provider/database messages are never exposed in production.
 const errorHandler = (err, req, res, next) => {
-  let error = { ...err };
-  error.message = err.message;
-
-  // Log error
+  void req;
+  void next;
   console.error(err);
 
-  // Mongoose bad ObjectId
-  if (err.name === 'CastError') {
-    const message = 'Resource not found';
-    error = { message, statusCode: 404 };
+  const explicitStatus = Number(err?.statusCode ?? err?.status);
+  let statusCode = Number.isInteger(explicitStatus) && explicitStatus >= 400 && explicitStatus <= 599
+    ? explicitStatus
+    : 500;
+  let code = typeof err?.code === 'string' ? err.code : undefined;
+  let message = statusCode < 500 && typeof err?.message === 'string'
+    ? err.message
+    : 'Internal server error';
+
+  if (err?.type === 'entity.parse.failed') {
+    statusCode = 400;
+    code = 'INVALID_JSON';
+    message = 'Request body contains invalid JSON';
+  } else if (err?.type === 'entity.too.large' || statusCode === 413) {
+    statusCode = 413;
+    code = 'PAYLOAD_TOO_LARGE';
+    message = 'Request payload is too large';
+  } else if (err?.name === 'CastError') {
+    statusCode = 400;
+    const castPath = String(err?.path || '');
+    const isIdentifier = castPath === '_id' || /(?:^|\.)[A-Za-z]*[Ii]d$/.test(castPath);
+    code = isIdentifier ? 'INVALID_IDENTIFIER' : 'INVALID_VALUE';
+    message = isIdentifier ? 'Invalid resource identifier' : 'Invalid request value';
+  } else if (err?.code === 11000) {
+    statusCode = 409;
+    code = 'RESOURCE_CONFLICT';
+    message = 'A resource with that value already exists';
+  } else if (err?.name === 'ValidationError') {
+    statusCode = 400;
+    code = 'VALIDATION_FAILED';
+    const validationMessages = Object.values(err.errors || {})
+      .map((value) => value?.message)
+      .filter(Boolean);
+    message = validationMessages.length > 0 ? validationMessages.join(', ') : 'Validation failed';
+  } else if (err?.name === 'JsonWebTokenError') {
+    statusCode = 401;
+    code = 'INVALID_TOKEN';
+    message = 'Invalid token';
+  } else if (err?.name === 'TokenExpiredError') {
+    statusCode = 401;
+    code = 'TOKEN_EXPIRED';
+    message = 'Token expired';
   }
 
-  // Mongoose duplicate key
-  if (err.code === 11000) {
-    const message = 'Duplicate field value entered';
-    error = { message, statusCode: 400 };
-  }
-
-  // Mongoose validation error
-  if (err.name === 'ValidationError') {
-    const message = Object.values(err.errors).map(val => val.message).join(', ');
-    error = { message, statusCode: 400 };
-  }
-
-  // JWT errors
-  if (err.name === 'JsonWebTokenError') {
-    const message = 'Invalid token';
-    error = { message, statusCode: 401 };
-  }
-
-  if (err.name === 'TokenExpiredError') {
-    const message = 'Token expired';
-    error = { message, statusCode: 401 };
-  }
-
-  res.status(error.statusCode || 500).json({
+  const response = {
     success: false,
-    message: error.message || 'Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-  });
+    message,
+    ...(code ? { code } : {}),
+    ...(process.env.NODE_ENV === 'development' && err?.stack ? { stack: err.stack } : {})
+  };
+  return res.status(statusCode).json(response);
 };
 
 module.exports = errorHandler;

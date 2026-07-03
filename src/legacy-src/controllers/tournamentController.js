@@ -105,6 +105,29 @@ const upload = multer({
   }
 }).single('banner');
 
+const sendTournamentUploadError = (res, error) => {
+  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({
+      success: false,
+      code: 'FILE_TOO_LARGE',
+      message: 'Tournament banner must not exceed 5MB'
+    });
+  }
+  if (error?.message === 'Only image files are allowed') {
+    return res.status(415).json({
+      success: false,
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      message: 'Only image files are allowed'
+    });
+  }
+  log.error('Tournament banner upload failed', { error: String(error) });
+  return res.status(400).json({
+    success: false,
+    code: 'FILE_UPLOAD_REJECTED',
+    message: 'Tournament banner upload was rejected'
+  });
+};
+
 // Helper function to convert banner filename to full URL
 const getBannerUrl = (banner) => {
   if (!banner) {
@@ -461,6 +484,10 @@ const normalizeAndValidatePrizes = ({ type, pool, distribution = [], special = [
   if (type !== 'with_prize') return { distribution: [], special: [] };
   if (!Array.isArray(distribution) || !Array.isArray(special)) {
     return { error: 'Prize distribution must be an array' };
+  }
+  if (distribution.some((prize) => !prize || typeof prize !== 'object' || Array.isArray(prize)) ||
+      special.some((prize) => !prize || typeof prize !== 'object' || Array.isArray(prize))) {
+    return { error: 'Prize distribution entries must be objects' };
   }
   const normalizedDistribution = distribution.map((prize) => ({
     rank: Number(prize.rank),
@@ -823,6 +850,18 @@ const createTournament = async (req, res) => {
         rules
       } = req.body;
 
+    if (typeof name !== 'string' || typeof description !== 'string' ||
+        (rules !== undefined && typeof rules !== 'string') ||
+        (location !== undefined && typeof location !== 'string') ||
+        (timezone !== undefined && typeof timezone !== 'string') ||
+        (prizePoolCurrency !== undefined && typeof prizePoolCurrency !== 'string')) {
+      return res.status(400).json({ success: false, message: 'Invalid tournament field type' });
+    }
+    if (name.length > 200 || description.length > 5000 || (rules && rules.length > 10000) ||
+        (location && location.length > 200) || (timezone && timezone.length > 100)) {
+      return res.status(400).json({ success: false, message: 'Tournament field exceeds the allowed length' });
+    }
+
     const hostId = req.user._id;
     const validGames = ['BGMI', 'Valorant', 'Free Fire', 'Call of Duty Mobile'];
     const validModes = ['Battle Royale', 'Deathmatch', '5v5', 'Solo'];
@@ -1136,7 +1175,7 @@ const createTournament = async (req, res) => {
     }
 
     if (error instanceof multer.MulterError || error?.message === 'Only image files are allowed') {
-      return res.status(400).json({ success: false, message: error.message });
+      return sendTournamentUploadError(res, error);
     }
     
     // Handle validation errors specifically
@@ -1166,7 +1205,20 @@ const getTournaments = async (req, res) => {
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
     const skip = (page - 1) * limit;
 
-    const { status, game, format, filter } = req.query;
+    const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+    const game = typeof req.query.game === 'string' ? req.query.game.trim() : '';
+    const format = typeof req.query.format === 'string' ? req.query.format.trim() : '';
+    const filter = typeof req.query.filter === 'string' ? req.query.filter.trim() : '';
+    const allowedStatuses = new Set(['Upcoming', 'Registration Open', 'Ongoing', 'Completed', 'Cancelled']);
+    const allowedGames = new Set(['BGMI', 'Valorant', 'Free Fire', 'Call of Duty Mobile']);
+    const allowedFormats = new Set(['Solo', 'Duo', 'Squad', '5v5']);
+    const allowedFilters = new Set(['recent', 'completed', 'hosted', 'participating', 'all']);
+    if ((req.query.status !== undefined && (typeof req.query.status !== 'string' || (status && !allowedStatuses.has(status)))) ||
+        (req.query.game !== undefined && (typeof req.query.game !== 'string' || (game && !allowedGames.has(game)))) ||
+        (req.query.format !== undefined && (typeof req.query.format !== 'string' || (format && !allowedFormats.has(format)))) ||
+        (req.query.filter !== undefined && (typeof req.query.filter !== 'string' || (filter && !allowedFilters.has(filter))))) {
+      return res.status(400).json({ success: false, message: 'Invalid tournament filter' });
+    }
     const search = normalizeQuerySearch(
       req.query.search !== undefined ? req.query.search : req.query.q
     );
@@ -1565,10 +1617,7 @@ const updateTournament = async (req, res) => {
   try {
     upload(req, res, async (err) => {
       if (err) {
-        return res.status(400).json({
-          success: false,
-          message: err.message
-        });
+        return sendTournamentUploadError(res, err);
       }
 
       let newBannerPublicId = null;
@@ -3530,6 +3579,33 @@ const getTournamentSchedule = async (req, res) => {
 const configureScheduleSettings = async (req, res) => {
   try {
     const { timeSlots, availableDates, defaultMatchDuration, timezone } = req.body;
+    const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const duration = defaultMatchDuration === undefined ? undefined : Number(defaultMatchDuration);
+    const validTimeSlots = timeSlots === undefined || (
+      Array.isArray(timeSlots) && timeSlots.length <= 100 && timeSlots.every((slot) => (
+        slot && typeof slot === 'object' && !Array.isArray(slot)
+        && timePattern.test(String(slot.startTime || ''))
+        && timePattern.test(String(slot.endTime || ''))
+        && String(slot.startTime) < String(slot.endTime)
+        && (slot.isActive === undefined || typeof slot.isActive === 'boolean')
+      ))
+    );
+    const validAvailableDates = availableDates === undefined || (
+      Array.isArray(availableDates) && availableDates.length <= 366 && availableDates.every((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !datePattern.test(String(entry.date || ''))) return false;
+        const date = new Date(`${entry.date}T00:00:00.000Z`);
+        const maxMatches = entry.maxMatches === undefined ? 10 : Number(entry.maxMatches);
+        return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === entry.date
+          && Number.isInteger(maxMatches) && maxMatches >= 1 && maxMatches <= 1000
+          && (entry.isActive === undefined || typeof entry.isActive === 'boolean');
+      })
+    );
+    if (!validTimeSlots || !validAvailableDates ||
+        (duration !== undefined && (!Number.isInteger(duration) || duration < 5 || duration > 480)) ||
+        (timezone !== undefined && (typeof timezone !== 'string' || !timezone.trim() || timezone.length > 100))) {
+      return res.status(400).json({ success: false, message: 'Invalid tournament schedule configuration' });
+    }
     const tournament = await Tournament.findById(req.params.id);
 
     if (!tournament) {
@@ -3553,10 +3629,10 @@ const configureScheduleSettings = async (req, res) => {
     }
 
     // Update schedule configuration
-    if (timeSlots) tournament.scheduleConfig.timeSlots = timeSlots;
-    if (availableDates) tournament.scheduleConfig.availableDates = availableDates;
-    if (defaultMatchDuration) tournament.scheduleConfig.defaultMatchDuration = defaultMatchDuration;
-    if (timezone) tournament.scheduleConfig.timezone = timezone;
+    if (timeSlots !== undefined) tournament.scheduleConfig.timeSlots = timeSlots;
+    if (availableDates !== undefined) tournament.scheduleConfig.availableDates = availableDates;
+    if (duration !== undefined) tournament.scheduleConfig.defaultMatchDuration = duration;
+    if (timezone !== undefined) tournament.scheduleConfig.timezone = timezone.trim();
 
     await tournament.save();
     await emitTournamentUpdated(req, tournament._id);
@@ -6006,6 +6082,7 @@ module.exports = {
     getSocketIo,
     emitTournamentUpdated,
     emitTournamentBroadcast,
+    sendTournamentUploadError,
     isDirectTournamentParticipant,
     canReadTournamentMessages,
     canReadGroupMessages,

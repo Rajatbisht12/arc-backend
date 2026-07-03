@@ -4,17 +4,29 @@ require('dotenv').config();
 
 const createTeams = async () => {
   try {
+    if (!process.argv.includes('--apply')) throw new Error('Refusing to seed teams without --apply');
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_TEST_DATA_SEED !== 'true') {
+      throw new Error('Test team seeding is disabled in production');
+    }
+    const mongoUri = process.env.MONGODB_URI;
+    const password = String(process.env.TEAM_SEED_PASSWORD || '');
+    const teamCount = Math.min(100, Math.max(1, Number.parseInt(process.env.TEAM_SEED_COUNT || '17', 10) || 17));
+    const emailDomain = String(process.env.TEAM_SEED_EMAIL_DOMAIN || '').trim().toLowerCase();
+    if (!mongoUri) throw new Error('MONGODB_URI is required');
+    if (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+      throw new Error('TEAM_SEED_PASSWORD must be at least 12 characters and include upper, lower, number, and symbol');
+    }
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(emailDomain)) throw new Error('TEAM_SEED_EMAIL_DOMAIN is required');
+
     // Connect to database
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-social-platform');
+    await mongoose.connect(mongoUri);
     console.log('Connected to database');
 
     const teams = [];
-    const password = '123456';
 
-    // Create 17 teams
-    for (let i = 1; i <= 17; i++) {
+    for (let i = 1; i <= teamCount; i++) {
       const username = `teamtr${i}`;
-      const email = `teamtr${i}@arcgaming.com`;
+      const email = `teamtr${i}@${emailDomain}`;
       const displayName = `Team TR${i}`;
 
       // Check if team already exists
@@ -56,7 +68,6 @@ const createTeams = async () => {
       teams.push({
         username: username,
         email: email,
-        password: password,
         id: team._id
       });
 
@@ -66,22 +77,21 @@ const createTeams = async () => {
     console.log('\n========================================');
     console.log('✅ Successfully created teams!');
     console.log('========================================\n');
-    console.log('Team Credentials:');
+    console.log('Created Teams:');
     console.log('-----------------');
     teams.forEach((team, index) => {
       console.log(`${index + 1}. Username: ${team.username}`);
       console.log(`   Email: ${team.email}`);
-      console.log(`   Password: ${team.password}`);
       console.log(`   ID: ${team.id}`);
       console.log('');
     });
     console.log('========================================\n');
 
   } catch (error) {
-    console.error('Error creating teams:', error);
+    console.error('Error creating teams:', error.message);
+    process.exitCode = 1;
   } finally {
-    await mongoose.disconnect();
-    process.exit(0);
+    if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
   }
 };
 

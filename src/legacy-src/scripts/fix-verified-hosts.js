@@ -9,6 +9,8 @@ const User = require('../models/User');
 const HostVerificationApplication = require('../models/HostVerificationApplication');
 
 async function fixVerifiedHosts() {
+  if (!process.argv.includes('--apply')) throw new Error('Refusing to update verified hosts without --apply');
+  if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
   await mongoose.connect(process.env.MONGODB_URI);
   console.log('✅ Connected to MongoDB');
 
@@ -43,6 +45,6 @@ async function fixVerifiedHosts() {
 }
 
 fixVerifiedHosts().catch(err => {
-  console.error('Error:', err);
+  console.error('Error:', err.message);
   process.exit(1);
 });

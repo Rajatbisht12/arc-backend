@@ -4,6 +4,7 @@
  */
 const User = require('../models/User');
 const log = require('../utils/logger');
+const { sendInternalError } = require('../utils/internalErrorResponse');
 
 // Plans catalog: credits + exploreDetails for each plan
 const PLAYER_PLANS = [
@@ -176,10 +177,12 @@ async function getPlans(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get plans',
-      error: err.message
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Membership plan catalog lookup failed',
+      publicMessage: 'Failed to get plans',
+      error: err
     });
   }
 }
@@ -255,10 +258,12 @@ async function getMembership(req, res) {
       }
     });
   } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get membership',
-      error: err.message
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Membership lookup failed',
+      publicMessage: 'Failed to get membership',
+      error: err
     });
   }
 }

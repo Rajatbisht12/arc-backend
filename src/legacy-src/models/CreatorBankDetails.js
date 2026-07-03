@@ -1,17 +1,27 @@
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || 'default-32-byte-key-for-arc-bank!!';
-const IV_LENGTH = 16;
-const ALGO = 'aes-256-cbc';
+const ENCRYPTION_KEY = process.env.BANK_DETAILS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+const LEGACY_IV_LENGTH = 16;
+const GCM_IV_LENGTH = 12;
+const LEGACY_ALGO = 'aes-256-cbc';
+const ALGO = 'aes-256-gcm';
+
+function encryptionKey() {
+  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) {
+    throw new Error('BANK_DETAILS_ENCRYPTION_KEY or ENCRYPTION_KEY with at least 32 characters is required');
+  }
+  return Buffer.from(ENCRYPTION_KEY.slice(0, 32).padEnd(32, '0'));
+}
 
 function encrypt(text) {
-  const key = Buffer.from(ENCRYPTION_KEY.slice(0, 32).padEnd(32, '0'));
-  const iv = crypto.randomBytes(IV_LENGTH);
+  const key = encryptionKey();
+  const iv = crypto.randomBytes(GCM_IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGO, key, iv);
   let encrypted = cipher.update(String(text), 'utf8', 'hex');
   encrypted += cipher.final('hex');
-  return iv.toString('hex') + ':' + encrypted;
+  const authTag = cipher.getAuthTag();
+  return 'v2:' + iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
 }
 
 function hashValue(text) {
@@ -23,10 +33,26 @@ function hashValue(text) {
 
 function decrypt(encrypted) {
   if (!encrypted || !encrypted.includes(':')) return '';
-  const [ivHex, encryptedText] = encrypted.split(':');
-  const key = Buffer.from(ENCRYPTION_KEY.slice(0, 32).padEnd(32, '0'));
+  const key = encryptionKey();
+  const parts = encrypted.split(':');
+  if (parts[0] === 'v2') {
+    if (parts.length !== 4 || parts[1].length !== GCM_IV_LENGTH * 2 || parts[2].length !== 32) {
+      throw new Error('Invalid encrypted bank value');
+    }
+    const decipher = crypto.createDecipheriv(ALGO, key, Buffer.from(parts[1], 'hex'));
+    decipher.setAuthTag(Buffer.from(parts[2], 'hex'));
+    let decrypted = decipher.update(parts[3], 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  }
+  // Backward-compatible read path for legacy AES-CBC rows. All new writes use
+  // authenticated v2 AES-GCM and naturally migrate when bank details change.
+  if (parts.length !== 2 || parts[0].length !== LEGACY_IV_LENGTH * 2) {
+    throw new Error('Invalid encrypted bank value');
+  }
+  const [ivHex, encryptedText] = parts;
   const iv = Buffer.from(ivHex, 'hex');
-  const decipher = crypto.createDecipheriv(ALGO, key, iv);
+  const decipher = crypto.createDecipheriv(LEGACY_ALGO, key, iv);
   let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
   decrypted += decipher.final('utf8');
   return decrypted;

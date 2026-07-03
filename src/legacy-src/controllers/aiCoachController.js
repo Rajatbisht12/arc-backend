@@ -15,6 +15,7 @@ const { uploadImage, uploadVideo } = require('../utils/cloudinary');
 const { retrieveKnowledge, formatKnowledgeContext } = require('../utils/knowledgeRetrieval');
 const { getWebSearchResults, formatSearchResults, shouldSearchWeb } = require('../utils/webSearch');
 const log = require('../utils/logger');
+const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 
 // Initialize all AI services
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -881,7 +882,7 @@ const chatWithAI = async (req, res) => {
       webSearchStatus = {
         searching: false,
         found: false,
-        error: webSearchError.message
+        error: 'web_search_unavailable'
       };
       // Continue without web search if it fails
     }
@@ -1658,12 +1659,7 @@ const analyzeGameplay = async (req, res) => {
       mediaUrl = uploadResult.url;
       mediaPublicId = uploadResult.publicId;
     } catch (uploadError) {
-      log.error('Cloudinary upload error:', { error: String(uploadError) });
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to upload file. Please try again.',
-        error: uploadError.message
-      });
+      return respondToMediaUploadError(res, uploadError, 'Failed to upload file. Please try again.');
     }
 
     // Detect language from message

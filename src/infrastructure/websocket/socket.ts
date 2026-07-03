@@ -4,6 +4,7 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import jwt from "jsonwebtoken";
 import path from "path";
 import { env } from "../../config/env";
+import { getAllowedOrigins } from "../../config/cors";
 import { logger } from "../../config/logger";
 import { registerChatSocketHandlers } from "../../modules/chat/chat.socket";
 import { registerLegacySocketHandlers } from "../../modules/legacy/legacy.socket";
@@ -38,7 +39,7 @@ declare module "socket.io" {
 }
 
 export const createSocketServer = (httpServer: HttpServer): Server => {
-  const allowedOrigins = env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean);
+  const allowedOrigins = getAllowedOrigins();
   const io = new Server(httpServer, {
     cors: {
       origin: allowedOrigins,
@@ -60,7 +61,19 @@ export const createSocketServer = (httpServer: HttpServer): Server => {
         return next(new Error("Authentication token is required"));
       }
 
-      const decoded = jwt.verify(token, env.JWT_SECRET) as { id?: string; userId?: string };
+      const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as {
+        id?: string;
+        userId?: string;
+        tokenType?: string;
+        iat?: number;
+        exp?: number;
+      };
+      if (decoded.tokenType && decoded.tokenType !== "access") {
+        return next(new Error("Invalid token type"));
+      }
+      if (!decoded.tokenType && decoded.iat && decoded.exp && decoded.exp - decoded.iat > 8 * 24 * 60 * 60) {
+        return next(new Error("Invalid legacy token lifetime"));
+      }
       const userId = decoded.id ?? decoded.userId;
       if (!userId) {
         return next(new Error("Invalid token payload"));
@@ -81,7 +94,8 @@ export const createSocketServer = (httpServer: HttpServer): Server => {
       socket.data.userId = String(userId);
       return next();
     } catch (error) {
-      return next(new Error(`Authentication failed: ${String(error)}`));
+      logger.warn("Socket authentication failed", { socketId: socket.id, error: String(error) });
+      return next(new Error("Authentication failed"));
     }
   });
 

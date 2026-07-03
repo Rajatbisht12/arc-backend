@@ -3,6 +3,7 @@ import { body } from "express-validator";
 import { normalizePreferredGender } from "../../legacy-src/utils/randomConnectGender";
 import {
   randomConnectController,
+  handleValidationErrors,
   protect,
   authorize,
   ConnectionQueue,
@@ -24,10 +25,10 @@ router.get("/queue-status", protect, async (_req: Request, res: Response) => {
       timestamp: new Date()
     });
   } catch (error) {
+    console.error("[random-connections] Failed to read queue status", error);
     res.status(500).json({
       success: false,
-      message: "Failed to get queue status",
-      error: String((error as Error).message)
+      message: "Failed to get queue status"
     });
   }
 });
@@ -93,21 +94,21 @@ const nextMatchValidation = [
 ];
 
 // Routes (original random connections)
-router.post("/join-queue", protect, joinQueueValidation, randomConnectController.joinQueue);
+router.post("/join-queue", protect, joinQueueValidation, handleValidationErrors, randomConnectController.joinQueue);
 router.delete("/leave-queue", protect, randomConnectController.leaveQueue);
 router.get("/current-connection", protect, randomConnectController.getCurrentConnection);
 router.get("/active-sessions", protect, randomConnectController.getActiveSessions);
-router.post("/disconnect", protect, disconnectValidation, randomConnectController.disconnectConnection);
-router.post("/next", protect, nextMatchValidation, randomConnectController.nextConnection);
-router.post("/send-message", protect, sendMessageValidation, randomConnectController.sendMessage);
+router.post("/disconnect", protect, disconnectValidation, handleValidationErrors, randomConnectController.disconnectConnection);
+router.post("/next", protect, nextMatchValidation, handleValidationErrors, randomConnectController.nextConnection);
+router.post("/send-message", protect, sendMessageValidation, handleValidationErrors, randomConnectController.sendMessage);
 router.post("/cleanup-current", protect, randomConnectController.cleanupCurrentConnection);
 
 // Backward-compatible v2 aliases use the same hardened implementation. The
 // former v2 controller bypassed canonical entitlement, admission and quota.
-router.post("/v2/join-queue", joinQueueValidation, randomConnectController.joinQueue);
+router.post("/v2/join-queue", joinQueueValidation, handleValidationErrors, randomConnectController.joinQueue);
 router.delete("/v2/leave-queue", randomConnectController.leaveQueue);
 router.get("/v2/current-connection", randomConnectController.getCurrentConnection);
-router.post("/v2/disconnect", disconnectValidation, randomConnectController.disconnectConnection);
+router.post("/v2/disconnect", disconnectValidation, handleValidationErrors, randomConnectController.disconnectConnection);
 router.post("/v2/cleanup-current", randomConnectController.cleanupCurrentConnection);
 
 export default router;

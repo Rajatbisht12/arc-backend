@@ -9,6 +9,39 @@ const User = require(path.join(backendModelPath, "User.js")) as any;
 const { resolvePrivacyAccess } = require(path.join(backendRootPath, "utils", "privacyPolicy.js")) as any;
 
 const RECENT_MESSAGES_CACHE_TTL_SECONDS = 30;
+const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
+
+const readRecentMessagesCache = async (key: string): Promise<unknown[] | null> => {
+  if (!redisCacheClient.isReady) return null;
+  try {
+    const cached = await redisCacheClient.get(key);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached) as unknown;
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    // Redis is an optional cache. Corrupt entries or a cache outage must not
+    // turn an otherwise healthy MongoDB request into HTTP 500.
+    return null;
+  }
+};
+
+const writeRecentMessagesCache = async (key: string, messages: unknown[]): Promise<void> => {
+  if (!redisCacheClient.isReady) return;
+  try {
+    await redisCacheClient.setEx(key, RECENT_MESSAGES_CACHE_TTL_SECONDS, JSON.stringify(messages));
+  } catch {
+    // Best effort only; MongoDB remains authoritative.
+  }
+};
+
+const invalidateRecentMessagesCache = async (key: string): Promise<void> => {
+  if (!redisCacheClient.isReady) return;
+  try {
+    await redisCacheClient.del(key);
+  } catch {
+    // Best effort only; the entry also has a short TTL.
+  }
+};
 
 const accessError = () => {
   const error = new Error("Chat not found or access denied") as Error & { statusCode?: number; code?: string };
@@ -19,6 +52,9 @@ const accessError = () => {
 
 export const chatService = {
   async resolveParticipant(chatId: string, userId: string) {
+    if (!OBJECT_ID_PATTERN.test(chatId) || !OBJECT_ID_PATTERN.test(userId)) {
+      throw accessError();
+    }
     const chat = await chatRepository.findById(chatId);
     if (!chat) return null;
     const allowed = Boolean(chat?.participantIds?.some((participantId) => String(participantId) === String(userId)));
@@ -67,20 +103,18 @@ export const chatService = {
   async getRecentMessages(chatId: string, userId: string) {
     await this.assertParticipant(chatId, userId);
     const cacheKey = `chat:${chatId}:recent`;
-    const cached = await redisCacheClient.get(cacheKey);
-    if (cached) {
-      return JSON.parse(cached) as unknown[];
-    }
+    const cached = await readRecentMessagesCache(cacheKey);
+    if (cached) return cached;
 
     const messages = await chatRepository.listRecentMessages(chatId);
-    await redisCacheClient.setEx(cacheKey, RECENT_MESSAGES_CACHE_TTL_SECONDS, JSON.stringify(messages));
+    await writeRecentMessagesCache(cacheKey, messages);
     return messages;
   },
 
   async postMessage(payload: { chatId: string; senderId: string; text: string }) {
     await this.assertRealtimeParticipant(payload.chatId, payload.senderId);
     const message = await chatRepository.sendMessage(payload);
-    await redisCacheClient.del(`chat:${payload.chatId}:recent`);
+    await invalidateRecentMessagesCache(`chat:${payload.chatId}:recent`);
     return message;
   }
 };

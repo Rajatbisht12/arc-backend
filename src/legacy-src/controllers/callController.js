@@ -129,7 +129,7 @@ const initiateCall = async (req, res) => {
       });
     }
 
-    if (!/^[a-f\d]{24}$/i.test(String(targetUserId))) {
+    if (typeof targetUserId !== 'string' || !/^[a-f\d]{24}$/i.test(targetUserId)) {
       return res.status(400).json({ success: false, message: 'Valid targetUserId is required' });
     }
 
@@ -633,10 +633,10 @@ const generateGroupCallToken = async (req, res) => {
     const userId = req.user._id.toString();
     const { chatRoomId } = req.body;
 
-    if (!chatRoomId) {
+    if (!/^[a-f\d]{24}$/i.test(String(chatRoomId || ''))) {
       return res.status(400).json({
         success: false,
-        message: 'chatRoomId is required'
+        message: 'Valid chatRoomId is required'
       });
     }
 

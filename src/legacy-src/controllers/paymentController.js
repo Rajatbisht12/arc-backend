@@ -2,6 +2,7 @@
  * Payment controller: create orders, verify payments, activate subscriptions, tournament payments
  */
 const User = require('../models/User');
+const mongoose = require('mongoose');
 const Tournament = require('../models/Tournament');
 const Post = require('../models/Post');
 const PaymentTransaction = require('../models/PaymentTransaction');
@@ -528,8 +529,17 @@ async function verifyBoostPayment(req, res) {
 async function getBoostCampaigns(req, res) {
   try {
     const query = { user: req.user._id };
-    if (req.query.postId) query.post = req.query.postId;
-    if (req.query.status) query.status = req.query.status;
+    const postId = typeof req.query.postId === 'string' ? req.query.postId.trim() : '';
+    const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+    const allowedStatuses = new Set(['pending', 'running', 'paused', 'completed', 'cancelled', 'rejected']);
+    if (req.query.postId !== undefined && (!postId || !mongoose.isValidObjectId(postId))) {
+      return res.status(400).json({ success: false, message: 'Invalid post identifier' });
+    }
+    if (req.query.status !== undefined && (!status || !allowedStatuses.has(status))) {
+      return res.status(400).json({ success: false, message: 'Invalid boost campaign status' });
+    }
+    if (postId) query.post = postId;
+    if (status) query.status = status;
 
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
     const campaigns = await BoostCampaign.find(query)
@@ -570,7 +580,13 @@ async function getBoostCampaigns(req, res) {
 async function getPaymentHistory(req, res) {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
+    if (req.query.cursor !== undefined && typeof req.query.cursor !== 'string') {
+      return res.status(400).json({ success: false, message: 'Invalid payment history cursor' });
+    }
     const cursor = req.query.cursor ? new Date(req.query.cursor) : null;
+    if (cursor && Number.isNaN(cursor.getTime())) {
+      return res.status(400).json({ success: false, message: 'Invalid payment history cursor' });
+    }
     const query = { user: req.user._id };
 
     if (cursor && !Number.isNaN(cursor.getTime())) {

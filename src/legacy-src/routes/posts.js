@@ -67,17 +67,33 @@ const addCommentValidation = [
     .withMessage('Comment must be between 1 and 500 characters')
 ];
 
+const MAX_ENGAGEMENT_DURATION_MS = 24 * 60 * 60 * 1000;
+const engagementMetricValidation = [
+  body('durationMs').optional({ values: 'null' }).isInt({ min: 0, max: MAX_ENGAGEMENT_DURATION_MS }).withMessage('Invalid engagement duration'),
+  body('dwellTime').optional({ values: 'null' }).isInt({ min: 0, max: MAX_ENGAGEMENT_DURATION_MS }).withMessage('Invalid dwell time'),
+  body('completionRate').optional({ values: 'null' }).isFloat({ min: 0, max: 1 }).withMessage('Completion rate must be between 0 and 1'),
+  body('context').optional({ values: 'null' }).isString().trim().isLength({ max: 64 }).withMessage('Invalid engagement context'),
+  body('source').optional({ values: 'null' }).isIn(['organic', 'boost']).withMessage('Invalid engagement source'),
+  body('deliverySource').optional({ values: 'null' }).isIn(['organic', 'boost']).withMessage('Invalid delivery source')
+];
+const interactionValidation = [
+  body('postId').isString().isMongoId().withMessage('Invalid post ID'),
+  body('interactionType').isIn(['watch', 'like', 'comment', 'share', 'save', 'click', 'dwell_time', 'skip']).withMessage('Invalid interaction type'),
+  body('clickedElement').optional({ values: 'null' }).isString().isLength({ max: 128 }).withMessage('Invalid clicked element'),
+  ...engagementMetricValidation
+];
+
 // Routes
 router.post('/', protect, uploadFields([{ name: 'media', maxCount: 5 }, { name: 'cover', maxCount: 1 }]), createPostValidation, handleValidationErrors, createPost);
 router.get('/', optionalAuth, getPosts);
 router.get('/clips', optionalAuth, getClips);
 router.get('/:id', optionalAuth, getPost);
-router.post('/:id/view', protect, recordClipView);
+router.post('/:id/view', protect, engagementMetricValidation, handleValidationErrors, recordClipView);
 router.post('/:id/like', protect, toggleLike);
 router.post('/:id/comment', protect, addCommentValidation, handleValidationErrors, addComment);
 router.post('/:id/share', protect, recordShare);
 router.post('/:id/save', protect, toggleSave);
-router.post('/interaction', protect, trackInteraction);
+router.post('/interaction', protect, interactionValidation, handleValidationErrors, trackInteraction);
 router.put('/:id', protect, updatePostValidation, handleValidationErrors, updatePost);
 router.delete('/:id', protect, deletePost);
 router.post('/:id/report', protect, reportPost);

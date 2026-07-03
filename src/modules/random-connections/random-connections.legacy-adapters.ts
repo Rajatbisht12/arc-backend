@@ -4,6 +4,7 @@ import { backendControllerPath, backendMiddlewarePath, backendModelPath } from "
 
 type RandomConnectController = Record<string, RequestHandler>;
 type AuthMiddleware = { protect: RequestHandler; authorize: (role: string) => RequestHandler };
+type ValidationMiddleware = { handleValidationErrors: RequestHandler };
 type MongooseModel = {
   countDocuments: (filter?: Record<string, unknown>) => Promise<number>;
 };
@@ -15,5 +16,6 @@ const loadModule = <T>(modulePath: string): T => {
 
 export const randomConnectController = loadModule<RandomConnectController>(path.join(backendControllerPath, "randomConnectController.js"));
 export const { protect, authorize } = loadModule<AuthMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
+export const { handleValidationErrors } = loadModule<ValidationMiddleware>(path.join(backendMiddlewarePath, "validation.js"));
 export const ConnectionQueue = loadModule<MongooseModel>(path.join(backendModelPath, "ConnectionQueue.js"));
 export const RandomConnection = loadModule<MongooseModel>(path.join(backendModelPath, "RandomConnection.js"));

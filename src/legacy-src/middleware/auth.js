@@ -213,6 +213,14 @@ const checkOwnership = (resourceModel, resourceIdParam = 'id') => {
         });
       }
 
+      if (!mongoose.isValidObjectId(resourceId)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_IDENTIFIER',
+          message: 'Invalid resource identifier.'
+        });
+      }
+
       const resource = await resourceModel.findById(resourceId);
       
       if (!resource) {
@@ -245,8 +253,7 @@ const checkOwnership = (resourceModel, resourceIdParam = 'id') => {
       log.error('Auth error', { error: String(error) });
       return res.status(500).json({
         success: false,
-        message: 'Error checking resource ownership.',
-        error: error.message
+        message: 'Error checking resource ownership.'
       });
     }
   };

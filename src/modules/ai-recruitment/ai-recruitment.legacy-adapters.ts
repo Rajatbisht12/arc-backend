@@ -4,6 +4,7 @@ import { backendControllerPath, backendMiddlewarePath } from "../legacy/legacy.p
 
 type AIRecruitmentController = Record<string, RequestHandler>;
 type AuthMiddleware = { protect: RequestHandler };
+type ValidationMiddleware = { handleValidationErrors: RequestHandler };
 type RateLimiterMiddleware = { aiCoachLimiter: RequestHandler };
 
 const loadModule = <T>(modulePath: string): T => {
@@ -13,4 +14,5 @@ const loadModule = <T>(modulePath: string): T => {
 
 export const aiRecruitmentController = loadModule<AIRecruitmentController>(path.join(backendControllerPath, "aiRecruitmentController.js"));
 export const { protect } = loadModule<AuthMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
+export const { handleValidationErrors } = loadModule<ValidationMiddleware>(path.join(backendMiddlewarePath, "validation.js"));
 export const { aiCoachLimiter } = loadModule<RateLimiterMiddleware>(path.join(backendMiddlewarePath, "rateLimiter.js"));

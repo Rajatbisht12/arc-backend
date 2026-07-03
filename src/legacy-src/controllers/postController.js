@@ -5,9 +5,16 @@ const BoostCampaign = require('../models/BoostCampaign');
 const { uploadMultipleFiles } = require('../utils/cloudinary');
 const { createLikeNotification, createCommentNotification, createMentionNotification } = require('../utils/notificationService');
 const { formatPostDTO } = require('../utils/dto');
-const { getRecommendedPosts, recordEngagementEvent } = require('../services/recommendationService');
+const {
+  getRecommendedPosts,
+  recordEngagementEvent,
+  normalizeEngagementContext,
+  normalizeEngagementDuration,
+  normalizeCompletionRate
+} = require('../services/recommendationService');
 const { isActiveBoost } = require('../services/boostService');
 const log = require('../utils/logger');
+const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const { resolvePostAccess, filterPostsForViewer } = require('../utils/privacyPolicy');
 
 const rejectPrivatePost = (res, decision) => res.status(decision?.reason === 'not_found' ? 404 : 403).json({
@@ -27,9 +34,10 @@ const requireVisiblePost = async (req, res, post) => {
   return decision;
 };
 
-function getRequestSource(req, post) {
-  const requested = req.body?.source || req.query?.source || req.body?.deliverySource || req.query?.deliverySource;
-  return requested === 'boost' && isActiveBoost(post) ? 'boost' : 'organic';
+function getRequestSource(_req, post) {
+  // Delivery attribution is derived from server-owned campaign state. Clients
+  // cannot relabel an active paid delivery as organic (or vice versa).
+  return isActiveBoost(post) ? 'boost' : 'organic';
 }
 
 function getBoostCampaignId(post, source) {
@@ -132,11 +140,7 @@ const createPost = async (req, res) => {
           } : null;
         }
       } catch (uploadError) {
-        return res.status(400).json({
-          success: false,
-          message: 'Failed to upload media files',
-          error: uploadError.message
-        });
+        return respondToMediaUploadError(res, uploadError, 'Failed to upload media files');
       }
     }
 
@@ -368,9 +372,9 @@ const recordClipView = async (req, res) => {
   try {
     const postId = req.params.id;
     const userId = req.user._id;
-    const context = req.body?.context || req.query?.context || 'clips';
-    const durationMs = Math.max(0, parseInt(req.body?.durationMs, 10) || 0);
-    const completionRate = Math.min(1, Math.max(0, Number(req.body?.completionRate) || 0));
+    const context = normalizeEngagementContext(req.body?.context || req.query?.context || 'clips');
+    const durationMs = normalizeEngagementDuration(req.body?.durationMs);
+    const completionRate = normalizeCompletionRate(req.body?.completionRate);
 
     const now = new Date();
     const basePost = await Post.findById(postId).select('author visibility isActive hiddenByAdmin boostMeta boostExpiresAt');
@@ -1122,7 +1126,9 @@ const trackInteraction = async (req, res) => {
     const userId = req.user._id;
 
     // Validate interaction type
-    const validTypes = ['view', 'watch', 'like', 'comment', 'share', 'save', 'click', 'dwell_time', 'skip'];
+    // Views must use POST /posts/:id/view so viewedBy, counters, attribution,
+    // and the unique engagement record are updated together.
+    const validTypes = ['watch', 'like', 'comment', 'share', 'save', 'click', 'dwell_time', 'skip'];
     if (!validTypes.includes(interactionType)) {
       return res.status(400).json({
         success: false,
@@ -1145,7 +1151,8 @@ const trackInteraction = async (req, res) => {
       : interactionType;
     const source = getRequestSource(req, post);
     const campaignId = getBoostCampaignId(post, source);
-    const trackedDuration = Math.max(0, parseInt(durationMs ?? dwellTime, 10) || 0);
+    const trackedDuration = normalizeEngagementDuration(durationMs ?? dwellTime);
+    const normalizedContext = normalizeEngagementContext(context);
     if (['watch', 'dwell'].includes(normalizedType) && trackedDuration > 0) {
       await incrementAttributionMetric({ postId, source, campaignId, metric: 'WatchTimeMs', amount: trackedDuration });
     }
@@ -1154,9 +1161,9 @@ const trackInteraction = async (req, res) => {
       postId,
       authorId: post.author,
       eventType: normalizedType,
-      context: context || 'unknown',
+      context: normalizedContext,
       durationMs: trackedDuration,
-      completionRate: Math.min(1, Math.max(0, Number(completionRate) || 0)),
+      completionRate: normalizeCompletionRate(completionRate),
       source,
       boostCampaign: campaignId,
       metadata: { clickedElement }

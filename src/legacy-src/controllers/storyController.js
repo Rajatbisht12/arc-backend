@@ -142,7 +142,7 @@ const getStory = async (req, res) => {
       data: { story: { ...safeStory, viewCount: counts.get(toIdStr(story._id)) || 0 } }
     });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message || 'Failed to fetch story' });
+    return res.status(500).json({ success: false, message: 'Failed to fetch story' });
   }
 };
 
@@ -231,9 +231,10 @@ const createStory = async (req, res) => {
         return respondWithStory(res, existingStory, 200);
       }
     }
-    return res.status(err.statusCode || 500).json({
+    const status = Number(err?.statusCode || 500);
+    return res.status(status).json({
       success: false,
-      message: err.message || 'Failed to create story'
+      message: status >= 500 ? 'Failed to create story' : (err.message || 'Failed to create story')
     });
   }
 };
@@ -359,10 +360,10 @@ const getStoriesFeed = async (req, res) => {
       data: { users: finalUsers }
     });
   } catch (err) {
-    console.error('getStoriesFeed error:', err.message || err);
+    console.error('getStoriesFeed error:', err);
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to fetch stories feed'
+      message: 'Failed to fetch stories feed'
     });
   }
 };
@@ -414,7 +415,7 @@ const getUserStories = async (req, res) => {
   } catch (err) {
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to fetch stories'
+      message: 'Failed to fetch stories'
     });
   }
 };
@@ -466,7 +467,7 @@ const viewStory = async (req, res) => {
   } catch (err) {
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to record view'
+      message: 'Failed to record view'
     });
   }
 };
@@ -513,7 +514,7 @@ const getStoryViewers = async (req, res) => {
   } catch (err) {
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to fetch story viewers'
+      message: 'Failed to fetch story viewers'
     });
   }
 };
@@ -536,7 +537,7 @@ const deleteStory = async (req, res) => {
   } catch (err) {
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to delete story'
+      message: 'Failed to delete story'
     });
   }
 };

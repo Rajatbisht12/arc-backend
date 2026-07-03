@@ -95,6 +95,14 @@ assert.match(validateScrimCreationInput(dailyPayload({ prizePoolCurrency: 'EUR' 
 assert.strictEqual(validateScrimCreationInput(dailyPayload({ prizePoolType: 'no_prize' }), {
   now: new Date('2026-07-03T10:00:00.000Z')
 }).value.prizePoolType, 'without_prize');
+assert.match(validateScrimCreationInput(dailyPayload({ prizeDistribution: { rank: 1 } }), {
+  now: new Date('2026-07-03T10:00:00.000Z')
+}).error, /must be arrays/);
+assert.match(validateScrimCreationInput(dailyPayload({
+  prizePoolType: 'with_prize',
+  prizePool: 100,
+  prizeDistribution: [{ rank: 1, amount: 101 }]
+}), { now: new Date('2026-07-03T10:00:00.000Z') }).error, /over-budget/);
 
 const participantA = '64b000000000000000000001';
 const participantB = '64b000000000000000000002';

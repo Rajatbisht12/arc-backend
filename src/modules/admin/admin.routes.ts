@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import { adminController, auditLog, durableMutationAudit, requireAdminPermission, requireSuperAdmin } from "./admin.legacy-adapters";
 import { requireHardcodedAdminAuth } from "./admin-auth.middleware";
@@ -9,6 +9,30 @@ import pushRoutes from "./push.routes";
 import { premiumMembershipController } from "./premium-membership.legacy-adapters";
 
 const router = Router();
+export const rejectStructuredAdminQuery = (req: Request, res: Response, next: NextFunction) => {
+  const invalidField = Object.entries(req.query || {}).find(([, value]) => typeof value !== "string");
+  if (invalidField) {
+    return res.status(400).json({
+      success: false,
+      code: "INVALID_QUERY_FILTER",
+      message: `Query filter ${invalidField[0]} must be a single string value`
+    });
+  }
+  return next();
+};
+const mongoObjectIdPattern = /^[a-f\d]{24}$/i;
+for (const parameterName of ["userId", "postId", "tournamentId", "reportId", "campaignId", "applicationId", "id"]) {
+  router.param(parameterName, (_req, res, next, value) => {
+    if (!mongoObjectIdPattern.test(String(value || ""))) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_RESOURCE_ID",
+        message: `Valid ${parameterName} is required`
+      });
+    }
+    return next();
+  });
+}
 const legacyPremiumMutationLimiter = rateLimit({
   windowMs: 60_000,
   max: 20,
@@ -19,6 +43,7 @@ const legacyPremiumMutationLimiter = rateLimit({
 
 // All admin routes are protected by the hardcoded-admin JWT check
 router.use(requireHardcodedAdminAuth);
+router.use(rejectStructuredAdminQuery);
 router.use((_, res, next) => {
   res.setHeader("X-Robots-Tag", "noindex, nofollow");
   next();

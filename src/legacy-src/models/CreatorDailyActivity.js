@@ -14,8 +14,7 @@ const creatorDailyActivitySchema = new mongoose.Schema({
   },
   date: {
     type: Date,
-    required: true,
-    index: true
+    required: true
   },
   postsCreated: { type: Number, default: 0 },
   clipsCreated: { type: Number, default: 0 },

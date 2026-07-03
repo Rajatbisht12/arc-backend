@@ -57,6 +57,24 @@ function sendRateLimitResponse(res, kind, retryAfterSec) {
 // In-memory fallback when Redis is unavailable
 const localStore = new Map();
 const localLocks = new Map();
+const MAX_LOCAL_AUTH_ENTRIES = 10000;
+const LOCAL_AUTH_ENTRY_RETENTION_MS = 2 * 60 * 60 * 1000;
+let localStoreOperations = 0;
+
+function sweepLocalStore(now = Date.now()) {
+  for (const [key, entry] of localStore) {
+    const lastSeenAt = Number(entry?.lastSeenAtMs || entry?.lastFailAtMs || 0);
+    const blockedUntil = Number(entry?.blockedUntilMs || 0);
+    if (blockedUntil <= now && lastSeenAt + LOCAL_AUTH_ENTRY_RETENTION_MS <= now) {
+      localStore.delete(key);
+    }
+  }
+  while (localStore.size > MAX_LOCAL_AUTH_ENTRIES) {
+    const oldestKey = localStore.keys().next().value;
+    if (oldestKey === undefined) break;
+    localStore.delete(oldestKey);
+  }
+}
 
 function createEmptyEntry() {
   return {
@@ -125,6 +143,10 @@ async function getEntry(key) {
  */
 async function setEntry(key, entry) {
   localStore.set(key, entry);
+  localStoreOperations += 1;
+  if (localStoreOperations % 256 === 0 || localStore.size > MAX_LOCAL_AUTH_ENTRIES) {
+    sweepLocalStore();
+  }
   // TTL = remaining block time + 1 hour buffer so entries auto-expire after block lifts.
   // Minimum 1 hour so short-block state doesn't persist for a full day.
   const blockRemainingMs = Math.max(0, (entry.blockedUntilMs || 0) - Date.now());
@@ -316,6 +338,8 @@ module.exports = {
     getIdentifier,
     getLimitKeys,
     localStore,
+    sweepLocalStore,
+    MAX_LOCAL_AUTH_ENTRIES,
     recordFailureForKeys
   }
 };

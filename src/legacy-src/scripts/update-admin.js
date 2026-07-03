@@ -4,40 +4,49 @@ require('dotenv').config();
 
 const updateAdminUser = async () => {
   try {
+    if (!process.argv.includes('--apply')) throw new Error('Refusing to update an admin without --apply');
+    const mongoUri = process.env.MONGODB_URI;
+    const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+    const newUsername = String(process.env.ADMIN_USERNAME || '').trim();
+    const newPassword = String(process.env.ADMIN_PASSWORD || '');
+    if (!mongoUri) throw new Error('MONGODB_URI is required');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) throw new Error('ADMIN_EMAIL is invalid');
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(newUsername)) throw new Error('ADMIN_USERNAME is invalid');
+    if (newPassword.length < 12 || !/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/\d/.test(newPassword) || !/[^A-Za-z0-9]/.test(newPassword)) {
+      throw new Error('ADMIN_PASSWORD must be at least 12 characters and include upper, lower, number, and symbol');
+    }
+
     // Connect to database
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-social-platform');
+    await mongoose.connect(mongoUri);
     console.log('Connected to database');
 
     // Find admin user
-    const adminUser = await User.findOne({ userType: 'admin' });
+    const adminUser = await User.findOne({ email: adminEmail, userType: 'admin' });
     
     if (!adminUser) {
-      console.log('❌ Admin user not found. Please create an admin user first using create-admin.js');
-      process.exit(1);
+      throw new Error('Admin user not found');
     }
 
     console.log('Found admin user:', adminUser.username);
     console.log('Updating credentials...');
 
     // Update username and password
-    adminUser.username = 'Admin';
-    adminUser.password = 'admin123'; // Will be automatically hashed by pre-save hook
+    adminUser.username = newUsername;
+    adminUser.password = newPassword;
     
     await adminUser.save();
     
     console.log('✅ Admin credentials updated successfully!');
-    console.log('Username: Admin');
-    console.log('Password: admin123');
-    console.log('\n⚠️  IMPORTANT: Change the admin password after first login!');
+    console.log(`Username: ${newUsername}`);
 
   } catch (error) {
-    console.error('❌ Error updating admin user:', error);
+    console.error('❌ Error updating admin user:', error.message);
     if (error.code === 11000) {
       console.error('Username "Admin" already exists. Please choose a different username.');
     }
+    process.exitCode = 1;
   } finally {
-    await mongoose.disconnect();
-    process.exit(0);
+    if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
   }
 };
 

@@ -211,7 +211,7 @@ const staticChallengesRoute = challengeRoutes.indexOf('router.get("/my/challenge
 const dynamicChallengeRoute = challengeRoutes.indexOf('router.get("/:id"');
 assert(staticChallengesRoute >= 0 && staticChallengesRoute < dynamicChallengeRoute);
 assert(challengeRoutes.includes('router.get("/", publicOptionalAuth, challengesController.getChallenges)'));
-assert(challengeRoutes.includes('router.get("/:id", publicOptionalAuth, challengesController.getChallenge)'));
+assert(challengeRoutes.includes('router.get("/:id", publicOptionalAuth, validateChallengeId, handleValidationErrors, challengesController.getChallenge)'));
 assert(!tournamentController.includes('stack: error.stack'));
 assert(followModel.includes('buildVisibleUserMatch({ excludeUserIds, search })'));
 assert(followModel.indexOf('buildVisibleUserMatch({ excludeUserIds, search })') < followModel.indexOf('$facet'));

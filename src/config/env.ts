@@ -19,7 +19,8 @@ const envSchema = z.object({
   REDIS_TLS: z.string().optional().transform((v) => v === "true"),
 
   // JWT
-  JWT_SECRET: z.string().min(16),
+  JWT_SECRET: z.string().min(32),
+  JWT_REFRESH_SECRET: z.string().min(32),
 
   // SMTP / Email
   SMTP_HOST: z.string().optional(),

@@ -9,6 +9,8 @@ const User = require('../models/User');
 const EarningsSnapshot = require('../models/EarningsSnapshot');
 const PayoutCycle = require('../models/PayoutCycle');
 const CreatorPayout = require('../models/CreatorPayout');
+const PostEngagement = require('../models/PostEngagement');
+const { buildUniquePostViewPipeline } = require('./postEngagementAnalytics');
 
 // Platform keeps a share; kept for audit purposes
 const PLATFORM_REVENUE_SHARE_PERCENT = 30;
@@ -62,18 +64,13 @@ async function calculateCreatorEarnings(userId, cycle) {
 
   let totalClipViews = 0;
   if (posts.length > 0) {
-    const PostEngagement = require('../models/PostEngagement');
-    const rows = await PostEngagement.aggregate([
-      {
-        $match: {
-          post: { $in: posts.map((post) => post._id) },
-          eventType: 'view',
-          source: 'organic',
-          createdAt: { $gte: cycle.startDate, $lte: cycle.endDate }
-        }
-      },
-      { $group: { _id: null, views: { $sum: 1 } } }
-    ]);
+    const rows = await PostEngagement.aggregate(buildUniquePostViewPipeline({
+      postIds: posts.map((post) => post._id),
+      source: 'organic',
+      sinceDate: cycle.startDate,
+      untilDate: cycle.endDate,
+      groupBy: 'total'
+    }));
     totalClipViews = rows[0]?.views || 0;
   }
 

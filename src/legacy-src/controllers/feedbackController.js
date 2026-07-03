@@ -1,5 +1,14 @@
 const Feedback = require('../models/Feedback');
+const mongoose = require('mongoose');
 const log = require('../utils/logger');
+
+const FEEDBACK_STATUSES = new Set(['pending', 'reviewed', 'addressed']);
+const FEEDBACK_SORT_FIELDS = new Set(['timestamp', 'createdAt', 'status']);
+const parsePositiveInteger = (value, fallback, maximum) => {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, maximum);
+};
 
 // Submit feedback
 const submitFeedback = async (req, res) => {
@@ -38,6 +47,17 @@ const submitFeedback = async (req, res) => {
 const getAllFeedback = async (req, res) => {
   try {
     const { page = 1, limit = 10, status, sortBy = 'timestamp', sortOrder = 'desc' } = req.query;
+    if (status && !FEEDBACK_STATUSES.has(String(status))) {
+      return res.status(400).json({ success: false, message: 'Invalid feedback status' });
+    }
+    if (!FEEDBACK_SORT_FIELDS.has(String(sortBy))) {
+      return res.status(400).json({ success: false, message: 'Invalid feedback sort field' });
+    }
+    if (!['asc', 'desc'].includes(String(sortOrder))) {
+      return res.status(400).json({ success: false, message: 'Invalid feedback sort order' });
+    }
+    const normalizedPage = parsePositiveInteger(page, 1, 10_000);
+    const normalizedLimit = parsePositiveInteger(limit, 10, 100);
     
     const query = {};
     if (status) {
@@ -45,12 +65,12 @@ const getAllFeedback = async (req, res) => {
     }
 
     const sortOptions = {};
-    sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
+    sortOptions[String(sortBy)] = sortOrder === 'desc' ? -1 : 1;
 
     const feedback = await Feedback.find(query)
       .sort(sortOptions)
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
+      .limit(normalizedLimit)
+      .skip((normalizedPage - 1) * normalizedLimit)
       .select('-ipAddress -userAgent');
 
     const total = await Feedback.countDocuments(query);
@@ -60,10 +80,10 @@ const getAllFeedback = async (req, res) => {
       data: {
         feedback,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / limit),
+          currentPage: normalizedPage,
+          totalPages: Math.ceil(total / normalizedLimit),
           totalItems: total,
-          itemsPerPage: parseInt(limit)
+          itemsPerPage: normalizedLimit
         }
       }
     });
@@ -81,6 +101,10 @@ const updateFeedbackStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, adminNotes } = req.body;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid feedback ID' });
+    }
 
     if (!['pending', 'reviewed', 'addressed'].includes(status)) {
       return res.status(400).json({
@@ -123,6 +147,10 @@ const updateFeedbackStatus = async (req, res) => {
 const deleteFeedback = async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid feedback ID' });
+    }
 
     const feedback = await Feedback.findByIdAndDelete(id);
 

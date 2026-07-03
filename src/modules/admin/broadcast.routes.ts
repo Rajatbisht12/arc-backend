@@ -8,6 +8,12 @@ import { auditLog, durableMutationAudit, requireAdminPermission } from "./admin.
 const controller = require(path.join(backendControllerPath, "broadcastController.js"));
 
 const router = Router();
+router.param("id", (_req, res, next, value) => {
+  if (!/^[a-f\d]{24}$/i.test(String(value || ""))) {
+    return res.status(400).json({ success: false, code: "INVALID_BROADCAST_ID", message: "Valid broadcast ID is required" });
+  }
+  return next();
+});
 
 const mutationLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

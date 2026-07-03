@@ -4,8 +4,12 @@ require('dotenv').config();
 
 const clearAllTeamHistory = async () => {
   try {
+    if (!process.argv.includes('--apply') || process.env.CONFIRM_DESTRUCTIVE_OPERATION !== 'CLEAR_TEAM_HISTORY') {
+      throw new Error('Requires --apply and CONFIRM_DESTRUCTIVE_OPERATION=CLEAR_TEAM_HISTORY');
+    }
+    if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');
     // Connect to database
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/gaming-social-platform');
+    await mongoose.connect(process.env.MONGODB_URI);
     console.log('Connected to database');
 
     // Find all players
@@ -32,11 +36,11 @@ const clearAllTeamHistory = async () => {
     console.log(`Total team memberships deleted: ${totalTeamsCleared}`);
 
   } catch (error) {
-    console.error('❌ Error clearing team history:', error);
+    console.error('❌ Error clearing team history:', error.message);
+    process.exitCode = 1;
   } finally {
-    await mongoose.disconnect();
+    if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
     console.log('Database connection closed');
-    process.exit(0);
   }
 };
 
@@ -44,6 +48,5 @@ const clearAllTeamHistory = async () => {
 console.log('⚠️  WARNING: This will delete ALL team history for ALL players!');
 console.log('This action cannot be undone.\n');
 
-// Run the script
 clearAllTeamHistory();
 

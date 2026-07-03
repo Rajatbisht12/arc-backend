@@ -11,16 +11,36 @@ class RedisRateLimitStore {
   constructor(prefix = 'rl') {
     this.prefix = prefix;
     this.localMap = new Map(); // fallback
+    this.localOperations = 0;
+    this.maxLocalEntries = 10000;
   }
 
   _key(k) { return `${this.prefix}:${k}`; }
+
+  _sweepLocal(now = Date.now()) {
+    for (const [key, entry] of this.localMap) {
+      if (!entry || entry.resetTime <= now) this.localMap.delete(key);
+    }
+    while (this.localMap.size > this.maxLocalEntries) {
+      const oldestKey = this.localMap.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.localMap.delete(oldestKey);
+    }
+  }
 
   async increment(key) {
     const client = getRedisClient();
     if (!client) {
       // Fallback to in-memory
       const now = Date.now();
-      const entry = this.localMap.get(key) || { count: 0, resetTime: now + this.windowMs };
+      this.localOperations += 1;
+      if (this.localOperations % 256 === 0 || this.localMap.size >= this.maxLocalEntries) {
+        this._sweepLocal(now);
+      }
+      const existing = this.localMap.get(key);
+      const entry = !existing || existing.resetTime <= now
+        ? { count: 0, resetTime: now + this.windowMs }
+        : existing;
       entry.count += 1;
       this.localMap.set(key, entry);
       return { totalHits: entry.count, resetTime: new Date(entry.resetTime) };
@@ -59,6 +79,10 @@ class RedisRateLimitStore {
       return;
     }
     await client.del(this._key(key));
+  }
+
+  async resetAll() {
+    this.localMap.clear();
   }
 
   // Called by express-rate-limit to pass config
@@ -138,8 +162,8 @@ const analyticsLimiter = rateLimit({
  * General API rate limiter (for all routes)
  */
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Max 100 requests per 15 minutes
+  windowMs: Math.min(60 * 60 * 1000, Math.max(60 * 1000, Number.parseInt(process.env.GENERAL_API_RATE_LIMIT_WINDOW_MS || '', 10) || 15 * 60 * 1000)),
+  max: Math.min(10000, Math.max(100, Number.parseInt(process.env.GENERAL_API_RATE_LIMIT_MAX || '', 10) || 2000)),
   store: new RedisRateLimitStore('rl:general'),
   message: {
     success: false,
@@ -169,5 +193,6 @@ module.exports = {
   aiCoachLimiter,
   analyticsLimiter,
   generalLimiter,
-  authLimiter
+  authLimiter,
+  _RedisRateLimitStore: RedisRateLimitStore
 };

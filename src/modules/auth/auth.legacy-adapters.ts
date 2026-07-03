@@ -39,6 +39,7 @@ type ProtectMiddleware = {
 type UploadMiddleware = {
   uploadSingle: (fieldName: string) => RequestHandler;
 };
+type ValidationMiddleware = { handleValidationErrors: RequestHandler };
 
 type PassportModule = {
   authenticate: (...args: unknown[]) => RequestHandler;
@@ -63,6 +64,7 @@ export const { progressiveLoginLimiter, progressiveOtpLoginLimiter } = loadModul
 );
 export const { protect, protectAllowIncomplete } = loadModule<ProtectMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
 export const { uploadSingle } = loadModule<UploadMiddleware>(path.join(backendMiddlewarePath, "upload.js"));
+export const { handleValidationErrors } = loadModule<ValidationMiddleware>(path.join(backendMiddlewarePath, "validation.js"));
 export const passport = loadModule<PassportModule>("passport");
 export const { recordSuccessfulLogin } = loadModule<LoginAuditModule>(path.join(backendRootPath, "utils", "userLoginAudit.js"));
 
