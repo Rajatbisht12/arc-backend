@@ -53,7 +53,7 @@ assert(!source.match(/AI_CANDIDATE_OWNER_PROJECTION[\s\S]*?privacySettings:\s*1/
 assert(!source.match(/AI_CANDIDATE_OWNER_PROJECTION[\s\S]*?blockedUsers:\s*1/));
 
 (async () => {
-  let capturedPipeline;
+  const capturedPipelines = [];
   const records = [{ _id: 'profile-visible' }];
   const customOwnerProjection = {
     _id: 1,
@@ -61,11 +61,14 @@ assert(!source.match(/AI_CANDIDATE_OWNER_PROJECTION[\s\S]*?blockedUsers:\s*1/));
     'profile.displayName': 1,
     'playerInfo.gamingStats': 1
   };
+  // $facet is unsupported on Amazon DocumentDB: the page and the count run as
+  // two aggregations. The stub returns count rows only for the $count pipeline.
   const model = {
     aggregate(pipeline) {
-      capturedPipeline = pipeline;
+      capturedPipelines.push(pipeline);
+      const isCount = pipeline.some((stage) => stage.$count);
       return {
-        allowDiskUse: async () => [{ records, metadata: [{ total: 1 }] }]
+        allowDiskUse: async () => (isCount ? [{ total: 1 }] : records)
       };
     }
   };
@@ -93,6 +96,10 @@ assert(!source.match(/AI_CANDIDATE_OWNER_PROJECTION[\s\S]*?blockedUsers:\s*1/));
   });
 
   assert.deepStrictEqual(result, { records, total: 1 });
+  assert(!capturedPipelines.some((p) => p.some((stage) => stage.$facet)), 'candidate query must not use $facet');
+  const capturedPipeline = capturedPipelines.find((p) => !p.some((stage) => stage.$count));
+  const countPipeline = capturedPipelines.find((p) => p.some((stage) => stage.$count));
+  assert(capturedPipeline && countPipeline, 'privacy filtering must precede pagination and count');
   const ownerLookup = capturedPipeline.find((stage) => stage.$lookup)?.$lookup;
   assert(ownerLookup, 'candidate owner lookup must exist');
   const privacyFollowIndex = ownerLookup.pipeline.findIndex(
@@ -110,9 +117,10 @@ assert(!source.match(/AI_CANDIDATE_OWNER_PROJECTION[\s\S]*?blockedUsers:\s*1/));
   assert(projectionIndex > privacyMatchIndex, 'candidate data must be projected only after privacy checks');
   assert.deepStrictEqual(ownerLookup.pipeline[projectionIndex].$project, customOwnerProjection);
   assert(
-    capturedPipeline.findIndex((stage) => stage.$facet) > capturedPipeline.findIndex((stage) => stage.$lookup),
-    'privacy filtering must happen before candidate limit/count'
+    capturedPipeline.findIndex((stage) => stage.$limit) > capturedPipeline.findIndex((stage) => stage.$lookup),
+    'privacy filtering must happen before the candidate limit'
   );
+  assert(countPipeline.some((stage) => stage.$count), 'total count must be a dedicated $count aggregation');
 
   console.log('AI recruitment privacy contracts passed');
 })().catch((error) => {

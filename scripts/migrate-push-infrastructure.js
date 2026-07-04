@@ -168,10 +168,25 @@ const normalizeObject = (value) => {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, normalizeObject(value[key])]));
 };
 const normalizeKey = (key) => JSON.stringify(Object.entries(key || {}));
+const isTextIndex = (key) => Object.values(key || {}).some((direction) => direction === 'text');
+const textFields = (key) => Object.keys(key || {}).filter((field) => key[field] === 'text').sort();
+const keyMatches = (actual, key) => {
+  // MongoDB never reports a text index with its declared key: it collapses the
+  // text fields into {_fts:'text',_ftsx:1} and records the real field names
+  // under `weights`. Compare those instead so a declared text index is matched.
+  if (isTextIndex(key)) {
+    if (!actual.weights) return false;
+    if (JSON.stringify(textFields(key)) !== JSON.stringify(Object.keys(actual.weights).sort())) return false;
+    return Object.entries(key)
+      .filter(([, direction]) => direction !== 'text')
+      .every(([field, direction]) => actual.key[field] === direction);
+  }
+  return normalizeKey(actual.key) === normalizeKey(key);
+};
 const verifyIndexes = async (Model) => {
   const actual = await Model.collection.indexes();
   const missing = Model.schema.indexes().filter(([key, options]) => !actual.some((index) =>
-    normalizeKey(index.key) === normalizeKey(key) &&
+    keyMatches(index, key) &&
     Boolean(index.unique) === Boolean(options.unique) &&
     Boolean(index.sparse) === Boolean(options.sparse) &&
     JSON.stringify(normalizeObject(index.partialFilterExpression || null)) ===
@@ -467,6 +482,13 @@ const main = async () => {
     await CallSession.createIndexes();
     await CallVoipPushAttempt.createIndexes();
     await Notification.createIndexes();
+    // Remove the accidental `data.cta` text index left behind by the old schema,
+    // when the cta subdocument collapsed to a String. A collection may hold only
+    // one text index, so this orphan would block any future legitimate one.
+    // Missing index (fresh DB or already cleaned up) is a no-op.
+    await Notification.collection.dropIndex('data.cta_text').catch((error) => {
+      if (error?.codeName !== 'IndexNotFound' && error?.code !== 27) throw error;
+    });
     await Message.createIndexes();
     await User.collection.createIndex(
       { 'pushTokens.installationId': 1 },

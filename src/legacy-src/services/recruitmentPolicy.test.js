@@ -221,11 +221,15 @@ const runValidation = async (middlewares, body) => {
 };
 
 (async () => {
-  let capturedPipeline = null;
+  // $facet is unsupported on Amazon DocumentDB, so the service issues the page
+  // and the total count as two aggregations sharing the validity/lookup stages.
+  // The stub returns count rows only for the pipeline that ends in $count.
+  let capturedPipelines = [];
   const fakeModel = {
     aggregate(pipeline) {
-      capturedPipeline = pipeline;
-      return { allowDiskUse: async () => [{ records: [{ _id: 'valid-1' }], metadata: [{ total: 1 }] }] };
+      capturedPipelines.push(pipeline);
+      const isCount = pipeline.some(stage => stage.$count);
+      return { allowDiskUse: async () => (isCount ? [{ total: 1 }] : [{ _id: 'valid-1' }]) };
     }
   };
   const canonical = await listCanonicalRecruitmentRecords({
@@ -241,19 +245,24 @@ const runValidation = async (middlewares, body) => {
     limit: 10
   });
   assert.deepStrictEqual(canonical, { records: [{ _id: 'valid-1' }], total: 1 });
-  const lookup = capturedPipeline.find(stage => stage.$lookup)?.$lookup;
+  assert(!capturedPipelines.some(p => p.some(stage => stage.$facet)), 'canonical query must not use $facet');
+  const recordsPipeline = capturedPipelines.find(p => !p.some(stage => stage.$count));
+  const countPipeline = capturedPipelines.find(p => p.some(stage => stage.$count));
+  assert(recordsPipeline && countPipeline, 'canonical validity must run before pagination and count');
+  const lookup = recordsPipeline.find(stage => stage.$lookup)?.$lookup;
   assert.strictEqual(lookup.from, 'users');
   assert.strictEqual(lookup.let.ownerId, '$player');
   assert.deepStrictEqual(lookup.pipeline[1].$match, getValidRecruitmentOwnerMatch('player'));
-  assert(capturedPipeline.some(stage => stage.$unwind === '$__validOwner'));
-  assert(capturedPipeline.some(stage => stage.$facet), 'canonical validity must run before pagination and count');
+  assert(recordsPipeline.some(stage => stage.$unwind === '$__validOwner'));
+  assert(recordsPipeline.some(stage => stage.$limit === 10), 'records pipeline must paginate');
 
-  let capturedApplicationPipeline = null;
+  let capturedApplicationPipelines = [];
   const canonicalApplications = await listCanonicalRecruitmentApplications({
     applicationModel: {
       aggregate(pipeline) {
-        capturedApplicationPipeline = pipeline;
-        return { allowDiskUse: async () => [{ records: [{ _id: 'application-1' }], metadata: [{ total: 1 }] }] };
+        capturedApplicationPipelines.push(pipeline);
+        const isCount = pipeline.some(stage => stage.$count);
+        return { allowDiskUse: async () => (isCount ? [{ total: 1 }] : [{ _id: 'application-1' }]) };
       }
     },
     recruitmentModel: { collection: { name: 'teamrecruitments' } },
@@ -266,11 +275,15 @@ const runValidation = async (middlewares, body) => {
     records: [{ _id: 'application-1' }],
     total: 1
   });
-  const applicationLookups = capturedApplicationPipeline.filter(stage => stage.$lookup);
+  assert(!capturedApplicationPipelines.some(p => p.some(stage => stage.$facet)), 'application query must not use $facet');
+  const applicationRecordsPipeline = capturedApplicationPipelines.find(p => !p.some(stage => stage.$count));
+  const applicationCountPipeline = capturedApplicationPipelines.find(p => p.some(stage => stage.$count));
+  assert(applicationRecordsPipeline && applicationCountPipeline, 'application validity must precede pagination and count');
+  const applicationLookups = applicationRecordsPipeline.filter(stage => stage.$lookup);
   assert.strictEqual(applicationLookups[0].$lookup.from, 'teamrecruitments');
   assert.strictEqual(applicationLookups[1].$lookup.from, 'users');
-  assert(capturedApplicationPipeline.filter(stage => stage.$unwind).length >= 2);
-  assert(capturedApplicationPipeline.some(stage => stage.$facet), 'application validity must precede pagination');
+  assert(applicationRecordsPipeline.filter(stage => stage.$unwind).length >= 2);
+  assert(applicationRecordsPipeline.some(stage => stage.$limit === 10), 'application records pipeline must paginate');
 
   const validStaffResponse = await runValidation(validateRecruitment, {
     recruitmentType: 'staff',

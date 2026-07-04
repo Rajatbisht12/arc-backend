@@ -266,16 +266,11 @@ const getChallenges = safeAsyncHandler(async (req, res) => {
         from: Follow.collection.name,
         let: { creatorId: '$creator' },
         pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ['$follower', viewerId] },
-                  { $eq: ['$following', '$$creatorId'] }
-                ]
-              }
-            }
-          },
+          // Amazon DocumentDB rejects a correlated $lookup with more than one
+          // join condition. `follower` is a constant (the viewer), so it stays a
+          // plain match, leaving a single correlated join on `following`.
+          { $match: { follower: viewerId } },
+          { $match: { $expr: { $eq: ['$following', '$$creatorId'] } } },
           { $limit: 1 }
         ],
         as: '__viewerFollow'
@@ -331,22 +326,22 @@ const getChallenges = safeAsyncHandler(async (req, res) => {
         participantCount: { $size: { $ifNull: ['$participants', []] } }
       }
     },
-    { $project: { participants: 0, __creator: 0, __viewerFollow: 0 } },
-    {
-      $facet: {
-        records: [
-          { $sort: sortOptions },
-          { $skip: (pageNumber - 1) * pageLimit },
-          { $limit: pageLimit }
-        ],
-        metadata: [{ $count: 'total' }]
-      }
-    }
+    { $project: { participants: 0, __creator: 0, __viewerFollow: 0 } }
   ];
 
-  const [result = {}] = await Challenge.aggregate(pipeline);
-  const challenges = (result.records || []).map((challenge) => serializeChallenge(challenge));
-  const total = Number(result.metadata?.[0]?.total || 0);
+  // Amazon DocumentDB does not support $facet, so the page and the total count
+  // are fetched with two aggregations that share the filter pipeline above.
+  const [records, countRows] = await Promise.all([
+    Challenge.aggregate([
+      ...pipeline,
+      { $sort: sortOptions },
+      { $skip: (pageNumber - 1) * pageLimit },
+      { $limit: pageLimit }
+    ]),
+    Challenge.aggregate([...pipeline, { $count: 'total' }])
+  ]);
+  const challenges = (records || []).map((challenge) => serializeChallenge(challenge));
+  const total = Number(countRows?.[0]?.total || 0);
 
   res.json({
     success: true,

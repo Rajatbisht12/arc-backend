@@ -139,6 +139,47 @@ const buildVisibleUserMatch = ({ excludeUserIds = [], search = '' } = {}) => {
   return conditions.length === 1 ? conditions[0] : { $and: conditions };
 };
 
+const FOLLOW_USER_PROJECTION = {
+  $project: {
+    _id: '$user._id',
+    username: '$user.username',
+    userType: '$user.userType',
+    profile: '$user.profile',
+    privacySettings: '$user.privacySettings',
+    blockedUsers: '$user.blockedUsers',
+    isActive: '$user.isActive',
+    createdAt: '$user.createdAt'
+  }
+};
+
+/**
+ * Fetch a page of joined users plus the total match count for a follower/
+ * following pipeline. Amazon DocumentDB does not support `$facet`, so the page
+ * and the count are issued as two aggregations that share the same filter
+ * pipeline instead of being combined in a single stage.
+ */
+async function paginateFollowUsers(model, filterPipeline, { page, limit }) {
+  const skip = (page - 1) * limit;
+  const [records, countRows] = await Promise.all([
+    model.aggregate([
+      ...filterPipeline,
+      { $sort: { createdAt: -1, _id: 1 } },
+      { $skip: skip },
+      { $limit: limit },
+      FOLLOW_USER_PROJECTION
+    ]),
+    model.aggregate([...filterPipeline, { $count: 'total' }])
+  ]);
+  const users = uniqueUsersById(records || []);
+  const total = Number(countRows?.[0]?.total || 0);
+  return {
+    users,
+    total,
+    pages: Math.ceil(total / limit),
+    current: page
+  };
+}
+
 /**
  * Static: Get followers with pagination
  */
@@ -148,46 +189,15 @@ followSchema.statics.getFollowers = async function(userId, {
   excludeUserIds = [],
   search = ''
 } = {}) {
-  const skip = (page - 1) * limit;
   const followingId = mongoose.Types.ObjectId.isValid(String(userId))
     ? new mongoose.Types.ObjectId(String(userId))
     : userId;
-  const [result = {}] = await this.aggregate([
+  return paginateFollowUsers(this, [
     { $match: { following: followingId } },
-    { $sort: { createdAt: -1, _id: 1 } },
     { $lookup: { from: 'users', localField: 'follower', foreignField: '_id', as: 'user' } },
     { $unwind: '$user' },
-    { $match: buildVisibleUserMatch({ excludeUserIds, search }) },
-    {
-      $facet: {
-        records: [
-          { $skip: skip },
-          { $limit: limit },
-          {
-            $project: {
-              _id: '$user._id',
-              username: '$user.username',
-              userType: '$user.userType',
-              profile: '$user.profile',
-              privacySettings: '$user.privacySettings',
-              blockedUsers: '$user.blockedUsers',
-              isActive: '$user.isActive',
-              createdAt: '$user.createdAt'
-            }
-          }
-        ],
-        metadata: [{ $count: 'total' }]
-      }
-    }
-  ]);
-  const users = uniqueUsersById(result.records || []);
-  const total = Number(result.metadata?.[0]?.total || 0);
-  return {
-    users,
-    total,
-    pages: Math.ceil(total / limit),
-    current: page
-  };
+    { $match: buildVisibleUserMatch({ excludeUserIds, search }) }
+  ], { page, limit });
 };
 
 /**
@@ -199,46 +209,15 @@ followSchema.statics.getFollowing = async function(userId, {
   excludeUserIds = [],
   search = ''
 } = {}) {
-  const skip = (page - 1) * limit;
   const followerId = mongoose.Types.ObjectId.isValid(String(userId))
     ? new mongoose.Types.ObjectId(String(userId))
     : userId;
-  const [result = {}] = await this.aggregate([
+  return paginateFollowUsers(this, [
     { $match: { follower: followerId } },
-    { $sort: { createdAt: -1, _id: 1 } },
     { $lookup: { from: 'users', localField: 'following', foreignField: '_id', as: 'user' } },
     { $unwind: '$user' },
-    { $match: buildVisibleUserMatch({ excludeUserIds, search }) },
-    {
-      $facet: {
-        records: [
-          { $skip: skip },
-          { $limit: limit },
-          {
-            $project: {
-              _id: '$user._id',
-              username: '$user.username',
-              userType: '$user.userType',
-              profile: '$user.profile',
-              privacySettings: '$user.privacySettings',
-              blockedUsers: '$user.blockedUsers',
-              isActive: '$user.isActive',
-              createdAt: '$user.createdAt'
-            }
-          }
-        ],
-        metadata: [{ $count: 'total' }]
-      }
-    }
-  ]);
-  const users = uniqueUsersById(result.records || []);
-  const total = Number(result.metadata?.[0]?.total || 0);
-  return {
-    users,
-    total,
-    pages: Math.ceil(total / limit),
-    current: page
-  };
+    { $match: buildVisibleUserMatch({ excludeUserIds, search }) }
+  ], { page, limit });
 };
 
 module.exports = mongoose.model('Follow', followSchema);

@@ -81,10 +81,15 @@ const notificationSchema = new mongoose.Schema({
     targetAppVersions: [{ type: String, maxlength: 40 }],
     bannerImage: String,
     thumbnail: String,
+    // Each field is wrapped in `{ type: String }` on purpose: a bare
+    // `type: String` here would make Mongoose treat the whole `cta` object as a
+    // String type descriptor (collapsing cta to a String, silently dropping the
+    // object, and creating a spurious `data.cta` text index from the leftover
+    // `text` option). Wrapping keeps `cta` a real subdocument.
     cta: {
-      text: String,
-      url: String,
-      type: String
+      text: { type: String },
+      url: { type: String },
+      type: { type: String }
     },
     customData: mongoose.Schema.Types.Mixed
   },

@@ -209,16 +209,11 @@ const buildRecruitmentOwnerPrivacyStages = ({ viewerId, viewerBlockedIds = [], f
         from: followCollectionName,
         let: { ownerId: '$_id' },
         pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ['$follower', viewerObjectId] },
-                  { $eq: ['$following', '$$ownerId'] }
-                ]
-              }
-            }
-          },
+          // Amazon DocumentDB rejects a correlated $lookup with more than one
+          // join condition. `follower` is a constant (the viewer), so it stays a
+          // plain match, leaving a single correlated join on `following`.
+          { $match: { follower: viewerObjectId } },
+          { $match: { $expr: { $eq: ['$following', '$$ownerId'] } } },
           { $limit: 1 }
         ],
         as: '__viewerFollow'
@@ -270,7 +265,7 @@ const listCanonicalRecruitmentRecords = async ({
   const sort = sortBy === 'createdAt'
     ? { createdAt: sortDirection, _id: 1 }
     : { [sortBy]: sortDirection, createdAt: -1, _id: 1 };
-  const [result = {}] = await model.aggregate([
+  const basePipeline = [
     { $match: query },
     {
       $lookup: {
@@ -288,22 +283,24 @@ const listCanonicalRecruitmentRecords = async ({
     { $unwind: '$__validOwner' },
     { $set: { [ownerField]: '$__validOwner' } },
     { $project: { __validOwner: 0 } },
-    { $addFields: { [countField]: { $size: { $ifNull: [`$${countSource}`, []] } } } },
-    {
-      $facet: {
-        records: [
-          { $sort: sort },
-          { $skip: (page - 1) * limit },
-          { $limit: limit }
-        ],
-        metadata: [{ $count: 'total' }]
-      }
-    }
-  ]).allowDiskUse(true);
+    { $addFields: { [countField]: { $size: { $ifNull: [`$${countSource}`, []] } } } }
+  ];
+
+  // Amazon DocumentDB does not support $facet, so the page and the total count
+  // are fetched with two aggregations that share the base pipeline above.
+  const [records, countRows] = await Promise.all([
+    model.aggregate([
+      ...basePipeline,
+      { $sort: sort },
+      { $skip: (page - 1) * limit },
+      { $limit: limit }
+    ]).allowDiskUse(true),
+    model.aggregate([...basePipeline, { $count: 'total' }]).allowDiskUse(true)
+  ]);
 
   return {
-    records: Array.isArray(result.records) ? result.records : [],
-    total: Number(result.metadata?.[0]?.total || 0)
+    records: Array.isArray(records) ? records : [],
+    total: Number(countRows?.[0]?.total || 0)
   };
 };
 
@@ -321,7 +318,7 @@ const listCanonicalRecruitmentApplications = async ({
   limit
 }) => {
   const recruitmentIntegrityQuery = addTeamRecruitmentIntegrityFilters({});
-  const [result = {}] = await applicationModel.aggregate([
+  const basePipeline = [
     { $match: query },
     {
       $lookup: {
@@ -397,22 +394,24 @@ const listCanonicalRecruitmentApplications = async ({
         appliedAt: '$createdAt'
       }
     },
-    { $project: { __validRecruitment: 0, __validApplicant: 0 } },
-    {
-      $facet: {
-        records: [
-          { $sort: { createdAt: -1, _id: 1 } },
-          { $skip: (page - 1) * limit },
-          { $limit: limit }
-        ],
-        metadata: [{ $count: 'total' }]
-      }
-    }
-  ]).allowDiskUse(true);
+    { $project: { __validRecruitment: 0, __validApplicant: 0 } }
+  ];
+
+  // Amazon DocumentDB does not support $facet, so the page and the total count
+  // are fetched with two aggregations that share the base pipeline above.
+  const [records, countRows] = await Promise.all([
+    applicationModel.aggregate([
+      ...basePipeline,
+      { $sort: { createdAt: -1, _id: 1 } },
+      { $skip: (page - 1) * limit },
+      { $limit: limit }
+    ]).allowDiskUse(true),
+    applicationModel.aggregate([...basePipeline, { $count: 'total' }]).allowDiskUse(true)
+  ]);
 
   return {
-    records: Array.isArray(result.records) ? result.records : [],
-    total: Number(result.metadata?.[0]?.total || 0)
+    records: Array.isArray(records) ? records : [],
+    total: Number(countRows?.[0]?.total || 0)
   };
 };
 

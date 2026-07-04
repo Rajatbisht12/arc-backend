@@ -214,7 +214,10 @@ assert(challengeRoutes.includes('router.get("/", publicOptionalAuth, challengesC
 assert(challengeRoutes.includes('router.get("/:id", publicOptionalAuth, validateChallengeId, handleValidationErrors, challengesController.getChallenge)'));
 assert(!tournamentController.includes('stack: error.stack'));
 assert(followModel.includes('buildVisibleUserMatch({ excludeUserIds, search })'));
-assert(followModel.indexOf('buildVisibleUserMatch({ excludeUserIds, search })') < followModel.indexOf('$facet'));
+// $facet is unsupported on Amazon DocumentDB: visibility filtering still runs
+// before pagination, but the page and total count are two separate aggregations.
+assert(!followModel.includes('$facet:'), 'Follow queries must avoid $facet for DocumentDB compatibility');
+assert(followModel.includes("{ $count: 'total' }"), 'follower/following totals must use a dedicated $count aggregation');
 assert(userController.includes('Follow.getFollowers(targetPrivacy.target._id, { page, limit, search, excludeUserIds })'));
 assert(userController.includes('Follow.getFollowing(targetPrivacy.target._id, { page, limit, search, excludeUserIds })'));
 
