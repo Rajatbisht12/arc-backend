@@ -123,9 +123,10 @@ assert(!source.match(/AI_CANDIDATE_OWNER_PROJECTION[\s\S]*?blockedUsers:\s*1/));
 
   // The owner is reduced to exactly the caller's projection; privacy fields the
   // caller did not request must never appear in the output.
-  const projectStage = capturedPipeline.find((stage) => stage.$set && stage.$set.player);
+  // $addFields, not $set: DocumentDB does not support the $set pipeline stage.
+  const projectStage = capturedPipeline.find((stage) => stage.$addFields && stage.$addFields.player);
   assert(projectStage, 'owner must be reduced to the caller projection');
-  const ownerShape = projectStage.$set.player;
+  const ownerShape = projectStage.$addFields.player;
   assert.strictEqual(ownerShape.privacySettings, undefined, 'privacySettings must not leak to a narrow candidate projection');
   assert.strictEqual(ownerShape.blockedUsers, undefined, 'blockedUsers must not leak to a narrow candidate projection');
   assert.strictEqual(

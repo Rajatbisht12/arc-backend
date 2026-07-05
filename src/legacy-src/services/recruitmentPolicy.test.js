@@ -126,6 +126,29 @@ const authenticatedPrivacyStages = buildRecruitmentOwnerPrivacyStages({
 // JS and passed in as viewerFollowingIds; the privacy stage is a plain $match.
 assert(!authenticatedPrivacyStages.some((stage) => stage.$lookup), 'privacy stages must not use a $lookup');
 assert(authenticatedPrivacyStages.some((stage) => stage.$match?.$expr?.$and), 'privacy stages must apply block/visibility checks');
+// The "owner blocked the viewer" check must be a plain query-language $ne, not an
+// $expr $in over a computed array — DocumentDB rejects the latter ("$in requires an
+// array as a second argument, found: object").
+assert(
+  authenticatedPrivacyStages.some((stage) => stage.$match?.blockedUsers?.$ne),
+  'owner-blocked-viewer check must use a plain $ne on blockedUsers'
+);
+// No aggregation $in in the privacy stages may take a computed (object) array
+// argument; only precomputed literal arrays are permitted.
+const collectIn = (node, acc = []) => {
+  if (Array.isArray(node)) node.forEach((child) => collectIn(child, acc));
+  else if (node && typeof node === 'object') {
+    if (Array.isArray(node.$in)) acc.push(node.$in);
+    Object.values(node).forEach((child) => collectIn(child, acc));
+  }
+  return acc;
+};
+collectIn(authenticatedPrivacyStages).forEach(([, arrayArg]) => {
+  assert(
+    Array.isArray(arrayArg),
+    'aggregation $in must take a literal array, never a computed expression (DocumentDB)'
+  );
+});
 assertSingleJoinCondition(authenticatedPrivacyStages, 'privacy stages');
 assert.strictEqual(isValidRecruitmentOwner({
   _id: 'player-1', username: 'wrong_role', userType: 'team', isActive: true
@@ -295,10 +318,16 @@ const runValidation = async (middlewares, body) => {
       && stage.$match.$expr),
     'owner validity must run at the top level after $unwind'
   );
-  // The owner is reduced to the caller projection via a $set that rebuilds it.
+  // The owner is reduced to the caller projection via an $addFields that rebuilds
+  // it. It must be $addFields, not $set: DocumentDB does not support the $set
+  // pipeline stage.
   assert(
-    recordsPipeline.some(stage => stage.$set && stage.$set.player),
+    recordsPipeline.some(stage => stage.$addFields && stage.$addFields.player),
     'owner must be reduced to the requested projection'
+  );
+  assert(
+    !recordsPipeline.some(stage => stage.$set),
+    'canonical pipeline must not use the $set stage (unsupported by DocumentDB)'
   );
   assert(recordsPipeline.some(stage => stage.$limit === 10), 'records pipeline must paginate');
 

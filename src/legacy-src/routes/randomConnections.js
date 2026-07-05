@@ -50,7 +50,9 @@ router.use(authorize('player'));
 // Validation middleware
 const joinQueueValidation = [
   body('selectedGame')
-    .optional()
+    // Clients send `selectedGame: null` for "no game filter"; optional() skips only
+    // undefined by default, so null must be treated as absent too (else isString fails).
+    .optional({ values: 'null' })
     .isString()
     .withMessage('Game selection must be a string'),
   body('tags')

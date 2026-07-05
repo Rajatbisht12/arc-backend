@@ -275,12 +275,21 @@ const buildRecruitmentOwnerPrivacyStages = ({
   const blockedObjectIds = toObjectIds(viewerBlockedIds);
   const followingObjectIds = toObjectIds(viewerFollowingIds);
   return [
+    // Exclude owners who have blocked the viewer. This runs as a plain
+    // query-language $ne (not an $expr $in) because Amazon DocumentDB's
+    // aggregation $in rejects a computed array argument such as the previous
+    // { $ifNull: ['$...blockedUsers', []] } ("$in requires an array as a second
+    // argument, found: object"). A query-language $ne against an array field
+    // means "no element equals value" and treats a missing field as a pass —
+    // exactly the intended semantics.
+    { $match: { [`${prefix}blockedUsers`]: { $ne: viewerObjectId } } },
     {
       $match: {
         $expr: {
           $and: [
+            // blockedObjectIds / followingObjectIds are precomputed literal
+            // arrays, which DocumentDB's aggregation $in accepts.
             { $not: [{ $in: [ownerField('_id'), blockedObjectIds] }] },
-            { $not: [{ $in: [viewerObjectId, { $ifNull: [ownerField('blockedUsers'), []] }] }] },
             {
               $or: [
                 { $eq: [ownerField('_id'), viewerObjectId] },
@@ -355,7 +364,9 @@ const listCanonicalRecruitmentRecords = async ({
       ownerPath: '__validOwner'
     }),
     // Reduce the joined owner document to exactly the requested projection.
-    { $set: { [ownerField]: buildOwnerProjectionExpression('__validOwner', ownerProjection) } },
+    // Use $addFields, not $set: Amazon DocumentDB does not support the $set
+    // pipeline stage ("Unrecognized pipeline stage name: '$set'").
+    { $addFields: { [ownerField]: buildOwnerProjectionExpression('__validOwner', ownerProjection) } },
     { $project: { __validOwner: 0 } },
     { $addFields: { [countField]: { $size: { $ifNull: [`$${countSource}`, []] } } } }
   ];
@@ -431,7 +442,9 @@ const listCanonicalRecruitmentApplications = async ({
     { $unwind: '$__validApplicant' },
     buildValidOwnerMatchStage('__validApplicant', 'player'),
     {
-      $set: {
+      // $addFields, not $set: Amazon DocumentDB does not support the $set
+      // pipeline stage ("Unrecognized pipeline stage name: '$set'").
+      $addFields: {
         recruitment: {
           _id: '$__validRecruitment._id',
           game: '$__validRecruitment.game',

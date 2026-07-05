@@ -45,7 +45,10 @@ router.use(authorize("player"));
 // Validation middleware
 const joinQueueValidation = [
   body("selectedGame")
-    .optional()
+    // Clients send `selectedGame: null` to mean "no game filter". express-validator 7
+    // only skips `undefined` by default, so a literal null would hit isString() and
+    // fail with "Validation failed". Treat null as absent too.
+    .optional({ values: "null" })
     .isString()
     .withMessage("Game selection must be a string"),
   body("tags")
