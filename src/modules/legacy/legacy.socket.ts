@@ -64,6 +64,7 @@ type CallSessionService = {
   getCallSessionForParticipant: (callId: string, userId: string) => Promise<DurableCallSession>;
   transitionCallSession: (input: Record<string, unknown>) => Promise<DurableCallSession>;
   serializeCallSession: (session: DurableCallSession) => Record<string, unknown>;
+  endLiveCallSessionsForUser?: (userId: string, reason?: string) => Promise<DurableCallSession[]>;
 };
 
 type ApnsVoipPushService = {
@@ -873,6 +874,35 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       if (session.participants.has(userIdStr)) {
         handleGroupCallLeave(io, callId, userIdStr);
       }
+    }
+    // Release any durable 1:1 call-session lease held by this user. A refresh,
+    // tab close, or network drop during an accepted call otherwise leaves the
+    // session leased (participantLeaseActive) until activeUntil — up to
+    // MAX_CALL_DURATION_SECONDS (default 4h) — which blocks this account's next
+    // call with CALL_PARTICIPANT_BUSY → "A previous call is still active."
+    const callSessionService = getCallSessionService();
+    if (callSessionService?.endLiveCallSessionsForUser) {
+      void callSessionService
+        .endLiveCallSessionsForUser(userIdStr, "peer_disconnected")
+        .then((ended) => {
+          for (const session of ended) {
+            const callerId = getObjectIdString(session.caller);
+            const calleeId = getObjectIdString(session.callee);
+            const otherUserId = userIdStr === callerId ? calleeId : callerId;
+            io.to(`user-${otherUserId}`).emit("call-end", {
+              callId: session.callId,
+              nativeCallId: session.nativeCallId,
+              fromUserId: userIdStr,
+              reason: "peer_disconnected"
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          logger.warn("Failed to release call sessions on disconnect", {
+            userId: userIdStr,
+            error: String(error)
+          });
+        });
     }
   });
 };

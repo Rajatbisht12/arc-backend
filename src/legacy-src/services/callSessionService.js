@@ -477,6 +477,49 @@ const transitionCallSession = async ({ callId, actorId, action, reason = '', ins
   return updated;
 };
 
+// Release every still-leased 1:1 call session this user participates in. Called
+// when the user's realtime socket disconnects (tab close, refresh, network drop)
+// so a call that was never cleanly hung up does not keep its
+// `participantLeaseActive` lease until `activeUntil` (up to
+// MAX_CALL_DURATION_SECONDS, default 4h) and block the account's next call with
+// CALL_PARTICIPANT_BUSY → "A previous call is still active."
+const endLiveCallSessionsForUser = async (userId, reason = 'peer_disconnected') => {
+  const actorId = toId(userId);
+  if (!actorId) return [];
+  const now = new Date();
+  const live = await CallSession.find({
+    participantLeaseActive: true,
+    $and: [
+      { $or: [
+        { status: 'ringing', expiresAt: { $gt: now } },
+        { status: 'accepted', activeUntil: { $gt: now } }
+      ] },
+      { $or: [{ caller: actorId }, { callee: actorId }] }
+    ]
+  }).select('callId').lean();
+
+  const ended = [];
+  for (const entry of live) {
+    try {
+      const session = await transitionCallSession({
+        callId: entry.callId,
+        actorId,
+        action: 'end',
+        reason: bounded(reason, 80) || 'peer_disconnected'
+      });
+      ended.push(session);
+    } catch (error) {
+      // A concurrent clean hang-up may have already ended it — that is fine.
+      log.warn('Failed to release call session on disconnect', {
+        callId: entry.callId,
+        userId: actorId,
+        error: String(error)
+      });
+    }
+  }
+  return ended;
+};
+
 const recoverCallStatePushes = async (limit = 200) => {
   const staleLease = new Date(Date.now() - CALL_STATE_PUSH_LEASE_MS);
   const now = new Date();
@@ -567,6 +610,7 @@ module.exports = {
   getCallSessionForParticipant,
   getPendingCallSession,
   transitionCallSession,
+  endLiveCallSessionsForUser,
   recoverCallStatePushes,
   startCallSessionSweeper,
   stopCallSessionSweeper
