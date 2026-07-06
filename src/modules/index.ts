@@ -28,6 +28,7 @@ import storiesRoutes from "./stories/stories.routes";
 import paymentsRoutes from "./payments/payments.routes";
 import hostVerificationRoutes from "./host-verification/host-verification.routes";
 import callsRoutes from "./calls/calls.routes";
+import rtcRoutes from "./calls/rtc.routes";
 
 export const registerModules = (app: Express): void => {
   registerLegacyMiddleware(app);
@@ -64,6 +65,7 @@ export const registerModules = (app: Express): void => {
   app.use("/api/payments", paymentsRoutes);
   app.use("/api/host-verification", hostVerificationRoutes);
   app.use("/api/calls", callsRoutes);
+  app.use("/api/rtc", rtcRoutes);
 
   // Legacy: passport init + static uploads
   registerLegacyRoutes(app);
