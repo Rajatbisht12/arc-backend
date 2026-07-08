@@ -13,6 +13,7 @@ const {
   getBankDetails,
   upsertBankDetails,
   deleteBankDetails,
+  deleteBankTaxId,
   getMonetizationStatus,
   submitWithdrawalRequest
 } = require('../controllers/monetizationController');
@@ -32,6 +33,7 @@ router.get('/earnings', getEarnings);
 router.get('/payout-history', getPayoutHistory);
 router.get('/bank-details', getBankDetails);
 router.put('/bank-details', upsertBankDetails);
+router.delete('/bank-details/tax-id', deleteBankTaxId);
 router.delete('/bank-details', deleteBankDetails);
 router.get('/status', getMonetizationStatus);
 router.post('/withdrawal-request', protect, assertPlayer, submitWithdrawalRequest);

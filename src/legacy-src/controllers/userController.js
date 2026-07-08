@@ -17,6 +17,7 @@ const { publishPrivacySettingsUpdate, evictPresenceAudience, removePresenceSubsc
 const { invalidateUserCache } = require('../middleware/auth');
 const log = require('../utils/logger');
 const { normalizeQuerySearch, buildPrefixRegex } = require('../utils/searchQuery');
+const { recordSuccessfulProfileVisit } = require('../services/profileVisitService');
 const {
   PROFILE_VISIBILITY,
   MESSAGE_AUDIENCE,
@@ -684,6 +685,21 @@ const getUser = async (req, res) => {
         }
       }
     };
+
+    // Record only a fully-authorized, successfully assembled profile view.
+    // Guest, self, blocked, and privacy-restricted requests return or skip
+    // before this point. The analytics row contains no request/device data.
+    if (requestingUserId && !isGuest && !isSelf && !isBlockedByMe) {
+      await recordSuccessfulProfileVisit({
+        viewerId: req.user._id,
+        profileOwnerId: user._id
+      }).catch((visitError) => {
+        log.warn('Profile visit analytics write failed', {
+          profileOwnerId: String(user._id),
+          error: String(visitError)
+        });
+      });
+    }
 
     // Cache anonymous, non-blocked profile views in Redis for 5 minutes
     if (!requestingUserId && !isBlockedByMe) {

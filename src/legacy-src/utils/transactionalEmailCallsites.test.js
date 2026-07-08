@@ -11,6 +11,7 @@ const admin = read('controllers/adminController.js');
 const recruitment = read('controllers/recruitmentController.js');
 const premium = read('services/premiumMembershipService.js');
 const securityEmail = read('utils/securityEmail.js');
+const creatorEarnings = read('services/CreatorEarningsCalculationService.js');
 
 for (const eventType of ['password_reset', 'password_changed']) {
   assert(auth.includes(`eventType: '${eventType}'`), `${eventType} must enqueue a confirmation after a successful mutation`);
@@ -65,17 +66,32 @@ for (const [intent, eventType] of [
   [EMAIL_INTENTS.ACCOUNT_LIFECYCLE, 'account_restored'],
   [EMAIL_INTENTS.ACCOUNT_LIFECYCLE, 'account_suspended'],
   [EMAIL_INTENTS.ACCOUNT_LIFECYCLE, 'report_account_suspended'],
-  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'payout_held'],
-  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'withdrawal_approved'],
-  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'withdrawal_rejected'],
-  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'creator_payout_approved'],
-  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'creator_payout_processing'],
-  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'creator_payout_paid'],
-  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'creator_payout_rejected'],
-  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'creator_payout_cancelled']
+  [EMAIL_INTENTS.ACCOUNT_LIFECYCLE, 'monetization_approved'],
+  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'payout_generated'],
+  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'payout_paid'],
+  [EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'payout_failed']
 ]) {
   assert.equal(evaluateEmailPolicy({ intent, eventType }).allowed, true, `admin transactional event is not registered: ${eventType}`);
 }
+for (const eventType of [
+  'payout_held',
+  'withdrawal_approved',
+  'withdrawal_rejected',
+  'creator_payout_approved',
+  'creator_payout_processing',
+  'creator_payout_paid',
+  'creator_payout_failed',
+  'creator_payout_rejected',
+  'creator_payout_cancelled'
+]) {
+  assert.equal(
+    evaluateEmailPolicy({ intent: EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, eventType }).allowed,
+    false,
+    `${eventType} must remain in-app/push only`
+  );
+}
+assert(creatorEarnings.includes("payoutEmail('payout_generated')"), 'automatic payout generation must opt into its exact email event');
+assert(creatorEarnings.includes('notificationDedupeKey'), 'payout generation must use a durable notification dedupe key');
 
 for (const disabledIntent of [
   'EMAIL_INTENTS.CREATOR_STATUS',
@@ -95,7 +111,6 @@ for (const eventType of [
   'monetization_approved',
   'monetization_rejected',
   'monetization_revoked',
-  'monetization_granted',
   'monetization_suspended',
   'monetization_reactivated',
   'withdrawal_approved',

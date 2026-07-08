@@ -19,8 +19,10 @@ function startPayoutCrons() {
     }
   });
 
-  // 1st of every month at 3:00 AM - close previous cycle and create pending payouts
-  cron.schedule('0 3 1 * *', async () => {
+  // Daily at 3:00 AM - idempotently close the previous cycle. The cycle-level
+  // database lease elects exactly one ECS task. Daily retries recover a crash
+  // after the 1st without waiting until the following month.
+  cron.schedule('0 3 * * *', async () => {
     try {
       const result = await closePreviousCycleAndCreatePayouts();
       console.log('[Monetization Cron] Close cycle & create payouts:', result);
@@ -29,7 +31,7 @@ function startPayoutCrons() {
     }
   });
 
-  console.log('[Monetization Cron] Scheduled: daily eligibility (2:00 AM), monthly cycle close (1st 3:00 AM)');
+  console.log('[Monetization Cron] Scheduled: daily eligibility (2:00 AM), leased cycle close/recovery (3:00 AM)');
 }
 
 module.exports = { startPayoutCrons };

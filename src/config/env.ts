@@ -21,6 +21,12 @@ const envSchema = z.object({
   // JWT
   JWT_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
+  ADMIN_JWT_SECRET: z.string().min(32).optional(),
+  BANK_DETAILS_ENCRYPTION_KEY: z.string().optional(),
+  ENCRYPTION_KEY: z.string().optional(),
+  PLATFORM_DEFAULT_CPM: z.coerce.number().positive().max(10000).default(50),
+  MAX_PAYOUT_PER_CREATOR: z.coerce.number().positive().max(100000000).default(10000),
+  MONETIZATION_CLOSE_LEASE_MS: z.coerce.number().int().min(60000).max(86400000).default(1800000),
 
   // SMTP / Email
   SMTP_HOST: z.string().optional(),
@@ -82,6 +88,59 @@ const envSchema = z.object({
   // Generate ADMIN_PASSWORD_HASH with: node scripts/generate-admin-hash.js <password>
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD_HASH: z.string().optional(),
+}).superRefine((value, context) => {
+  if (value.NODE_ENV !== "production") return;
+  const key = value.BANK_DETAILS_ENCRYPTION_KEY || "";
+  if (!/^[\x20-\x7E]{32,}$/.test(key)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["BANK_DETAILS_ENCRYPTION_KEY"],
+      message: "Production requires a dedicated stable ASCII BANK_DETAILS_ENCRYPTION_KEY with at least 32 characters"
+    });
+  }
+  if (/(replace|change[-_ ]?me|placeholder|example|demo|your[-_ ]?key|at_least_32)/i.test(key)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["BANK_DETAILS_ENCRYPTION_KEY"],
+      message: "BANK_DETAILS_ENCRYPTION_KEY cannot be a placeholder value"
+    });
+  }
+  if (key && key === value.JWT_SECRET) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["BANK_DETAILS_ENCRYPTION_KEY"],
+      message: "BANK_DETAILS_ENCRYPTION_KEY must be different from JWT_SECRET"
+    });
+  }
+  const adminJwtSecret = value.ADMIN_JWT_SECRET || "";
+  if (adminJwtSecret.length < 32) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["ADMIN_JWT_SECRET"],
+      message: "Production requires a dedicated ADMIN_JWT_SECRET with at least 32 characters"
+    });
+  }
+  if (adminJwtSecret && adminJwtSecret === value.JWT_SECRET) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["ADMIN_JWT_SECRET"],
+      message: "ADMIN_JWT_SECRET must be different from JWT_SECRET"
+    });
+  }
+  if (key && adminJwtSecret && key === adminJwtSecret) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["BANK_DETAILS_ENCRYPTION_KEY"],
+      message: "BANK_DETAILS_ENCRYPTION_KEY must be different from ADMIN_JWT_SECRET"
+    });
+  }
+  if (/(replace|change[-_ ]?me|placeholder|example|demo|your[-_ ]?key|at_least_32)/i.test(adminJwtSecret)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["ADMIN_JWT_SECRET"],
+      message: "ADMIN_JWT_SECRET cannot be a placeholder value"
+    });
+  }
 });
 
 const parsed = envSchema.safeParse(process.env);

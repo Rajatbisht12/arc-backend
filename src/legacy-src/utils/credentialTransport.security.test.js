@@ -32,4 +32,52 @@ const bankRoundTrip = spawnSync(process.execPath, ['-e', `
 `], { cwd: backendRoot, encoding: 'utf8', env: { ...process.env, BANK_DETAILS_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef' } });
 assert.equal(bankRoundTrip.status, 0, bankRoundTrip.stderr);
 
+const releaseConfig = spawnSync(process.execPath, ['scripts/verify-bank-details-config.js', '--release'], {
+  cwd: backendRoot,
+  encoding: 'utf8',
+  env: {
+    ...process.env,
+    BANK_DETAILS_ENCRYPTION_KEY: 'bank-key-0123456789abcdef0123456789',
+    JWT_SECRET: 'user-jwt-0123456789abcdef0123456789',
+    ADMIN_JWT_SECRET: 'admin-jwt-0123456789abcdef012345678'
+  }
+});
+assert.equal(releaseConfig.status, 0, releaseConfig.stderr);
+
+const sharedAdminSecret = spawnSync(process.execPath, ['scripts/verify-bank-details-config.js', '--release'], {
+  cwd: backendRoot,
+  encoding: 'utf8',
+  env: {
+    ...process.env,
+    BANK_DETAILS_ENCRYPTION_KEY: 'bank-key-0123456789abcdef0123456789',
+    JWT_SECRET: 'shared-jwt-0123456789abcdef01234567',
+    ADMIN_JWT_SECRET: 'shared-jwt-0123456789abcdef01234567'
+  }
+});
+assert.notEqual(sharedAdminSecret.status, 0, 'Admin and user JWT secrets must be isolated');
+
+const sharedBankAndUserSecret = spawnSync(process.execPath, ['scripts/verify-bank-details-config.js', '--release'], {
+  cwd: backendRoot,
+  encoding: 'utf8',
+  env: {
+    ...process.env,
+    BANK_DETAILS_ENCRYPTION_KEY: 'shared-bank-jwt-0123456789abcdef0123',
+    JWT_SECRET: 'shared-bank-jwt-0123456789abcdef0123',
+    ADMIN_JWT_SECRET: 'admin-jwt-0123456789abcdef012345678'
+  }
+});
+assert.notEqual(sharedBankAndUserSecret.status, 0, 'Bank encryption and user JWT secrets must be isolated');
+
+const sharedBankAndAdminSecret = spawnSync(process.execPath, ['scripts/verify-bank-details-config.js', '--release'], {
+  cwd: backendRoot,
+  encoding: 'utf8',
+  env: {
+    ...process.env,
+    BANK_DETAILS_ENCRYPTION_KEY: 'shared-bank-admin-0123456789abcdef01',
+    JWT_SECRET: 'user-jwt-0123456789abcdef0123456789',
+    ADMIN_JWT_SECRET: 'shared-bank-admin-0123456789abcdef01'
+  }
+});
+assert.notEqual(sharedBankAndAdminSecret.status, 0, 'Bank encryption and admin JWT secrets must be isolated');
+
 console.log('Credential transport and encryption-key contracts passed');

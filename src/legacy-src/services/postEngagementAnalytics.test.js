@@ -23,7 +23,8 @@ assert.deepStrictEqual(totalPipeline[1], { $sort: { createdAt: 1, _id: 1 } });
 assert.deepStrictEqual(totalPipeline[2], {
   $group: {
     _id: { user: '$user', post: '$post' },
-    source: { $first: '$source' }
+    source: { $first: '$source' },
+    createdAt: { $first: '$createdAt' }
   }
 });
 assert.deepStrictEqual(totalPipeline[3], { $match: { source: 'organic' } });
@@ -35,6 +36,15 @@ assert.deepStrictEqual(byPost.at(-1), { $group: { _id: '$_id.post', views: { $su
 const bySource = buildUniquePostViewPipeline({ postIds, groupBy: 'source' });
 assert.deepStrictEqual(bySource.at(-1), { $group: { _id: '$source', views: { $sum: 1 } } });
 assert.strictEqual(bySource.filter((stage) => stage.$group?._id?.user === '$user').length, 1);
+
+const byDay = buildUniquePostViewPipeline({ postIds, source: 'organic', groupBy: 'day' });
+assert.deepStrictEqual(byDay.at(-2), {
+  $group: {
+    _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } },
+    views: { $sum: 1 }
+  }
+});
+assert.deepStrictEqual(byDay.at(-1), { $sort: { _id: 1 } });
 
 assert.throws(
   () => buildUniquePostViewPipeline({ groupBy: 'context' }),

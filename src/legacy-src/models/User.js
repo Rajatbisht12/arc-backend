@@ -102,7 +102,8 @@ const userSchema = new mongoose.Schema({
   creatorCpm: {
     type: Number,
     default: null,
-    min: 0
+    min: 0,
+    max: 10000
   },
   isPremium: {
     type: Boolean,

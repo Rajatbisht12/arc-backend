@@ -2,6 +2,7 @@ const Post = require('../models/Post');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const BoostCampaign = require('../models/BoostCampaign');
+const BoostDeliveryAttribution = require('../models/BoostDeliveryAttribution');
 const { uploadMultipleFiles } = require('../utils/cloudinary');
 const { createLikeNotification, createCommentNotification, createMentionNotification } = require('../utils/notificationService');
 const { formatPostDTO } = require('../utils/dto');
@@ -34,14 +35,20 @@ const requireVisiblePost = async (req, res, post) => {
   return decision;
 };
 
-function getRequestSource(_req, post) {
-  // Delivery attribution is derived from server-owned campaign state. Clients
-  // cannot relabel an active paid delivery as organic (or vice versa).
-  return isActiveBoost(post) ? 'boost' : 'organic';
-}
-
-function getBoostCampaignId(post, source) {
-  return source === 'boost' ? (post?.boostMeta?.activeCampaign || null) : null;
+async function getRequestAttribution(req, post) {
+  const campaignId = post?.boostMeta?.activeCampaign || null;
+  const userId = req.user?._id;
+  if (!userId || !campaignId || !isActiveBoost(post)) return { source: 'organic', campaignId: null };
+  // Context is client-supplied engagement metadata and cannot decide whether
+  // paid delivery becomes monetizable. Any unexpired server-authored delivery
+  // proof for this viewer/post/campaign keeps the engagement boost-attributed.
+  const proof = await BoostDeliveryAttribution.exists({
+    user: userId,
+    post: post._id,
+    campaign: campaignId,
+    expiresAt: { $gt: new Date() }
+  });
+  return proof ? { source: 'boost', campaignId } : { source: 'organic', campaignId: null };
 }
 
 async function incrementAttributionMetric({ postId, source, campaignId, metric, amount = 1 }) {
@@ -382,8 +389,7 @@ const recordClipView = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Post not found' });
     }
     if (!await requireVisiblePost(req, res, basePost)) return;
-    const source = getRequestSource(req, basePost);
-    const campaignId = getBoostCampaignId(basePost, source);
+    const { source, campaignId } = await getRequestAttribution(req, basePost);
     const metricsInc = {
       views: 1,
       [`metrics.${source}Views`]: 1
@@ -474,8 +480,7 @@ const getPost = async (req, res) => {
     const viewerId = req.user?._id;
     const isGuest = req.user && req.user.userType === 'guest';
     if (viewerId && !isGuest) {
-      const source = getRequestSource(req, post);
-      const campaignId = getBoostCampaignId(post, source);
+      const { source, campaignId } = await getRequestAttribution(req, post);
       const viewUpdate = await Post.updateOne(
         {
           _id: postId,
@@ -544,8 +549,7 @@ const toggleLike = async (req, res) => {
       if (!likeUser) return false;
       return likeUser.toString() === userId.toString();
     }) > -1;
-    const source = getRequestSource(req, existingPost);
-    const campaignId = getBoostCampaignId(existingPost, source);
+    const { source, campaignId } = await getRequestAttribution(req, existingPost);
 
     if (alreadyLiked) {
       await Post.updateOne(
@@ -663,8 +667,7 @@ const addComment = async (req, res) => {
       });
     }
 
-    const source = getRequestSource(req, post);
-    const campaignId = getBoostCampaignId(post, source);
+    const { source, campaignId } = await getRequestAttribution(req, post);
     await incrementAttributionMetric({ postId, source, campaignId, metric: 'Comments' });
 
     // Create notification for post author (if not commenting on own post)
@@ -731,8 +734,7 @@ const recordShare = async (req, res) => {
     if (!finalPost || finalPost.isActive === false) {
       return res.status(404).json({ success: false, message: 'Post not found' });
     }
-    const source = getRequestSource(req, finalPost);
-    const campaignId = getBoostCampaignId(finalPost, source);
+    const { source, campaignId } = await getRequestAttribution(req, finalPost);
     if (post) {
       await incrementAttributionMetric({ postId, source, campaignId, metric: 'Shares' });
     }
@@ -797,8 +799,7 @@ const toggleSave = async (req, res) => {
       isSaved = true;
     }
     await user.save();
-    const source = getRequestSource(req, post);
-    const campaignId = getBoostCampaignId(post, source);
+    const { source, campaignId } = await getRequestAttribution(req, post);
     if (isSaved) {
       await incrementAttributionMetric({ postId, source, campaignId, metric: 'Saves' });
     }
@@ -1149,8 +1150,7 @@ const trackInteraction = async (req, res) => {
     const normalizedType = interactionType === 'dwell_time' || interactionType === 'click'
       ? 'dwell'
       : interactionType;
-    const source = getRequestSource(req, post);
-    const campaignId = getBoostCampaignId(post, source);
+    const { source, campaignId } = await getRequestAttribution(req, post);
     const trackedDuration = normalizeEngagementDuration(durationMs ?? dwellTime);
     const normalizedContext = normalizeEngagementContext(context);
     if (['watch', 'dwell'].includes(normalizedType) && trackedDuration > 0) {

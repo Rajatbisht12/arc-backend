@@ -32,13 +32,14 @@ const loginLimiter = rateLimit({
  */
 router.post("/login", loginLimiter, async (req: Request, res: Response): Promise<void> => {
   // Guard: ensure credentials are configured in the environment
-  if (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD_HASH) {
+  if (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD_HASH || !env.ADMIN_JWT_SECRET) {
     res.status(503).json({
       success: false,
       message: "Admin login is not configured on this server.",
     });
     return;
   }
+  const adminJwtSecret = env.ADMIN_JWT_SECRET;
 
   const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
   const password = typeof req.body?.password === "string" ? req.body.password : "";
@@ -68,9 +69,15 @@ router.post("/login", loginLimiter, async (req: Request, res: Response): Promise
   }
 
   const token = jwt.sign(
-    { isHardcodedAdmin: true, username: env.ADMIN_USERNAME, adminRole: "super_admin", adminPermissions: ["*"] },
-    env.JWT_SECRET,
-    { expiresIn: "8h" }
+    { isHardcodedAdmin: true, tokenUse: "admin", username: env.ADMIN_USERNAME, adminRole: "super_admin", adminPermissions: ["*"] },
+    adminJwtSecret,
+    {
+      algorithm: "HS256",
+      issuer: "squadhunt-admin",
+      audience: "squadhunt-admin-panel",
+      subject: `hardcoded:${env.ADMIN_USERNAME}`,
+      expiresIn: "8h"
+    }
   );
 
   console.log(

@@ -30,9 +30,49 @@ const payoutCycleSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['open', 'closed', 'paid'],
+    enum: ['open', 'closing', 'closed', 'paid'],
     default: 'open',
     index: true
+  },
+  /**
+   * Durable close lease. Every ECS task schedules the same cron, so the cycle
+   * document is also the cross-process coordinator. No payout calculation may
+   * run for a closing cycle without owning this lease.
+   */
+  closeLeaseKey: {
+    type: String,
+    default: '',
+    select: false
+  },
+  closeLeaseExpiresAt: {
+    type: Date,
+    default: null
+  },
+  closeStartedAt: {
+    type: Date,
+    default: null
+  },
+  closeLastAttemptAt: {
+    type: Date,
+    default: null
+  },
+  closeAttemptCount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  earningsFinalizedAt: {
+    type: Date,
+    default: null
+  },
+  closeCompletedAt: {
+    type: Date,
+    default: null
+  },
+  closeLastError: {
+    type: String,
+    default: '',
+    maxlength: 1000
   },
   /** Minimum amount to trigger payout (below = rollover) */
   minimumPayoutThreshold: {

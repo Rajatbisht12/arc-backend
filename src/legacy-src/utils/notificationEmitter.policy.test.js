@@ -254,6 +254,36 @@ const run = async () => {
   assert.equal(outboxCompletions, baselineCount + 3, 'successful submissions must complete their outbox lease');
   existingNotification = null;
 
+  const emailsBeforePayout = emails;
+  const payoutDedupeKey = 'creator-payout-paid:payout-1';
+  await emitter.createAndEmitNotification({
+    recipient,
+    type: 'system',
+    title: 'Creator payout paid',
+    message: 'Your payout was paid.',
+    data: { customData: { notificationDedupeKey: payoutDedupeKey } },
+    email: { intent: EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, eventType: 'payout_paid' }
+  });
+  assert.equal(emails, emailsBeforePayout + 1, 'the first payout event must enqueue one email');
+  existingNotification = {
+    _id: 'notification-existing-payout',
+    recipient,
+    type: 'system',
+    title: 'Creator payout paid',
+    message: 'Your payout was paid.',
+    data: { customData: { notificationDedupeKey: payoutDedupeKey } }
+  };
+  await emitter.createAndEmitNotification({
+    recipient,
+    type: 'system',
+    title: 'Creator payout paid',
+    message: 'Your payout was paid.',
+    data: { customData: { notificationDedupeKey: payoutDedupeKey } },
+    email: { intent: EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, eventType: 'payout_paid' }
+  });
+  assert.equal(emails, emailsBeforePayout + 1, 'replaying a deduplicated payout event must not enqueue duplicate email');
+  existingNotification = null;
+
   const channels = emitter.resolveNotificationChannels(
     { type: 'like' },
     { inAppEnabled: false, pushEnabled: true, likes: true }

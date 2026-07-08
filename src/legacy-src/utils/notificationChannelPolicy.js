@@ -41,7 +41,10 @@ const ALLOWED_EMAIL_EVENTS = Object.freeze({
     'account_restored',
     'account_suspended',
     'report_account_suspended',
-    'account_banned'
+    'account_banned',
+    // Creator monetization approval changes the account's financial access.
+    // Other creator-review state changes remain in-app/push only.
+    'monetization_approved'
   ]),
   [EMAIL_INTENTS.PREMIUM_LIFECYCLE]: Object.freeze([
     'purchase',
@@ -75,17 +78,13 @@ const ALLOWED_EMAIL_EVENTS = Object.freeze({
     'refund',
     'refund_processed',
     'refund_failed',
-    'payout_held',
-    'withdrawal_approved',
-    'withdrawal_rejected',
-    'creator_payout_approved',
-    'creator_payout_processing',
-    'creator_payout_paid',
-    'creator_payout_completed',
-    'creator_payout_failed',
-    'creator_payout_held',
-    'creator_payout_cancelled',
-    'creator_payout_rejected'
+    // Creator-payout email is deliberately limited to the three material
+    // financial events approved by product. Approval, processing, hold,
+    // rejection and cancellation still produce in-app/push notifications but
+    // cannot reach SMTP through this policy.
+    'payout_generated',
+    'payout_paid',
+    'payout_failed'
   ]),
   [EMAIL_INTENTS.PLATFORM_CRITICAL]: Object.freeze([
     'critical_platform_announcement',

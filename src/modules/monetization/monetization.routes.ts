@@ -16,6 +16,7 @@ router.get("/earnings", monetizationController.getEarnings);
 router.get("/payout-history", monetizationController.getPayoutHistory);
 router.get("/bank-details", monetizationController.getBankDetails);
 router.put("/bank-details", monetizationController.upsertBankDetails);
+router.delete("/bank-details/tax-id", monetizationController.deleteBankTaxId);
 router.delete("/bank-details", monetizationController.deleteBankDetails);
 router.get("/status", monetizationController.getMonetizationStatus);
 router.post("/withdrawal-request", protect, monetizationController.assertPlayer, monetizationController.submitWithdrawalRequest);

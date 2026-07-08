@@ -175,10 +175,16 @@ const createAndEmitNotification = async (notificationData) => {
     const { user, channels } = delivery;
     const emailPolicy = evaluateNotificationEmailPolicy(normalizedNotificationData);
     let notification = null;
+    let notificationCreated = false;
+    let notificationDedupeKey = '';
 
-    if (channels.inApp || channels.push) {
+    // Email-only transactional events still need a durable dedupe row. The row
+    // is archived when in-app delivery is disabled, so it does not surface in
+    // the inbox but can prevent replayed jobs from sending duplicate email.
+    if (channels.inApp || channels.push || emailPolicy.allowed) {
       const Notification = require('../models/Notification');
       const dedupeKey = String(normalizedNotificationData?.data?.customData?.notificationDedupeKey || '').trim().slice(0, 250);
+      notificationDedupeKey = dedupeKey;
       if (dedupeKey) {
         notification = await Notification.findOne({
           recipient: normalizedNotificationData.recipient,
@@ -200,6 +206,7 @@ const createAndEmitNotification = async (notificationData) => {
             } : {})
           });
           created = true;
+          notificationCreated = true;
         } catch (error) {
           if (dedupeKey && error?.code === 11000) {
             notification = await Notification.findOne({
@@ -263,7 +270,11 @@ const createAndEmitNotification = async (notificationData) => {
 
     // Email is opt-in and independently policy-gated. Routine engagement
     // notifications are structurally blocked before reaching the queue.
-    if (emailPolicy.allowed && user?.email && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    // A deduplicated notification represents one business event. Replaying a
+    // producer for recovery may rediscover its durable row, but must never
+    // enqueue another email for that same event.
+    const shouldEnqueueEmail = !notificationDedupeKey || notificationCreated;
+    if (emailPolicy.allowed && shouldEnqueueEmail && user?.email && process.env.SMTP_USER && process.env.SMTP_PASS) {
       try {
         const { enqueueEmail } = require('./jobQueue');
         const link = process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/notifications` : '';

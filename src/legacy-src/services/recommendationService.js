@@ -512,8 +512,9 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
 
   const selected = selectDiversePosts(scored, limit, mode);
   const selectedPosts = selected.map((item) => item.post);
-  await recordBoostDelivery(selectedPosts, mode).catch((error) => {
+  const attributedBoostPostIds = await recordBoostDelivery(selectedPosts, mode, relationship.currentUserId).catch((error) => {
     log.warn('Failed to record boost delivery', { error: String(error), mode });
+    return new Set();
   });
   const lastCandidate = candidates[candidates.length - 1] || selectedPosts[selectedPosts.length - 1] || null;
   const nextCursor = candidates.length >= limit ? encodeCursor(lastCandidate) : null;
@@ -529,7 +530,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
         isGuest,
         Boolean(relationship.currentUserId && normalizeId(post.author) === relationship.currentUserId)
       );
-      if (dto) dto.deliverySource = getDeliverySource(post);
+      if (dto) dto.deliverySource = attributedBoostPostIds.has(normalizeId(post._id)) ? 'boost' : 'organic';
       return dto;
     }),
     pagination: {
