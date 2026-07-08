@@ -113,9 +113,10 @@ const run = async () => {
   assert.equal(concurrentLoser.deduped, true, 'duplicate-key loser must be treated as an already-recorded visit');
 
   const backendRoot = path.resolve(__dirname, '../../..');
-  const userController = fs.readFileSync(path.join(backendRoot, 'src/legacy-src/controllers/userController.js'), 'utf8');
-  const adminController = fs.readFileSync(path.join(backendRoot, 'src/legacy-src/controllers/adminMonetizationController.js'), 'utf8');
-  const migration = fs.readFileSync(path.join(backendRoot, 'scripts/migrate-monetization-admin.js'), 'utf8');
+  const readSource = (relativePath) => fs.readFileSync(path.join(backendRoot, relativePath), 'utf8').replace(/\r\n/g, '\n');
+  const userController = readSource('src/legacy-src/controllers/userController.js');
+  const adminController = readSource('src/legacy-src/controllers/adminMonetizationController.js');
+  const migration = readSource('scripts/migrate-monetization-admin.js');
   const getUserStart = userController.indexOf('const getUser = async');
   const getUserEnd = userController.indexOf('const invalidateFollowCaches', getUserStart);
   const getUserSource = userController.slice(getUserStart, getUserEnd);
