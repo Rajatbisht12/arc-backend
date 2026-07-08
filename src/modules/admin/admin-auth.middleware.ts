@@ -4,6 +4,7 @@ import { env } from "../../config/env";
 
 interface AdminJwtPayload {
   isHardcodedAdmin?: boolean;
+  tokenUse?: string;
   username?: string;
   adminRole?: string;
   adminPermissions?: string[];
@@ -29,11 +30,18 @@ export const requireHardcodedAdminAuth = (
   if (!token) {
     return res.status(401).json({ success: false, message: "Authentication required." });
   }
+  if (!env.ADMIN_JWT_SECRET) {
+    return res.status(503).json({ success: false, message: "Admin authentication is not configured." });
+  }
 
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as AdminJwtPayload;
+    const decoded = jwt.verify(token, env.ADMIN_JWT_SECRET, {
+      algorithms: ["HS256"],
+      issuer: "squadhunt-admin",
+      audience: "squadhunt-admin-panel",
+    }) as AdminJwtPayload;
 
-    if (!decoded.isHardcodedAdmin) {
+    if (!decoded.isHardcodedAdmin || decoded.tokenUse !== "admin") {
       return res.status(403).json({ success: false, message: "Admin access required." });
     }
 

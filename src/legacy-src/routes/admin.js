@@ -20,6 +20,7 @@ const {
   approveMonetizationApplication,
   rejectMonetizationApplication,
   holdCreatorPayout,
+  releaseCreatorPayoutHold,
   getCreatorAnalytics,
   getCreatorBankDetailsForAdmin,
   getApprovedCreators,
@@ -83,6 +84,7 @@ router.get('/monetization/applications', auditLog('VIEW_MONETIZATION_APPLICATION
 router.post('/monetization/applications/:applicationId/approve', auditLog('APPROVE_MONETIZATION'), requireSuperAdmin, approveMonetizationApplication);
 router.post('/monetization/applications/:applicationId/reject', auditLog('REJECT_MONETIZATION'), requireSuperAdmin, rejectMonetizationApplication);
 router.post('/monetization/payout-hold/:userId', auditLog('HOLD_CREATOR_PAYOUT'), requireSuperAdmin, holdCreatorPayout);
+router.post('/monetization/payout-hold/:userId/release', auditLog('RELEASE_CREATOR_PAYOUT_HOLD'), requireSuperAdmin, releaseCreatorPayoutHold);
 
 // Creator management
 router.get('/monetization/creators/export.csv', auditLog('EXPORT_CREATORS'), requireAdminPermission('monetization:manage'), exportCreatorsCsv);

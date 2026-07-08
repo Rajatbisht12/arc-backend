@@ -96,6 +96,39 @@ for (const intent of ['creator_status', 'host_status', 'tournament_registration_
 }
 assert.equal(evaluateEmailPolicy({}).allowed, false);
 assert.equal(evaluateEmailPolicy({ intent: 'transactional' }).allowed, false, 'there is no generic transactional bypass');
+for (const eventType of ['monetization_approved']) {
+  assert.equal(
+    evaluateEmailPolicy({ intent: EMAIL_INTENTS.ACCOUNT_LIFECYCLE, eventType }).allowed,
+    true,
+    `${eventType} must remain an explicitly approved account email`
+  );
+}
+for (const eventType of ['payout_generated', 'payout_paid', 'payout_failed']) {
+  assert.equal(
+    evaluateEmailPolicy({ intent: EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, eventType }).allowed,
+    true,
+    `${eventType} must remain an explicitly approved payout email`
+  );
+}
+for (const eventType of [
+  'payout_held',
+  'withdrawal_approved',
+  'withdrawal_rejected',
+  'creator_payout_approved',
+  'creator_payout_processing',
+  'creator_payout_paid',
+  'creator_payout_completed',
+  'creator_payout_failed',
+  'creator_payout_held',
+  'creator_payout_cancelled',
+  'creator_payout_rejected'
+]) {
+  assert.equal(
+    evaluateEmailPolicy({ intent: EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, eventType }).allowed,
+    false,
+    `${eventType} must remain in-app/push only`
+  );
+}
 for (const intent of Object.values(EMAIL_INTENTS)) {
   assert.equal(evaluateEmailPolicy({ intent }).reason, 'missing_or_invalid_email_event');
   assert.equal(evaluateEmailPolicy({ intent, eventType: `${intent}_event` }).allowed, false, 'unknown events must fail closed');

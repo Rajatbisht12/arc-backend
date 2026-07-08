@@ -16,6 +16,7 @@ const { disconnectUserSockets } = require('../utils/realtimePrivacy');
 const { validateOnboardingProfile } = require('../utils/onboardingValidation');
 const { recordSuccessfulLogin } = require('../utils/userLoginAudit');
 const { normalizeMatchmakingGender } = require('../utils/randomConnectGender');
+const { FINANCIAL_TRANSACTION_OPTIONS, startFinancialSession } = require('../utils/financialTransactions');
 
 const INVALID_LOGIN_MESSAGE = 'Invalid email or password.';
 
@@ -900,10 +901,68 @@ const deleteAccount = async (req, res) => {
       });
     }
 
-    // Mark user as inactive instead of hard delete to preserve data integrity
-    user.isActive = false;
-    user.deletedAt = new Date();
-    await user.save();
+
+    const CreatorPayout = require('../models/CreatorPayout');
+    const WithdrawalRequest = require('../models/WithdrawalRequest');
+    const CreatorBankDetails = require('../models/CreatorBankDetails');
+    const CreatorBankDetailsHistory = require('../models/CreatorBankDetailsHistory');
+    const activeFinancialQuery = { $in: ['pending', 'held', 'approved', 'processing'] };
+    let financialSession;
+    try {
+      financialSession = await startFinancialSession();
+      await financialSession.withTransaction(async () => {
+        const activePayout = await CreatorPayout.exists({ user: userId, status: activeFinancialQuery }).session(financialSession);
+        const activeWithdrawal = await WithdrawalRequest.exists({ user: userId, status: { $in: ['pending', 'approved', 'processing'] } }).session(financialSession);
+        if (activePayout || activeWithdrawal) {
+          throw Object.assign(new Error('Your account cannot be deleted while a creator payout or withdrawal is pending or processing. Contact support after it is resolved.'), { code: 'ACTIVE_CREATOR_PAYOUT' });
+        }
+        const bank = await CreatorBankDetails.findOne({ user: userId }).session(financialSession).lean();
+        if (bank?.activePayoutLocks?.length || bank?.activeWithdrawalLocks?.length) {
+          throw Object.assign(new Error('Your account cannot be deleted while payout bank details are reserved.'), { code: 'ACTIVE_CREATOR_PAYOUT' });
+        }
+        await User.updateOne(
+          { _id: userId },
+          { $set: { isActive: false, deletedAt: new Date() } },
+          { session: financialSession }
+        );
+        if (bank) {
+          await CreatorBankDetailsHistory.create([{
+            bankDetails: bank._id,
+            user: userId,
+            action: 'deleted',
+            actor: { actorKey: `user:${String(userId)}`, username: user.username || '', role: 'user', type: 'user' },
+            previous: {
+              accountHolderName: bank.accountHolderName,
+              bankName: bank.bankName,
+              lastFourDigits: bank.lastFourDigits || '',
+              ifsc: bank.ifsc || '',
+              swiftCode: bank.swiftCode || '',
+              country: bank.country || 'IN',
+              verificationStatus: bank.verificationStatus
+            },
+            next: null,
+            reason: 'Account deletion requested by owner',
+            ip: String(req.ip || req.headers?.['x-forwarded-for'] || ''),
+            userAgent: req.get ? (req.get('user-agent') || '') : ''
+          }], { session: financialSession });
+          const deleted = await CreatorBankDetails.deleteOne(
+            { _id: bank._id, 'activePayoutLocks.0': { $exists: false }, 'activeWithdrawalLocks.0': { $exists: false } },
+            { session: financialSession }
+          );
+          if (deleted.deletedCount !== 1) {
+            throw Object.assign(new Error('Bank details became reserved while the account was closing.'), { code: 'ACTIVE_CREATOR_PAYOUT' });
+          }
+        }
+      }, FINANCIAL_TRANSACTION_OPTIONS);
+    } catch (financialError) {
+      if (financialError?.code === 'ACTIVE_CREATOR_PAYOUT') {
+        return res.status(409).json({ success: false, code: financialError.code, message: financialError.message });
+      }
+      throw financialError;
+    } finally {
+      if (financialSession) await financialSession.endSession().catch(() => null);
+    }
+
     const TeamRecruitment = require('../models/TeamRecruitment');
     const PlayerProfile = require('../models/PlayerProfile');
     const RecruitmentApplication = require('../models/RecruitmentApplication');

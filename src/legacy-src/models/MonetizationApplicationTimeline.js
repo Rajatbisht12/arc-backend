@@ -15,7 +15,7 @@ const monetizationApplicationTimelineSchema = new mongoose.Schema({
   },
   action: {
     type: String,
-    enum: ['applied', 'withdrawn', 'approved', 'rejected', 'suspended', 'resumed', 'disabled', 'reactivated', 'commented'],
+    enum: ['applied', 'withdrawn', 'approved', 'rejected', 'suspended', 'resumed', 'disabled', 'reactivated', 'cpm_updated', 'commented'],
     required: true,
     index: true
   },

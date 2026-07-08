@@ -11,6 +11,7 @@ const PostEngagement = require('../models/PostEngagement');
 const MonetizationEligibility = require('../models/MonetizationEligibility');
 const CreatorEligibilityHistory = require('../models/CreatorEligibilityHistory');
 const CreatorDailyActivity = require('../models/CreatorDailyActivity');
+const Follow = require('../models/Follow');
 const mongoose = require('mongoose');
 const { buildUniquePostViewPipeline } = require('./postEngagementAnalytics');
 
@@ -86,7 +87,8 @@ async function refreshDailyActivitySnapshots(userId, sinceDate) {
         $match: {
           author: authorObjectId,
           createdAt: { $gte: sinceDate },
-          isActive: true
+          isActive: true,
+          hiddenByAdmin: { $ne: true }
         }
       },
       {
@@ -184,7 +186,7 @@ async function refreshDailyActivitySnapshots(userId, sinceDate) {
  * @returns {Promise<{ isEligible: boolean, failedConditions: array, progressPercent: number, metrics: object }>}
  */
 async function calculateEligibility(userId) {
-  const user = await User.findById(userId).select('createdAt followers membership userType role').lean();
+  const user = await User.findById(userId).select('createdAt membership userType role').lean();
   if (!user) {
     return {
       isEligible: false,
@@ -215,7 +217,10 @@ async function calculateEligibility(userId) {
     };
   }
 
-  const followersCount = (user.followers && user.followers.length) || 0;
+  // Follow is the canonical relationship collection. User.followers remains a
+  // bounded compatibility projection and can lag during migrations, so it
+  // must not decide financial eligibility.
+  const followersCount = await Follow.getFollowerCount(userId);
   const membershipTier = user.membership?.tier || 'free';
   const membershipValidUntil = user.membership?.validUntil || null;
   const membershipExpired = membershipValidUntil ? new Date(membershipValidUntil) < new Date() : false;
@@ -278,7 +283,12 @@ async function calculateEligibility(userId) {
       },
       { $group: { _id: '$day' } }
     ]),
-    Post.find({ author: userId, createdAt: { $gte: sinceDate }, isActive: true })
+    Post.find({
+      author: userId,
+      createdAt: { $gte: sinceDate },
+      isActive: true,
+      hiddenByAdmin: { $ne: true }
+    })
       .select('createdAt')
       .lean(),
     Story.find({ author: userId, createdAt: { $gte: sinceDate } })

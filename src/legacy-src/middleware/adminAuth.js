@@ -4,13 +4,13 @@ const AdminAuditLog = require('../models/AdminAuditLog');
 
 const ROLE_PERMISSIONS = {
   super_admin: ['*'],
-  admin: ['dashboard:read', 'users:manage', 'content:manage', 'reports:manage', 'hosts:manage', 'boosts:manage', 'boost_delivery:manage', 'monetization:manage', 'broadcasts:read', 'broadcasts:manage', 'broadcasts:send', 'premium:read', 'analytics:read', 'audit:read'],
+  admin: ['dashboard:read', 'users:manage', 'content:manage', 'reports:manage', 'hosts:manage', 'boosts:manage', 'boost_delivery:manage', 'monetization:read', 'monetization:manage', 'earnings:read', 'transactions:read', 'payouts:manage', 'bank_details:read', 'financial_reports:export', 'broadcasts:read', 'broadcasts:manage', 'broadcasts:send', 'premium:read', 'analytics:read', 'audit:read'],
   moderator: ['dashboard:read', 'content:manage', 'reports:manage', 'users:read'],
   support: ['dashboard:read', 'users:read', 'reports:read', 'feedback:manage'],
-  finance: ['dashboard:read', 'payments:read', 'boosts:read', 'boost_delivery:manage', 'monetization:manage', 'premium:read', 'premium:refund'],
+  finance: ['dashboard:read', 'payments:read', 'boosts:read', 'boost_delivery:manage', 'monetization:read', 'earnings:read', 'transactions:read', 'payouts:manage', 'bank_details:read', 'financial_reports:export', 'premium:read', 'premium:refund', 'audit:read'],
   tournament_manager: ['dashboard:read', 'tournaments:manage', 'hosts:read'],
   content_moderator: ['dashboard:read', 'content:manage', 'reports:manage'],
-  creator_manager: ['dashboard:read', 'monetization:manage', 'analytics:read']
+  creator_manager: ['dashboard:read', 'monetization:read', 'monetization:manage', 'earnings:read', 'analytics:read']
 };
 
 const getAdminRole = (user) => {
@@ -42,7 +42,7 @@ const sanitizeForAudit = (value) => {
   if (!value || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map(sanitizeForAudit);
   return Object.entries(value).reduce((acc, [key, nestedValue]) => {
-    if (/password|token|secret|authorization|cookie/i.test(key)) {
+    if (/password|token|secret|authorization|cookie|accountnumber|taxid|pan|gst|upi|paypal|ifsc|swift|internalnotes|notes/i.test(key)) {
       acc[key] = '[REDACTED]';
     } else if (nestedValue && typeof nestedValue === 'object') {
       acc[key] = sanitizeForAudit(nestedValue);

@@ -1,17 +1,19 @@
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 
-const ENCRYPTION_KEY = process.env.BANK_DETAILS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
 const LEGACY_IV_LENGTH = 16;
 const GCM_IV_LENGTH = 12;
 const LEGACY_ALGO = 'aes-256-cbc';
 const ALGO = 'aes-256-gcm';
 
 function encryptionKey() {
-  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) {
-    throw new Error('BANK_DETAILS_ENCRYPTION_KEY or ENCRYPTION_KEY with at least 32 characters is required');
+  const encryptionSecret = process.env.BANK_DETAILS_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+  if (!encryptionSecret || !/^[\x20-\x7E]{32,}$/.test(encryptionSecret)) {
+    throw new Error('BANK_DETAILS_ENCRYPTION_KEY or ENCRYPTION_KEY with at least 32 ASCII characters is required');
   }
-  return Buffer.from(ENCRYPTION_KEY.slice(0, 32).padEnd(32, '0'));
+  // Preserve the deployed v1/v2 key derivation so existing ciphertext remains
+  // decryptable. Key rotation must be performed through an explicit migration.
+  return Buffer.from(encryptionSecret.slice(0, 32).padEnd(32, '0'));
 }
 
 function encrypt(text) {
@@ -24,15 +26,17 @@ function encrypt(text) {
   return 'v2:' + iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
 }
 
-function hashValue(text) {
+function hashValue(text, purpose = 'sensitive-value') {
   return crypto
-    .createHash('sha256')
-    .update(String(text || '').trim().toLowerCase())
+    .createHmac('sha256', encryptionKey())
+    .update(`${purpose}:${String(text || '').trim().toLowerCase()}`)
     .digest('hex');
 }
 
 function decrypt(encrypted) {
-  if (!encrypted || !encrypted.includes(':')) return '';
+  if (!encrypted || typeof encrypted !== 'string' || !encrypted.includes(':')) {
+    throw new Error('Invalid encrypted bank value');
+  }
   const key = encryptionKey();
   const parts = encrypted.split(':');
   if (parts[0] === 'v2') {
@@ -63,6 +67,7 @@ const creatorBankDetailsSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
+    immutable: true,
     unique: true,
     index: true
   },
@@ -75,11 +80,13 @@ const creatorBankDetailsSchema = new mongoose.Schema({
   /** Stored encrypted at rest */
   accountNumberEncrypted: {
     type: String,
-    required: true
+    required: true,
+    select: false
   },
   accountNumberHash: {
     type: String,
-    index: true
+    index: true,
+    select: false
   },
   ifsc: {
     type: String,
@@ -108,13 +115,33 @@ const creatorBankDetailsSchema = new mongoose.Schema({
     type: String,
     trim: true,
     lowercase: true,
-    maxlength: 100
+    maxlength: 100,
+    select: false
+  },
+  upiIdEncrypted: {
+    type: String,
+    select: false
+  },
+  upiIdMasked: {
+    type: String,
+    default: '',
+    maxlength: 120
   },
   paypalEmail: {
     type: String,
     trim: true,
     lowercase: true,
-    maxlength: 200
+    maxlength: 200,
+    select: false
+  },
+  paypalEmailEncrypted: {
+    type: String,
+    select: false
+  },
+  paypalEmailMasked: {
+    type: String,
+    default: '',
+    maxlength: 220
   },
   country: {
     type: String,
@@ -124,38 +151,94 @@ const creatorBankDetailsSchema = new mongoose.Schema({
     maxlength: 2
   },
   taxIdEncrypted: {
-    type: String
+    type: String,
+    select: false
   },
   taxIdHash: {
     type: String,
-    index: true
+    index: true,
+    select: false
   },
   gstNumber: {
     type: String,
     trim: true,
     uppercase: true,
-    maxlength: 30
+    maxlength: 30,
+    select: false
+  },
+  gstNumberEncrypted: {
+    type: String,
+    select: false
+  },
+  gstNumberMasked: {
+    type: String,
+    default: '',
+    maxlength: 40
   },
   verificationStatus: {
     type: String,
-    enum: ['pending', 'verified', 'failed'],
+    enum: ['pending', 'verified', 'rejected', 'failed'],
     default: 'pending',
     index: true
   },
   verifiedAt: {
     type: Date
   },
+  verifiedByActorKey: {
+    type: String,
+    default: ''
+  },
+  rejectedAt: {
+    type: Date
+  },
+  verificationReason: {
+    type: String,
+    trim: true,
+    maxlength: 1000,
+    default: ''
+  },
+  internalNotes: {
+    type: String,
+    trim: true,
+    maxlength: 2000,
+    default: '',
+    select: false
+  },
+  // Administrative notes are metadata. Their concurrency token must remain
+  // independent from the payout-destination version pinned by disbursements.
+  internalNotesVersion: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+  version: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+  lastSubmittedAt: {
+    type: Date,
+    default: Date.now
+  },
+  activePayoutLocks: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'CreatorPayout'
+  }],
+  activeWithdrawalLocks: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'WithdrawalRequest'
+  }],
   lastFourDigits: {
     type: String,
     maxlength: 4
   }
 }, { timestamps: true });
 
-creatorBankDetailsSchema.virtual('accountNumber').get(function() {
-  return decrypt(this.accountNumberEncrypted);
-});
 creatorBankDetailsSchema.set('toJSON', { virtuals: false });
-creatorBankDetailsSchema.set('toObject', { virtuals: true });
+creatorBankDetailsSchema.set('toObject', { virtuals: false });
+
+creatorBankDetailsSchema.index({ verificationStatus: 1, updatedAt: -1 });
+creatorBankDetailsSchema.index({ country: 1, verificationStatus: 1, updatedAt: -1 });
 
 // Caller must encrypt account number before saving: use CreatorBankDetails.encryptAccountNumber(plain)
 creatorBankDetailsSchema.statics.encryptAccountNumber = encrypt;

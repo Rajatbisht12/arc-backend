@@ -1,4 +1,4 @@
-const VIEW_GROUPS = new Set(['total', 'post', 'source']);
+const VIEW_GROUPS = new Set(['total', 'post', 'source', 'day']);
 
 /**
  * Build a view-count pipeline that treats a user/post pair as one view even if
@@ -28,7 +28,8 @@ function buildUniquePostViewPipeline({
     {
       $group: {
         _id: { user: '$user', post: '$post' },
-        source: { $first: '$source' }
+        source: { $first: '$source' },
+        createdAt: { $first: '$createdAt' }
       }
     }
   ];
@@ -39,6 +40,13 @@ function buildUniquePostViewPipeline({
     pipeline.push({ $group: { _id: '$_id.post', views: { $sum: 1 } } });
   } else if (groupBy === 'source') {
     pipeline.push({ $group: { _id: '$source', views: { $sum: 1 } } });
+  } else if (groupBy === 'day') {
+    pipeline.push({
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } },
+        views: { $sum: 1 }
+      }
+    }, { $sort: { _id: 1 } });
   } else {
     pipeline.push({ $group: { _id: null, views: { $sum: 1 } } });
   }

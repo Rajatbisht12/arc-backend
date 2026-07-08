@@ -1,5 +1,6 @@
 const Post = require('../models/Post');
 const BoostCampaign = require('../models/BoostCampaign');
+const BoostDeliveryAttribution = require('../models/BoostDeliveryAttribution');
 
 const FREQUENCY_HOURS = {
   daily: 24,
@@ -330,13 +331,14 @@ async function activateBoostCampaign({ campaign, paymentId, paymentAmount }) {
   return updatedCampaign;
 }
 
-async function recordBoostDelivery(posts, context = 'feed') {
+async function recordBoostDelivery(posts, context = 'feed', viewerId = null) {
   const delivered = Array.isArray(posts) ? posts : [posts];
   const active = delivered.filter((post) => getDeliverySource(post) === 'boost' && post?.boostMeta?.activeCampaign);
+  const attributedPostIds = new Set();
   await Promise.all(active.map(async (post) => {
     const campaignId = post.boostMeta.activeCampaign;
     const campaignUpdate = await BoostCampaign.findOneAndUpdate(
-      { _id: campaignId, status: 'running', remainingReach: { $gt: 0 } },
+      { _id: campaignId, status: 'running', paymentStatus: 'paid', remainingReach: { $gt: 0 } },
       {
         $inc: {
           remainingReach: -1,
@@ -348,6 +350,7 @@ async function recordBoostDelivery(posts, context = 'feed') {
       { new: true }
     );
     if (campaignUpdate) {
+      attributedPostIds.add(String(post._id));
       await Post.updateOne(
         { _id: post._id, 'boostMeta.activeCampaign': campaignId, 'boostMeta.remainingReach': { $gt: 0 } },
         {
@@ -357,6 +360,16 @@ async function recordBoostDelivery(posts, context = 'feed') {
           }
         }
       );
+      if (viewerId) {
+        const deliveredAt = new Date();
+        const campaignEnd = campaignUpdate.endTime ? new Date(campaignUpdate.endTime) : new Date(deliveredAt.getTime() + (24 * 60 * 60 * 1000));
+        const expiresAt = new Date(Math.min(campaignEnd.getTime(), deliveredAt.getTime() + (48 * 60 * 60 * 1000)));
+        await BoostDeliveryAttribution.findOneAndUpdate(
+          { user: viewerId, post: post._id, campaign: campaignId, context },
+          { $set: { deliveredAt, expiresAt } },
+          { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
+        );
+      }
       if (campaignUpdate.remainingReach <= 0) {
         await BoostCampaign.updateOne(
           { _id: campaignId },
@@ -374,6 +387,7 @@ async function recordBoostDelivery(posts, context = 'feed') {
       }
     }
   }));
+  return attributedPostIds;
 }
 
 async function processSingleManualBoostCampaign(campaign, { now = new Date(), actor } = {}) {

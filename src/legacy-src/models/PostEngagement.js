@@ -74,6 +74,8 @@ const postEngagementSchema = new mongoose.Schema({
 postEngagementSchema.index({ user: 1, createdAt: -1 });
 postEngagementSchema.index({ post: 1, eventType: 1, createdAt: -1 });
 postEngagementSchema.index({ author: 1, eventType: 1, createdAt: -1 });
+postEngagementSchema.index({ eventType: 1, source: 1, createdAt: -1, author: 1 });
+postEngagementSchema.index({ author: 1, createdAt: -1, eventType: 1, source: 1 });
 postEngagementSchema.index(
   { user: 1, post: 1, eventType: 1, context: 1 },
   {

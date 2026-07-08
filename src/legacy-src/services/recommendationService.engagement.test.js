@@ -245,8 +245,21 @@ async function run() {
       'utf8'
     );
     assert(
-      controllerSource.includes("return isActiveBoost(post) ? 'boost' : 'organic';"),
-      'post attribution must be derived from server-owned boost state'
+      controllerSource.includes('BoostDeliveryAttribution.exists({'),
+      'boost attribution must require a server-authored delivery proof'
+    );
+    assert(
+      controllerSource.includes("expiresAt: { $gt: new Date() }"),
+      'expired boost delivery proof must not classify engagement as boosted'
+    );
+    assert(
+      controllerSource.includes("return proof ? { source: 'boost', campaignId } : { source: 'organic', campaignId: null }"),
+      'no valid server proof must default attribution to organic'
+    );
+    assert.strictEqual(
+      controllerSource.includes('req.body?.source'),
+      false,
+      'client-provided source must not control monetization attribution'
     );
   } finally {
     PostEngagement.collection.updateOne = originalUpdateOne;

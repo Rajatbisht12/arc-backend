@@ -15,7 +15,10 @@ const PaymentTransaction = require('../models/PaymentTransaction');
 const AdminAuditLog = require('../models/AdminAuditLog');
 const MonetizationApplication = require('../models/MonetizationApplication');
 const CreatorBankDetails = require('../models/CreatorBankDetails');
+const CreatorBankDetailsHistory = require('../models/CreatorBankDetailsHistory');
 const CreatorPayout = require('../models/CreatorPayout');
+const CreatorPayoutHistory = require('../models/CreatorPayoutHistory');
+const CreatorDisbursementReservation = require('../models/CreatorDisbursementReservation');
 const EarningsSnapshot = require('../models/EarningsSnapshot');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const PostEngagement = require('../models/PostEngagement');
@@ -42,6 +45,11 @@ const {
   processSingleManualBoostCampaign
 } = require('../services/boostService');
 const log = require('../utils/logger');
+const {
+  FINANCIAL_TRANSACTION_OPTIONS,
+  startFinancialSession,
+  maskedBankSnapshot
+} = require('../utils/financialTransactions');
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -686,14 +694,74 @@ const deleteUser = async (req, res) => {
       });
     }
 
+    // Financial records must retain their owner reference. Administrators can
+    // deactivate the account instead of hard-deleting a creator with payout or
+    // withdrawal history.
     // Resolve owned recruitment IDs before deleting the account so dependent
     // applications cannot survive as broken references.
     const ownedRecruitmentIds = await TeamRecruitment.distinct('_id', { team: userId });
 
+    let deletionSession;
+    try {
+      deletionSession = await startFinancialSession();
+      await deletionSession.withTransaction(async () => {
+        const hasPayoutHistory = await CreatorPayout.exists({ user: userId }).session(deletionSession);
+        const hasWithdrawalHistory = await WithdrawalRequest.exists({ user: userId }).session(deletionSession);
+        if (hasPayoutHistory || hasWithdrawalHistory) {
+          throw Object.assign(new Error('This account has financial payout history and cannot be hard deleted. Deactivate the account instead.'), { code: 'FINANCIAL_RECORD_RETENTION_REQUIRED' });
+        }
+        const bank = await CreatorBankDetails.findOne({ user: userId }).session(deletionSession).lean();
+        if (bank?.activePayoutLocks?.length || bank?.activeWithdrawalLocks?.length) {
+          throw Object.assign(new Error('This account has an active payout bank reservation and cannot be hard deleted.'), { code: 'FINANCIAL_RECORD_RETENTION_REQUIRED' });
+        }
+        if (bank) {
+          await CreatorBankDetailsHistory.create([{
+            bankDetails: bank._id,
+            user: userId,
+            action: 'deleted',
+            actor: {
+              actorKey: req.user?._id ? `user:${String(req.user._id)}` : `hardcoded:${String(req.user?.username || 'admin').toLowerCase()}`,
+              username: req.user?.username || 'admin',
+              role: req.user?.adminRole || (req.user?.isSuperUser ? 'super_admin' : 'admin'),
+              type: 'admin'
+            },
+            previous: {
+              accountHolderName: bank.accountHolderName,
+              bankName: bank.bankName,
+              lastFourDigits: bank.lastFourDigits || '',
+              ifsc: bank.ifsc || '',
+              swiftCode: bank.swiftCode || '',
+              country: bank.country || 'IN',
+              verificationStatus: bank.verificationStatus
+            },
+            next: null,
+            reason: 'User hard-deleted by administrator',
+            ip: String(req.ip || req.headers?.['x-forwarded-for'] || ''),
+            userAgent: req.get ? (req.get('user-agent') || '') : ''
+          }], { session: deletionSession });
+          const deletedBank = await CreatorBankDetails.deleteOne(
+            { _id: bank._id, 'activePayoutLocks.0': { $exists: false }, 'activeWithdrawalLocks.0': { $exists: false } },
+            { session: deletionSession }
+          );
+          if (deletedBank.deletedCount !== 1) {
+            throw Object.assign(new Error('Bank details became reserved while deleting this account.'), { code: 'FINANCIAL_RECORD_RETENTION_REQUIRED' });
+          }
+        }
+        const deletedUser = await User.deleteOne({ _id: userId }, { session: deletionSession });
+        if (deletedUser.deletedCount !== 1) throw Object.assign(new Error('User changed while being deleted.'), { code: 'USER_DELETE_CONFLICT' });
+      }, FINANCIAL_TRANSACTION_OPTIONS);
+    } catch (financialError) {
+      if (financialError?.code === 'FINANCIAL_RECORD_RETENTION_REQUIRED' || financialError?.code === 'USER_DELETE_CONFLICT') {
+        return res.status(409).json({ success: false, code: financialError.code, message: financialError.message });
+      }
+      throw financialError;
+    } finally {
+      if (deletionSession) await deletionSession.endSession().catch(() => null);
+    }
+
     // Delete user and recruitment-owned data, and remove the user from embedded
     // applicant/interest arrays owned by other accounts.
     await Promise.all([
-      User.findByIdAndDelete(userId),
       Post.deleteMany({ author: userId }),
       Message.deleteMany({ $or: [{ sender: userId }, { recipient: userId }] }),
       Notification.deleteMany({ $or: [{ recipient: userId }, { sender: userId }] }),
@@ -1043,11 +1111,8 @@ const sumPostEngagementViews = async (source, sinceDate = null) => {
 };
 
 const getCreatorStatsForUser = async (userId) => {
-  const [eligibility, bank, latestApplication, totalPayoutRows, pendingPayoutRows] = await Promise.all([
+  const [eligibility, latestApplication, totalPayoutRows, pendingPayoutRows] = await Promise.all([
     MonetizationEligibility.findOne({ user: userId }).lean(),
-    CreatorBankDetails.findOne({ user: userId })
-      .select('accountHolderName bankName ifsc swiftCode country lastFourDigits verificationStatus')
-      .lean(),
     MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 }).lean(),
     CreatorPayout.aggregate([
       { $match: { user: new mongoose.Types.ObjectId(userId), status: { $in: ['paid', 'completed'] } } },
@@ -1073,15 +1138,6 @@ const getCreatorStatsForUser = async (userId) => {
       appliedAt: latestApplication.appliedAt,
       reviewedAt: latestApplication.reviewedAt
     } : null,
-    bankDetails: bank ? {
-      accountHolderName: bank.accountHolderName,
-      bankName: bank.bankName,
-      ifsc: bank.ifsc,
-      swiftCode: bank.swiftCode,
-      country: bank.country,
-      lastFourDigits: bank.lastFourDigits,
-      verificationStatus: bank.verificationStatus
-    } : null,
     earnings: {
       paid: totalPayoutRows[0]?.amount || 0,
       pending: pendingPayoutRows[0]?.amount || 0
@@ -1089,9 +1145,9 @@ const getCreatorStatsForUser = async (userId) => {
   };
 };
 
-const recordMonetizationTimeline = async ({ applicationId, userId, action, actor, actorType = 'admin', reason = '', oldValue = null, newValue = null }) => {
+const recordMonetizationTimeline = async ({ applicationId, userId, action, actor, actorType = 'admin', reason = '', oldValue = null, newValue = null, session = null }) => {
   if (!applicationId || !userId || !action) return;
-  await MonetizationApplicationTimeline.create({
+  const entry = {
     application: applicationId,
     user: userId,
     action,
@@ -1100,7 +1156,27 @@ const recordMonetizationTimeline = async ({ applicationId, userId, action, actor
     reason,
     oldValue,
     newValue
-  });
+  };
+  if (session) return MonetizationApplicationTimeline.create([entry], { session });
+  return MonetizationApplicationTimeline.create(entry);
+};
+
+const CREATOR_CPM_MIN = 0.01;
+const CREATOR_CPM_MAX = 10000;
+
+const getOrCreateLatestMonetizationApplication = async ({ userId, status, adminId, reason, session }) => {
+  let application = await MonetizationApplication.findOne({ user: userId })
+    .sort({ appliedAt: -1, _id: -1 })
+    .session(session);
+  if (application) return { application, created: false };
+  const rows = await MonetizationApplication.create([{
+    user: userId,
+    status,
+    reviewedAt: new Date(),
+    reviewedBy: adminId || null,
+    adminRemark: String(reason || '').slice(0, 1000)
+  }], { session });
+  return { application: rows[0], created: true };
 };
 
 const csvEscape = (value) => {
@@ -1275,15 +1351,21 @@ const getCreatorAnalytics = async (req, res) => {
 const getCreatorBankDetailsForAdmin = async (req, res) => {
   try {
     const { userId } = req.params;
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ success: false, message: 'Invalid creator ID' });
     const [user, bank] = await Promise.all([
       User.findById(userId).select('username userType profile.displayName').lean(),
-      CreatorBankDetails.findOne({ user: userId }).lean()
+      CreatorBankDetails.findOne({ user: userId })
+        .select('+taxIdHash upiIdMasked paypalEmailMasked gstNumberMasked')
+        .lean()
     ]);
     if (!user) return res.status(404).json({ success: false, message: 'Creator not found' });
     if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Bank details are only available for individual creator accounts' });
     if (!bank) return res.status(404).json({ success: false, message: 'Bank details not found' });
 
-    res.locals.auditAfter = { userId, viewedCompleteBankDetails: true };
+    res.locals.auditAfter = { userId, viewedMaskedBankDetails: true };
+    res.setHeader('Deprecation', 'true');
+    res.setHeader('Link', '</api/admin/monetization/bank-details>; rel="successor-version"');
     res.json({
       success: true,
       data: {
@@ -1295,15 +1377,15 @@ const getCreatorBankDetailsForAdmin = async (req, res) => {
         bankDetails: {
           accountHolderName: bank.accountHolderName,
           bankName: bank.bankName,
-          accountNumber: CreatorBankDetails.decryptAccountNumber(bank.accountNumberEncrypted),
+          accountNumber: `•••• ${bank.lastFourDigits || '----'}`,
           ifsc: bank.ifsc,
           swiftCode: bank.swiftCode,
           branch: bank.branch,
-          upiId: bank.upiId,
-          paypalEmail: bank.paypalEmail,
+          upiId: bank.upiIdMasked || '',
+          paypalEmail: bank.paypalEmailMasked || '',
           country: bank.country,
-          panOrTaxId: bank.taxIdEncrypted ? CreatorBankDetails.decryptAccountNumber(bank.taxIdEncrypted) : '',
-          gstNumber: bank.gstNumber,
+          hasTaxId: Boolean(bank.taxIdHash),
+          gstNumber: bank.gstNumberMasked || '',
           verificationStatus: bank.verificationStatus,
           verifiedAt: bank.verifiedAt,
           updatedAt: bank.updatedAt
@@ -1428,38 +1510,42 @@ const getMonetizationApplications = async (req, res) => {
 };
 
 const approveMonetizationApplication = async (req, res) => {
+  let session;
   try {
     const { applicationId } = req.params;
-    const adminId = req.user._id;
-
-    const application = await MonetizationApplication.findById(applicationId);
-    if (!application) {
-      return res.status(404).json({ success: false, message: 'Application not found' });
-    }
-    if (application.status !== 'pending') {
-      return res.status(400).json({ success: false, message: 'Application is not pending' });
-    }
-
-    const before = application.toObject();
-    application.status = 'approved';
-    application.reviewedAt = new Date();
-    application.reviewedBy = adminId;
-    await application.save();
-
-    await User.findByIdAndUpdate(application.user, {
-      isCreator: true,
-      creatorMonetizationStatus: 'approved'
-    });
+    const adminId = req.user?._id || null;
+    const adminRemark = String(req.body?.adminRemark || '').trim().slice(0, 1000);
+    let application;
+    let before;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      const pending = await MonetizationApplication.findById(applicationId).session(session);
+      if (!pending) throw Object.assign(new Error('Application not found'), { statusCode: 404, code: 'APPLICATION_NOT_FOUND' });
+      if (pending.status !== 'pending') throw Object.assign(new Error('Application is not pending'), { statusCode: 409, code: 'APPLICATION_NOT_PENDING' });
+      const activePlayer = await User.findOne({ _id: pending.user, userType: 'player', isActive: true }).session(session);
+      if (!activePlayer) throw Object.assign(new Error('The application owner is not an active individual account.'), { statusCode: 409, code: 'CREATOR_ACCOUNT_NOT_ACTIVE' });
+      before = pending.toObject();
+      application = await MonetizationApplication.findOneAndUpdate(
+        { _id: pending._id, status: 'pending' },
+        { $set: { status: 'approved', reviewedAt: new Date(), reviewedBy: adminId, adminRemark } },
+        { new: true, runValidators: true, session }
+      );
+      if (!application) throw Object.assign(new Error('Application changed while it was being reviewed.'), { statusCode: 409, code: 'APPLICATION_REVIEW_CONFLICT' });
+      activePlayer.isCreator = true;
+      activePlayer.creatorMonetizationStatus = 'approved';
+      await activePlayer.save({ session });
+      await recordMonetizationTimeline({
+        applicationId: application._id,
+        userId: application.user,
+        action: 'approved',
+        actor: adminId,
+        reason: adminRemark,
+        oldValue: { status: before.status },
+        newValue: { status: application.status },
+        session
+      });
+    }, FINANCIAL_TRANSACTION_OPTIONS);
     await invalidateUserCache(application.user);
-    await recordMonetizationTimeline({
-      applicationId: application._id,
-      userId: application.user,
-      action: 'approved',
-      actor: adminId,
-      reason: req.body?.adminRemark || '',
-      oldValue: { status: before.status },
-      newValue: { status: application.status }
-    });
     res.locals.auditBefore = before;
     res.locals.auditAfter = application.toObject();
 
@@ -1467,7 +1553,12 @@ const approveMonetizationApplication = async (req, res) => {
       application.user,
       'Monetization Approved',
       'Your creator monetization application has been approved. You can now add bank details and start earning.',
-      { type: 'monetization_approved', applicationId: application._id }
+      {
+        type: 'monetization_approved',
+        applicationId: application._id,
+        customData: { notificationDedupeKey: `monetization-approved:${String(application._id)}` }
+      },
+      notificationEmail(EMAIL_INTENTS.ACCOUNT_LIFECYCLE, 'monetization_approved')
     );
 
     res.json({
@@ -1476,50 +1567,63 @@ const approveMonetizationApplication = async (req, res) => {
       data: { application: { _id: application._id, status: application.status } }
     });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
     log.error('Approve monetization error:', { error: String(error) });
     res.status(500).json({ success: false, message: 'Failed to approve', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
 const rejectMonetizationApplication = async (req, res) => {
+  let session;
   try {
     const { applicationId } = req.params;
     const { rejectionReason, cooldownDays = 30 } = req.body || {};
-    const adminId = req.user._id;
-
-    const application = await MonetizationApplication.findById(applicationId);
-    if (!application) {
-      return res.status(404).json({ success: false, message: 'Application not found' });
-    }
-    if (application.status !== 'pending') {
-      return res.status(400).json({ success: false, message: 'Application is not pending' });
-    }
-
-    const before = application.toObject();
+    const adminId = req.user?._id || null;
+    const normalizedReason = String(rejectionReason || '').trim().slice(0, 500);
+    if (normalizedReason.length < 3) return res.status(422).json({ success: false, code: 'REJECTION_REASON_REQUIRED', message: 'A rejection reason is required.' });
+    const normalizedCooldownDays = Math.min(365, Math.max(1, Number.parseInt(cooldownDays, 10) || 30));
     const reapplyAfter = new Date();
-    reapplyAfter.setDate(reapplyAfter.getDate() + (parseInt(cooldownDays) || 30));
-
-    application.status = 'rejected';
-    application.rejectionReason = rejectionReason || 'Your application did not meet our criteria.';
-    application.adminRemark = (req.body.adminRemark || '').slice(0, 1000);
-    application.reviewedAt = new Date();
-    application.reviewedBy = adminId;
-    application.reapplyAfter = reapplyAfter;
-    await application.save();
-    await User.findByIdAndUpdate(application.user, {
-      isCreator: false,
-      creatorMonetizationStatus: 'rejected'
-    });
+    reapplyAfter.setDate(reapplyAfter.getDate() + normalizedCooldownDays);
+    let application;
+    let before;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      const pending = await MonetizationApplication.findById(applicationId).session(session);
+      if (!pending) throw Object.assign(new Error('Application not found'), { statusCode: 404, code: 'APPLICATION_NOT_FOUND' });
+      if (pending.status !== 'pending') throw Object.assign(new Error('Application is not pending'), { statusCode: 409, code: 'APPLICATION_NOT_PENDING' });
+      const activePlayer = await User.findOne({ _id: pending.user, userType: 'player', isActive: true }).session(session);
+      if (!activePlayer) throw Object.assign(new Error('The application owner is not an active individual account.'), { statusCode: 409, code: 'CREATOR_ACCOUNT_NOT_ACTIVE' });
+      before = pending.toObject();
+      application = await MonetizationApplication.findOneAndUpdate(
+        { _id: pending._id, status: 'pending' },
+        { $set: {
+          status: 'rejected',
+          rejectionReason: normalizedReason,
+          adminRemark: String(req.body?.adminRemark || '').trim().slice(0, 1000),
+          reviewedAt: new Date(),
+          reviewedBy: adminId,
+          reapplyAfter
+        } },
+        { new: true, runValidators: true, session }
+      );
+      if (!application) throw Object.assign(new Error('Application changed while it was being reviewed.'), { statusCode: 409, code: 'APPLICATION_REVIEW_CONFLICT' });
+      activePlayer.isCreator = false;
+      activePlayer.creatorMonetizationStatus = 'rejected';
+      await activePlayer.save({ session });
+      await recordMonetizationTimeline({
+        applicationId: application._id,
+        userId: application.user,
+        action: 'rejected',
+        actor: adminId,
+        reason: normalizedReason,
+        oldValue: { status: before.status },
+        newValue: { status: application.status, reapplyAfter },
+        session
+      });
+    }, FINANCIAL_TRANSACTION_OPTIONS);
     await invalidateUserCache(application.user);
-    await recordMonetizationTimeline({
-      applicationId: application._id,
-      userId: application.user,
-      action: 'rejected',
-      actor: adminId,
-      reason: application.rejectionReason,
-      oldValue: { status: before.status },
-      newValue: { status: application.status, reapplyAfter }
-    });
     res.locals.auditBefore = before;
     res.locals.auditAfter = application.toObject();
 
@@ -1536,46 +1640,220 @@ const rejectMonetizationApplication = async (req, res) => {
       data: { application: { _id: application._id, status: application.status, reapplyAfter } }
     });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
     log.error('Reject monetization error:', { error: String(error) });
     res.status(500).json({ success: false, message: 'Failed to reject', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
 const holdCreatorPayout = async (req, res) => {
+  let session;
   try {
     const { userId } = req.params;
-    const { reason } = req.body || {};
-
-    const snapshot = await EarningsSnapshot.findOneAndUpdate(
-      { user: userId, held: false },
-      { held: true, holdReason: reason || 'Under review' },
-      { new: true }
-    );
-    if (snapshot) {
-      await CreatorPayout.updateMany(
-        { user: userId, status: { $in: ['pending', 'approved', 'processing'] } },
-        { status: 'held', heldReason: reason || 'Under review' }
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ success: false, code: 'INVALID_USER_ID', message: 'Invalid user ID.' });
+    const reason = String(req.body?.reason || 'Under review').trim().slice(0, 500) || 'Under review';
+    let previousSnapshot;
+    let affectedPayouts = 0;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      const approvedCreator = await User.exists({
+        _id: userId,
+        userType: 'player',
+        isCreator: true,
+        creatorMonetizationStatus: 'approved',
+        isActive: true
+      }).session(session);
+      if (!approvedCreator) throw Object.assign(new Error('Active approved creator not found.'), { statusCode: 409, code: 'CREATOR_MONETIZATION_NOT_ACTIVE' });
+      previousSnapshot = await EarningsSnapshot.findOne({ user: userId }).sort({ createdAt: -1 }).session(session).lean();
+      if (!previousSnapshot) throw Object.assign(new Error('Creator earnings snapshot not found.'), { statusCode: 404 });
+      const activeWithdrawal = await WithdrawalRequest.exists({
+        user: userId,
+        status: { $in: ['pending', 'approved', 'processing'] }
+      }).session(session);
+      if (activeWithdrawal) {
+        throw Object.assign(new Error('Resolve the active withdrawal before placing this creator on payout hold.'), {
+          statusCode: 409,
+          code: 'ACTIVE_WITHDRAWAL_REQUIRES_RESOLUTION'
+        });
+      }
+      const activePayouts = await CreatorPayout.find({
+        user: userId,
+        status: { $in: ['pending', 'approved', 'processing'] }
+      }).session(session);
+      const activePayoutIds = activePayouts.map((payout) => payout._id);
+      // A global creator hold writes every currently payable snapshot.
+      // Reservation transactions write those same rows, closing the race.
+      await EarningsSnapshot.updateMany(
+        {
+          user: userId,
+          held: { $ne: true },
+          $or: [
+            { disbursementId: null },
+            ...(activePayoutIds.length ? [{ disbursementId: { $in: activePayoutIds } }] : [])
+          ]
+        },
+        { $set: { held: true, holdReason: reason } },
+        { session }
       );
-    }
-    res.locals.auditBefore = { userId, reason };
-    res.locals.auditAfter = { userId, status: 'held' };
+      for (const payout of activePayouts) {
+        const previousStatus = payout.status;
+        const nextVersion = Number(payout.version || 0) + 1;
+        const result = await CreatorPayout.updateOne(
+          { _id: payout._id, status: previousStatus, version: Number(payout.version || 0) === 0 ? { $in: [0, null] } : payout.version },
+          { $set: { status: 'held', preHoldStatus: previousStatus, heldReason: reason }, $inc: { version: 1 } },
+          { runValidators: true, session }
+        );
+        if (result.matchedCount !== 1) throw Object.assign(new Error('A payout changed while the hold was being applied.'), { statusCode: 409, code: 'PAYOUT_VERSION_CONFLICT' });
+        const amountMinor = Number.isSafeInteger(payout.amountMinor) ? payout.amountMinor : Math.round(Number(payout.amount || 0) * 100);
+        await CreatorPayoutHistory.create([{
+          payout: payout._id,
+          user: payout.user,
+          payoutCycle: payout.payoutCycle,
+          action: 'held',
+          previousStatus,
+          newStatus: 'held',
+          amount: payout.amount,
+          amountMinor,
+          currency: payout.currency || 'INR',
+          idempotencyKey: `creator-hold:${String(payout._id)}:v${nextVersion}`,
+          actor: {
+            actorKey: req.user?._id ? `user:${String(req.user._id)}` : `hardcoded:${String(req.user?.username || 'admin').toLowerCase()}`,
+            user: req.user?._id || null,
+            username: req.user?.username || 'admin',
+            role: req.user?.adminRole || (req.user?.isSuperUser ? 'super_admin' : 'admin')
+          },
+          reason,
+          ip: String(req.ip || req.headers?.['x-forwarded-for'] || ''),
+          userAgent: req.get ? (req.get('user-agent') || '') : '',
+          metadata: { source: 'creator_global_hold' }
+        }], { session });
+        affectedPayouts += 1;
+      }
+    }, FINANCIAL_TRANSACTION_OPTIONS);
+    res.locals.auditBefore = { userId, held: Boolean(previousSnapshot?.held), reason: previousSnapshot?.holdReason || '' };
+    res.locals.auditAfter = { userId, status: 'held', affectedPayouts, reason };
 
     await createSystemNotification(
       userId,
       'Payout On Hold',
-      reason || 'Your payout is under review. Our team will contact you if needed.',
-      { type: 'payout_held' },
-      notificationEmail(EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'payout_held')
-    );
+      reason,
+      { type: 'payout_held' }
+    ).catch((notificationError) => log.error('Payout hold notification failed after commit', { userId, error: String(notificationError) }));
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Payout held for creator.',
-      data: { userId }
+      data: { userId, affectedPayouts }
     });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
     log.error('Hold payout error:', { error: String(error) });
-    res.status(500).json({ success: false, message: 'Failed to hold payout', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
+    return res.status(500).json({ success: false, message: 'Failed to hold payout' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
+  }
+};
+
+const releaseCreatorPayoutHold = async (req, res) => {
+  let session;
+  try {
+    const { userId } = req.params;
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ success: false, code: 'INVALID_USER_ID', message: 'Invalid user ID.' });
+    const reason = String(req.body?.reason || 'Payout hold released').trim().slice(0, 500) || 'Payout hold released';
+    let heldSnapshots = 0;
+    let heldPayouts = [];
+    let payoutsCreated = 0;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      const activeWithdrawal = await WithdrawalRequest.exists({
+        user: userId,
+        status: { $in: ['pending', 'approved', 'processing'] }
+      }).session(session);
+      if (activeWithdrawal) {
+        throw Object.assign(new Error('Resolve the active withdrawal before releasing this payout hold.'), {
+          statusCode: 409,
+          code: 'ACTIVE_WITHDRAWAL_REQUIRES_RESOLUTION'
+        });
+      }
+      const approvedCreator = await User.exists({
+        _id: userId,
+        isCreator: true,
+        creatorMonetizationStatus: 'approved',
+        isActive: true
+      }).session(session);
+      if (!approvedCreator) {
+        throw Object.assign(new Error('Resume creator monetization before releasing the payout hold.'), {
+          statusCode: 409,
+          code: 'CREATOR_MONETIZATION_NOT_ACTIVE'
+        });
+      }
+      heldPayouts = await CreatorPayout.find({ user: userId, status: 'held' }).session(session);
+      const snapshotsResult = await EarningsSnapshot.updateMany(
+        { user: userId, held: true },
+        { $set: { held: false, holdReason: '' } },
+        { session }
+      );
+      heldSnapshots = snapshotsResult.modifiedCount || 0;
+      for (const payout of heldPayouts) {
+        const nextStatus = ['pending', 'approved', 'processing'].includes(payout.preHoldStatus)
+          ? payout.preHoldStatus
+          : 'pending';
+        const nextVersion = Number(payout.version || 0) + 1;
+        const result = await CreatorPayout.updateOne(
+          { _id: payout._id, status: 'held', version: Number(payout.version || 0) === 0 ? { $in: [0, null] } : payout.version },
+          { $set: { status: nextStatus, preHoldStatus: '', heldReason: '' }, $inc: { version: 1 } },
+          { runValidators: true, session }
+        );
+        if (result.matchedCount !== 1) throw Object.assign(new Error('A payout changed while the hold was being released.'), { statusCode: 409, code: 'PAYOUT_VERSION_CONFLICT' });
+        const amountMinor = Number.isSafeInteger(payout.amountMinor) ? payout.amountMinor : Math.round(Number(payout.amount || 0) * 100);
+        await CreatorPayoutHistory.create([{
+          payout: payout._id,
+          user: payout.user,
+          payoutCycle: payout.payoutCycle,
+          action: 'resumed',
+          previousStatus: 'held',
+          newStatus: nextStatus,
+          amount: payout.amount,
+          amountMinor,
+          currency: payout.currency || 'INR',
+          idempotencyKey: `creator-hold-release:${String(payout._id)}:v${nextVersion}`,
+          actor: {
+            actorKey: req.user?._id ? `user:${String(req.user._id)}` : `hardcoded:${String(req.user?.username || 'admin').toLowerCase()}`,
+            user: req.user?._id || null,
+            username: req.user?.username || 'admin',
+            role: req.user?.adminRole || (req.user?.isSuperUser ? 'super_admin' : 'admin')
+          },
+          reason,
+          ip: String(req.ip || req.headers?.['x-forwarded-for'] || ''),
+          userAgent: req.get ? (req.get('user-agent') || '') : '',
+          metadata: { source: 'creator_global_hold_release' }
+        }], { session });
+      }
+      if (!heldSnapshots && !heldPayouts.length) {
+        throw Object.assign(new Error('No payout hold exists for this creator.'), { statusCode: 409, code: 'PAYOUT_NOT_HELD' });
+      }
+    }, FINANCIAL_TRANSACTION_OPTIONS);
+    res.locals.auditBefore = { userId, held: true };
+    res.locals.auditAfter = { userId, held: false, heldSnapshots, payoutsResumed: heldPayouts.length, payoutsCreated, reason };
+    await createSystemNotification(
+      userId,
+      'Payout Hold Released',
+      'Your creator payout hold has been released. Pending payouts will be reviewed again.',
+      { type: 'payout_hold_released' }
+    ).catch((notificationError) => log.error('Payout hold release notification failed after commit', { userId, error: String(notificationError) }));
+    return res.json({
+      success: true,
+      message: 'Payout hold released.',
+      data: { userId, heldSnapshots, payoutsResumed: heldPayouts.length, payoutsCreated }
+    });
+  } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
+    log.error('Release payout hold error:', { error: String(error) });
+    return res.status(500).json({ success: false, message: 'Failed to release payout hold' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
@@ -1614,128 +1892,231 @@ const getApprovedCreators = async (req, res) => {
 
 // Task 5.2: Revoke creator monetization
 const revokeMonetization = async (req, res) => {
+  let session;
   try {
     const { userId } = req.params;
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Only individual user accounts can use creator monetization' });
-    if (!user.isCreator) return res.status(400).json({ success: false, message: 'User is not an approved creator' });
-
-    const before = user.toObject();
-    user.isCreator = false;
-    user.creatorMonetizationStatus = 'disabled';
-    await user.save();
-    const application = await MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 });
-    if (application) {
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ success: false, code: 'INVALID_USER_ID', message: 'Valid user ID is required.' });
+    const adminId = req.user?._id || null;
+    const reason = String(req.body?.reason || 'Disabled by admin').trim().slice(0, 500) || 'Disabled by admin';
+    let user;
+    let before;
+    let application;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      user = await User.findOne({ _id: userId, userType: 'player', isActive: true }).session(session);
+      if (!user) throw Object.assign(new Error('Active individual creator account not found.'), { statusCode: 404, code: 'CREATOR_NOT_FOUND' });
+      if (!user.isCreator || user.creatorMonetizationStatus !== 'approved') {
+        throw Object.assign(new Error('User is not an approved creator.'), { statusCode: 409, code: 'CREATOR_NOT_APPROVED' });
+      }
+      before = user.toObject();
+      const applicationResult = await getOrCreateLatestMonetizationApplication({
+        userId,
+        status: 'disabled',
+        adminId,
+        reason,
+        session
+      });
+      application = applicationResult.application;
+      const previousApplicationStatus = applicationResult.created ? null : application.status;
+      user.isCreator = false;
+      user.creatorMonetizationStatus = 'disabled';
       application.status = 'disabled';
+      application.adminRemark = reason;
       application.reviewedAt = new Date();
-      application.reviewedBy = req.user._id;
-      await application.save();
+      application.reviewedBy = adminId;
+      await user.save({ session });
+      await application.save({ session });
       await recordMonetizationTimeline({
         applicationId: application._id,
         userId,
         action: 'disabled',
-        actor: req.user._id,
-        reason: req.body?.reason || 'Disabled by admin',
-        oldValue: { isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus },
-        newValue: { isCreator: false, creatorMonetizationStatus: 'disabled' }
+        actor: adminId,
+        reason,
+        oldValue: {
+          isCreator: before.isCreator,
+          creatorMonetizationStatus: before.creatorMonetizationStatus,
+          applicationStatus: previousApplicationStatus
+        },
+        newValue: { isCreator: false, creatorMonetizationStatus: 'disabled', applicationStatus: 'disabled' },
+        session
       });
-    }
-    await invalidateUserCache(userId);
+    }, FINANCIAL_TRANSACTION_OPTIONS);
+    await invalidateUserCache(userId).catch((cacheError) => log.error('Creator cache invalidation failed after committed revocation', { userId, error: String(cacheError) }));
     res.locals.auditBefore = { userId, isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus };
-    res.locals.auditAfter = { userId, isCreator: user.isCreator, creatorMonetizationStatus: user.creatorMonetizationStatus };
+    res.locals.auditAfter = { userId, isCreator: false, creatorMonetizationStatus: 'disabled', reason };
 
     await createSystemNotification(
       userId,
       'Creator Monetization Revoked',
       'Your creator monetization access has been revoked by the platform. Please contact support if you have questions.',
-      { type: 'monetization_revoked' }
-    );
+      { type: 'monetization_revoked', applicationId: application._id }
+    ).catch((notificationError) => log.error('Monetization revocation notification failed after commit', { userId, error: String(notificationError) }));
 
-    res.json({ success: true, message: 'Monetization revoked successfully' });
+    return res.json({ success: true, message: 'Monetization revoked successfully' });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
     log.error('Revoke monetization error:', { error: String(error) });
-    res.status(500).json({ success: false, message: 'Failed to revoke monetization' });
+    return res.status(500).json({ success: false, message: 'Failed to revoke monetization' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
 // Task 5.3: Grant creator monetization
 const grantMonetization = async (req, res) => {
+  let session;
   try {
     const { userId } = req.params;
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Only individual user accounts can use creator monetization' });
-
-    const before = user.toObject();
-    user.isCreator = true;
-    user.creatorMonetizationStatus = 'approved';
-    await user.save();
-    let application = await MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 });
-    if (!application) {
-      application = await MonetizationApplication.create({
-        user: userId,
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ success: false, code: 'INVALID_USER_ID', message: 'Valid user ID is required.' });
+    const adminId = req.user?._id || null;
+    const reason = String(req.body?.reason || 'Granted by admin').trim().slice(0, 500) || 'Granted by admin';
+    let user;
+    let before;
+    let application;
+    let timelineEntry;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      user = await User.findOne({ _id: userId, userType: 'player', isActive: true }).session(session);
+      if (!user) throw Object.assign(new Error('Active individual account not found.'), { statusCode: 404, code: 'CREATOR_NOT_FOUND' });
+      if (user.isCreator && user.creatorMonetizationStatus === 'approved') {
+        throw Object.assign(new Error('Creator monetization is already approved.'), { statusCode: 409, code: 'MONETIZATION_ALREADY_APPROVED' });
+      }
+      before = user.toObject();
+      const applicationResult = await getOrCreateLatestMonetizationApplication({
+        userId,
         status: 'approved',
-        reviewedAt: new Date(),
-        reviewedBy: req.user._id,
-        adminRemark: req.body?.reason || 'Granted by admin'
+        adminId,
+        reason,
+        session
       });
-    } else {
+      application = applicationResult.application;
+      const previousApplicationStatus = applicationResult.created ? null : application.status;
+      user.isCreator = true;
+      user.creatorMonetizationStatus = 'approved';
       application.status = 'approved';
+      application.rejectionReason = '';
+      application.reapplyAfter = undefined;
+      application.adminRemark = reason;
       application.reviewedAt = new Date();
-      application.reviewedBy = req.user._id;
-      await application.save();
-    }
-    await recordMonetizationTimeline({
-      applicationId: application._id,
-      userId,
-      action: 'reactivated',
-      actor: req.user._id,
-      reason: req.body?.reason || 'Granted by admin',
-      oldValue: { isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus },
-      newValue: { isCreator: true, creatorMonetizationStatus: 'approved' }
-    });
-    await invalidateUserCache(userId);
+      application.reviewedBy = adminId;
+      await user.save({ session });
+      await application.save({ session });
+      const rows = await recordMonetizationTimeline({
+        applicationId: application._id,
+        userId,
+        action: applicationResult.created || previousApplicationStatus === 'approved' ? 'approved' : 'reactivated',
+        actor: adminId,
+        reason,
+        oldValue: {
+          isCreator: before.isCreator,
+          creatorMonetizationStatus: before.creatorMonetizationStatus,
+          applicationStatus: previousApplicationStatus
+        },
+        newValue: { isCreator: true, creatorMonetizationStatus: 'approved', applicationStatus: 'approved' },
+        session
+      });
+      timelineEntry = Array.isArray(rows) ? rows[0] : rows;
+    }, FINANCIAL_TRANSACTION_OPTIONS);
+    await invalidateUserCache(userId).catch((cacheError) => log.error('Creator cache invalidation failed after committed grant', { userId, error: String(cacheError) }));
     res.locals.auditBefore = { userId, isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus };
-    res.locals.auditAfter = { userId, isCreator: user.isCreator, creatorMonetizationStatus: user.creatorMonetizationStatus };
+    res.locals.auditAfter = { userId, isCreator: true, creatorMonetizationStatus: 'approved', reason };
 
     await createSystemNotification(
       userId,
       'Creator Monetization Granted',
       'Congratulations! Creator monetization has been enabled for your account. You can now add bank details and start earning.',
-      { type: 'monetization_granted' }
-    );
+      {
+        type: 'monetization_approved',
+        applicationId: application._id,
+        customData: { notificationDedupeKey: `monetization-approved:${String(application._id)}:${String(timelineEntry?._id || application.reviewedAt?.getTime() || '')}` }
+      },
+      notificationEmail(EMAIL_INTENTS.ACCOUNT_LIFECYCLE, 'monetization_approved')
+    ).catch((notificationError) => log.error('Monetization grant notification failed after commit', { userId, error: String(notificationError) }));
 
-    res.json({ success: true, message: 'Monetization granted successfully' });
+    return res.json({ success: true, message: 'Monetization granted successfully' });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
     log.error('Grant monetization error:', { error: String(error) });
-    res.status(500).json({ success: false, message: 'Failed to grant monetization' });
+    return res.status(500).json({ success: false, message: 'Failed to grant monetization' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
 // Task 5.4: Set and get per-creator CPM
 const setCreatorCpm = async (req, res) => {
+  let session;
   try {
     const { userId } = req.params;
-    const { cpm } = req.body;
-
-    if (!cpm || typeof cpm !== 'number' || cpm <= 0) {
-      return res.status(400).json({ success: false, message: 'CPM must be a positive number' });
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ success: false, code: 'INVALID_USER_ID', message: 'Valid user ID is required.' });
+    const rawCpm = req.body?.cpm;
+    const cpm = Number(rawCpm);
+    if (typeof rawCpm !== 'number' || !Number.isFinite(cpm) || cpm < CREATOR_CPM_MIN || cpm > CREATOR_CPM_MAX) {
+      return res.status(422).json({
+        success: false,
+        code: 'INVALID_CREATOR_CPM',
+        message: `CPM must be a finite number between ₹${CREATOR_CPM_MIN.toFixed(2)} and ₹${CREATOR_CPM_MAX.toFixed(2)}.`
+      });
     }
+    const normalizedCpm = Math.round(cpm * 100) / 100;
+    const adminId = req.user?._id || null;
+    const reason = String(req.body?.reason || 'Creator CPM updated by admin').trim().slice(0, 500) || 'Creator CPM updated by admin';
+    let user;
+    let application;
+    let previousCpm;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      user = await User.findOne({
+        _id: userId,
+        userType: 'player',
+        isActive: true,
+        isCreator: true,
+        creatorMonetizationStatus: 'approved'
+      }).session(session);
+      if (!user) throw Object.assign(new Error('Active approved creator not found.'), { statusCode: 409, code: 'CREATOR_MONETIZATION_NOT_ACTIVE' });
+      previousCpm = user.creatorCpm;
+      const applicationResult = await getOrCreateLatestMonetizationApplication({
+        userId,
+        status: 'approved',
+        adminId,
+        reason,
+        session
+      });
+      application = applicationResult.application;
+      const previousApplicationStatus = applicationResult.created ? null : application.status;
+      user.creatorCpm = normalizedCpm;
+      application.status = 'approved';
+      application.adminRemark = reason;
+      application.reviewedAt = new Date();
+      application.reviewedBy = adminId;
+      await user.save({ session });
+      await application.save({ session });
+      await recordMonetizationTimeline({
+        applicationId: application._id,
+        userId,
+        action: 'cpm_updated',
+        actor: adminId,
+        reason,
+        oldValue: { creatorCpm: previousCpm, applicationStatus: previousApplicationStatus },
+        newValue: { creatorCpm: normalizedCpm, applicationStatus: 'approved' },
+        session
+      });
+    }, FINANCIAL_TRANSACTION_OPTIONS);
+    await invalidateUserCache(userId).catch((cacheError) => log.error('Creator cache invalidation failed after committed CPM update', { userId, error: String(cacheError) }));
+    res.locals.auditBefore = { userId, creatorCpm: previousCpm };
+    res.locals.auditAfter = { userId, creatorCpm: normalizedCpm, reason };
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    const before = { userId, creatorCpm: user.creatorCpm };
-    user.creatorCpm = cpm;
-    await user.save();
-    res.locals.auditBefore = before;
-    res.locals.auditAfter = { userId, creatorCpm: user.creatorCpm };
-
-    res.json({ success: true, message: 'CPM updated successfully', data: { userId, cpm } });
+    return res.json({
+      success: true,
+      message: 'CPM updated successfully',
+      data: { userId, cpm: normalizedCpm, min: CREATOR_CPM_MIN, max: CREATOR_CPM_MAX }
+    });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
     log.error('Set creator CPM error:', { error: String(error) });
-    res.status(500).json({ success: false, message: 'Failed to set CPM' });
+    return res.status(500).json({ success: false, message: 'Failed to set CPM' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
@@ -1777,14 +2158,12 @@ const listWithdrawalRequests = async (req, res) => {
       .skip((page - 1) * limit)
       .lean();
 
-    // Enrich with bank details
-    const enriched = await Promise.all(requests.map(async (r) => {
-      const bank = r.user?._id
-        ? await CreatorBankDetails.findOne({ user: r.user._id })
-            .select('accountHolderName bankName lastFourDigits ifsc verificationStatus')
-            .lean()
-        : null;
-      return { ...r, bankDetails: bank || null };
+    const enriched = requests.map((request) => ({
+      ...request,
+      bankDetails: request.bankDetailsSnapshot?.capturedAt
+        ? { ...request.bankDetailsSnapshot, verificationStatus: 'verified', source: 'withdrawal_snapshot' }
+        : null,
+      bankDetailsUnavailableReason: request.bankDetailsSnapshot?.capturedAt ? null : 'legacy_destination_unavailable'
     }));
 
     const total = await WithdrawalRequest.countDocuments(query);
@@ -1806,67 +2185,224 @@ const listWithdrawalRequests = async (req, res) => {
 
 // Task 5.6: Approve and reject withdrawal requests
 const approveWithdrawalRequest = async (req, res) => {
+  let session;
   try {
     const { id } = req.params;
     const { bankReference } = req.body || {};
-    const adminId = req.user._id;
-
-    const request = await WithdrawalRequest.findById(id);
-    if (!request) return res.status(404).json({ success: false, message: 'Withdrawal request not found' });
-    if (request.status !== 'pending') return res.status(400).json({ success: false, message: 'Request is not pending' });
-
-    request.status = 'approved';
-    request.bankReference = bankReference || '';
-    request.paidAt = new Date();
-    request.reviewedBy = adminId;
-    await request.save();
+    const adminId = req.user?._id;
+    let request;
+    let before;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      const pending = await WithdrawalRequest.findById(id).session(session);
+      if (!pending) throw Object.assign(new Error('Withdrawal request not found'), { statusCode: 404 });
+      if (!['pending', 'approved'].includes(pending.status)) throw Object.assign(new Error('Request is not pending or awaiting legacy processing'), { statusCode: 409 });
+      const approvedCreator = await User.exists({
+        _id: pending.user,
+        isCreator: true,
+        creatorMonetizationStatus: 'approved',
+        isActive: true
+      }).session(session);
+      if (!approvedCreator) throw Object.assign(new Error('Creator monetization is not active.'), { statusCode: 409, code: 'CREATOR_MONETIZATION_NOT_ACTIVE' });
+      if (!pending.bankDetails || !pending.bankDetailsSnapshot?.capturedAt || !pending.bankDetailsVersion) {
+        throw Object.assign(new Error('This legacy withdrawal has no provable bank reservation. Reconcile it before approval.'), { statusCode: 409, code: 'WITHDRAWAL_BANK_RESERVATION_REQUIRED' });
+      }
+      const reservedBank = await CreatorBankDetails.exists({
+        _id: pending.bankDetails,
+        user: pending.user,
+        verificationStatus: 'verified',
+        version: pending.bankDetailsVersion,
+        activeWithdrawalLocks: pending._id
+      }).session(session);
+      if (!reservedBank) {
+        throw Object.assign(new Error('The verified bank reservation is no longer valid.'), { statusCode: 409, code: 'WITHDRAWAL_BANK_RESERVATION_INVALID' });
+      }
+      const reviewClaim = await EarningsSnapshot.updateOne(
+        { user: pending.user, payoutCycle: pending.payoutCycle, held: { $ne: true }, disbursementId: pending._id },
+        { $set: { disbursementReviewedAt: new Date() } },
+        { session }
+      );
+      if (reviewClaim.matchedCount !== 1) {
+        throw Object.assign(new Error('The withdrawal earnings are held or no longer reserved.'), { statusCode: 409, code: 'WITHDRAWAL_EARNINGS_UNAVAILABLE' });
+      }
+      before = pending.toObject();
+      request = await WithdrawalRequest.findOneAndUpdate(
+        { _id: pending._id, status: pending.status },
+        { $set: {
+          status: 'processing',
+          bankReference: String(bankReference || '').trim().slice(0, 100),
+          processedAt: new Date(),
+          reviewedBy: adminId
+        } },
+        { new: true, runValidators: true, session }
+      );
+      if (!request) throw Object.assign(new Error('Withdrawal changed while it was being approved.'), { statusCode: 409 });
+    }, FINANCIAL_TRANSACTION_OPTIONS);
+    res.locals.auditBefore = before;
+    res.locals.auditAfter = request.toObject();
 
     await createSystemNotification(
       request.user,
       'Withdrawal Request Approved',
-      `Your withdrawal request has been approved${bankReference ? ` (Reference: ${bankReference})` : ''}. The amount will be credited to your bank account.`,
-      { type: 'withdrawal_approved', requestId: request._id },
-      notificationEmail(EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'withdrawal_approved')
-    );
+      `Your withdrawal request has been approved and is processing${bankReference ? ` (Reference: ${String(bankReference).trim().slice(0, 100)})` : ''}.`,
+      { type: 'withdrawal_approved', requestId: request._id }
+    ).catch((notificationError) => log.error('Withdrawal approval notification failed after commit', { requestId: String(request._id), error: String(notificationError) }));
 
-    res.json({ success: true, message: 'Withdrawal request approved', data: { _id: request._id, status: request.status } });
+    res.json({ success: true, message: 'Withdrawal request approved and processing', data: { _id: request._id, status: request.status } });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
     log.error('Approve withdrawal error:', { error: String(error) });
-    res.status(500).json({ success: false, message: 'Failed to approve withdrawal request' });
+    return res.status(500).json({ success: false, message: 'Failed to approve withdrawal request' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
 const rejectWithdrawalRequest = async (req, res) => {
+  let session;
   try {
     const { id } = req.params;
-    const { rejectionReason } = req.body || {};
-    const adminId = req.user._id;
-
-    if (!rejectionReason) return res.status(400).json({ success: false, message: 'rejectionReason is required' });
-
-    const request = await WithdrawalRequest.findById(id);
-    if (!request) return res.status(404).json({ success: false, message: 'Withdrawal request not found' });
-    if (request.status !== 'pending') return res.status(400).json({ success: false, message: 'Request is not pending' });
-
-    request.status = 'rejected';
-    request.rejectionReason = rejectionReason;
-    request.reviewedBy = adminId;
-    await request.save();
+    const normalizedReason = String(req.body?.rejectionReason || '').trim();
+    const adminId = req.user?._id;
+    if (!normalizedReason) return res.status(422).json({ success: false, message: 'rejectionReason is required' });
+    let request;
+    let before;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      const pending = await WithdrawalRequest.findById(id).session(session);
+      if (!pending) throw Object.assign(new Error('Withdrawal request not found'), { statusCode: 404 });
+      if (pending.status !== 'pending') throw Object.assign(new Error('Request is not pending'), { statusCode: 409 });
+      before = pending.toObject();
+      request = await WithdrawalRequest.findOneAndUpdate(
+        { _id: pending._id, status: 'pending' },
+        { $set: { status: 'rejected', rejectionReason: normalizedReason.slice(0, 500), reviewedBy: adminId } },
+        { new: true, runValidators: true, session }
+      );
+      if (!request) throw Object.assign(new Error('Withdrawal changed while it was being rejected.'), { statusCode: 409 });
+      if (pending.bankDetails) {
+        await CreatorBankDetails.updateOne(
+          { _id: pending.bankDetails },
+          { $pull: { activeWithdrawalLocks: pending._id } },
+          { session }
+        );
+      }
+    }, FINANCIAL_TRANSACTION_OPTIONS);
+    res.locals.auditBefore = before;
+    res.locals.auditAfter = request.toObject();
 
     await createSystemNotification(
       request.user,
       'Withdrawal Request Rejected',
-      `Your withdrawal request has been rejected. Reason: ${rejectionReason}`,
-      { type: 'withdrawal_rejected', requestId: request._id },
-      notificationEmail(EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, 'withdrawal_rejected')
-    );
+      `Your withdrawal request has been rejected. Reason: ${normalizedReason}`,
+      { type: 'withdrawal_rejected', requestId: request._id }
+    ).catch((notificationError) => log.error('Withdrawal rejection notification failed after commit', { requestId: String(request._id), error: String(notificationError) }));
 
     res.json({ success: true, message: 'Withdrawal request rejected', data: { _id: request._id, status: request.status } });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
     log.error('Reject withdrawal error:', { error: String(error) });
-    res.status(500).json({ success: false, message: 'Failed to reject withdrawal request' });
+    return res.status(500).json({ success: false, message: 'Failed to reject withdrawal request' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
+
+const transitionProcessingWithdrawal = async (req, res, nextStatus) => {
+  let session;
+  try {
+    const bankReference = String(req.body?.bankReference || '').trim().slice(0, 100);
+    const reason = String(req.body?.reason || '').trim().slice(0, 500);
+    if (nextStatus === 'paid' && bankReference.length < 3) {
+      return res.status(422).json({ success: false, code: 'BANK_REFERENCE_REQUIRED', message: 'A bank reference or UTR is required to mark a withdrawal paid.' });
+    }
+    if (['failed', 'cancelled'].includes(nextStatus) && reason.length < 3) {
+      return res.status(422).json({ success: false, code: 'WITHDRAWAL_REASON_REQUIRED', message: 'A reason is required.' });
+    }
+    let before;
+    let updated;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      const withdrawal = await WithdrawalRequest.findById(req.params.id).session(session);
+      if (!withdrawal) throw Object.assign(new Error('Withdrawal request not found'), { statusCode: 404 });
+      if (withdrawal.status !== 'processing') throw Object.assign(new Error('Only a processing withdrawal can use this action.'), { statusCode: 409 });
+      if (nextStatus === 'paid') {
+        const approvedCreator = await User.exists({
+          _id: withdrawal.user,
+          isCreator: true,
+          creatorMonetizationStatus: 'approved',
+          isActive: true
+        }).session(session);
+        if (!approvedCreator) throw Object.assign(new Error('Creator monetization is not active.'), { statusCode: 409, code: 'CREATOR_MONETIZATION_NOT_ACTIVE' });
+        const validReservation = await CreatorBankDetails.exists({
+          _id: withdrawal.bankDetails,
+          user: withdrawal.user,
+          verificationStatus: 'verified',
+          version: withdrawal.bankDetailsVersion,
+          activeWithdrawalLocks: withdrawal._id
+        }).session(session);
+        if (!validReservation || !withdrawal.bankDetailsSnapshot?.capturedAt) {
+          throw Object.assign(new Error('The withdrawal bank reservation is invalid.'), { statusCode: 409, code: 'WITHDRAWAL_BANK_RESERVATION_INVALID' });
+        }
+        const reviewClaim = await EarningsSnapshot.updateOne(
+          { user: withdrawal.user, payoutCycle: withdrawal.payoutCycle, held: { $ne: true }, disbursementId: withdrawal._id },
+          { $set: { disbursementReviewedAt: new Date() } },
+          { session }
+        );
+        if (reviewClaim.matchedCount !== 1) {
+          throw Object.assign(new Error('The withdrawal earnings are held or no longer reserved.'), { statusCode: 409, code: 'WITHDRAWAL_EARNINGS_UNAVAILABLE' });
+        }
+      }
+      before = withdrawal.toObject();
+      const fields = { status: nextStatus, reviewedBy: req.user?._id };
+      if (nextStatus === 'paid') Object.assign(fields, { paidAt: new Date(), bankReference });
+      if (nextStatus === 'failed') fields.failureReason = reason;
+      if (nextStatus === 'cancelled') Object.assign(fields, { cancelledAt: new Date(), cancellationReason: reason });
+      updated = await WithdrawalRequest.findOneAndUpdate(
+        { _id: withdrawal._id, status: 'processing' },
+        { $set: fields },
+        { new: true, runValidators: true, session }
+      );
+      if (!updated) throw Object.assign(new Error('Withdrawal changed while processing this action.'), { statusCode: 409 });
+      if (withdrawal.bankDetails) {
+        await CreatorBankDetails.updateOne(
+          { _id: withdrawal.bankDetails },
+          { $pull: { activeWithdrawalLocks: withdrawal._id } },
+          { session }
+        );
+      }
+    }, FINANCIAL_TRANSACTION_OPTIONS);
+    res.locals.auditBefore = before;
+    res.locals.auditAfter = updated.toObject();
+    const terminalEmailOptions = ['paid', 'failed'].includes(nextStatus)
+      ? notificationEmail(EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, `payout_${nextStatus}`)
+      : null;
+    await createSystemNotification(
+      updated.user,
+      'Withdrawal Request Updated',
+      nextStatus === 'paid'
+        ? `Your withdrawal was paid successfully (Reference: ${bankReference}).`
+        : `Your withdrawal was ${nextStatus}. Reason: ${reason}`,
+      {
+        type: `withdrawal_${nextStatus}`,
+        requestId: updated._id,
+        status: nextStatus,
+        customData: { notificationDedupeKey: `withdrawal-${nextStatus}:${String(updated._id)}` }
+      },
+      ...(terminalEmailOptions ? [terminalEmailOptions] : [])
+    ).catch((notificationError) => log.error('Withdrawal status notification failed after commit', { requestId: String(updated._id), status: nextStatus, error: String(notificationError) }));
+    return res.json({ success: true, message: `Withdrawal marked ${nextStatus}`, data: { _id: updated._id, status: updated.status } });
+  } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
+    log.error('Transition withdrawal error:', { status: nextStatus, error: String(error) });
+    return res.status(500).json({ success: false, message: 'Failed to update withdrawal request' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
+  }
+};
+
+const markWithdrawalPaid = (req, res) => transitionProcessingWithdrawal(req, res, 'paid');
+const markWithdrawalFailed = (req, res) => transitionProcessingWithdrawal(req, res, 'failed');
+const cancelWithdrawalRequest = (req, res) => transitionProcessingWithdrawal(req, res, 'cancelled');
 
 // Task 5.1: Get host verification applications
 const getHostVerificationApplications = async (req, res) => {
@@ -2143,14 +2679,16 @@ const listCreatorPayouts = async (req, res) => {
       .skip((page - 1) * limit)
       .lean();
 
-    const enriched = await Promise.all(payouts.map(async (payout) => {
-      const bank = payout.user?._id
-        ? await CreatorBankDetails.findOne({ user: payout.user._id })
-            .select('accountHolderName bankName lastFourDigits ifsc swiftCode country verificationStatus')
-            .lean()
+    const enriched = payouts.map((payout) => {
+      const snapshot = payout.bankDetailsSnapshot?.capturedAt
+        ? { ...payout.bankDetailsSnapshot, verificationStatus: 'verified', source: 'payout_snapshot' }
         : null;
-      return { ...payout, bankDetails: bank || null };
-    }));
+      return {
+        ...payout,
+        bankDetails: snapshot,
+        bankDetailsUnavailableReason: snapshot ? null : 'legacy_destination_unavailable'
+      };
+    });
 
     const total = await CreatorPayout.countDocuments(query);
     res.json({
@@ -2169,60 +2707,154 @@ const listCreatorPayouts = async (req, res) => {
 };
 
 const updateCreatorPayoutStatus = async (req, res, nextStatus, fields = {}) => {
+  let session;
   try {
     const { id } = req.params;
     const { reason = '', bankReference = '' } = req.body || {};
-    const payout = await CreatorPayout.findById(id);
-    if (!payout) return res.status(404).json({ success: false, message: 'Creator payout not found' });
+    const normalizedBankReference = String(bankReference || '').trim().slice(0, 100);
+    if (nextStatus === 'paid' && normalizedBankReference.length < 3) {
+      return res.status(422).json({
+        success: false,
+        code: 'BANK_REFERENCE_REQUIRED',
+        message: 'A bank reference or UTR is required to mark a creator payout paid.'
+      });
+    }
+    session = await startFinancialSession();
+    const allowedTransitions = {
+      pending: ['approved', 'rejected', 'cancelled'],
+      held: ['approved', 'rejected', 'cancelled'],
+      approved: ['processing', 'cancelled'],
+      processing: ['paid', 'failed', 'cancelled']
+    };
+    let payout;
+    let before;
+    let updated;
+    await session.withTransaction(async () => {
+      payout = await CreatorPayout.findById(id).session(session);
+      if (!payout) throw Object.assign(new Error('Creator payout not found'), { statusCode: 404 });
+      if (!(allowedTransitions[payout.status] || []).includes(nextStatus)) {
+        throw Object.assign(new Error(`Payout cannot move from ${payout.status} to ${nextStatus}.`), { statusCode: 409 });
+      }
+      if (['approved', 'processing', 'paid'].includes(nextStatus)) {
+        const approvedCreator = await User.exists({
+          _id: payout.user,
+          isCreator: true,
+          creatorMonetizationStatus: 'approved',
+          isActive: true
+        }).session(session);
+        if (!approvedCreator) throw Object.assign(new Error('Creator monetization is not active.'), { statusCode: 409, code: 'CREATOR_MONETIZATION_NOT_ACTIVE' });
+        const releasingHeldPayout = payout.status === 'held' && nextStatus === 'approved';
+        const reviewClaim = await EarningsSnapshot.updateOne(
+          {
+            user: payout.user,
+            payoutCycle: payout.payoutCycle,
+            disbursementId: payout._id,
+            held: releasingHeldPayout ? true : { $ne: true }
+          },
+          { $set: {
+            disbursementReviewedAt: new Date(),
+            ...(releasingHeldPayout ? { held: false, holdReason: '' } : {})
+          } },
+          { session }
+        );
+        if (reviewClaim.matchedCount !== 1) {
+          throw Object.assign(new Error('The payout earnings are held or no longer reserved.'), { statusCode: 409, code: 'PAYOUT_EARNINGS_UNAVAILABLE' });
+        }
+      }
+      let reservedBank = null;
+      if (['approved', 'processing', 'paid'].includes(nextStatus)) {
+        reservedBank = await CreatorBankDetails.findOneAndUpdate(
+          {
+            ...(payout.bankDetails ? { _id: payout.bankDetails } : { user: payout.user }),
+            user: payout.user,
+            verificationStatus: 'verified',
+            ...(payout.bankDetailsVersion ? { version: payout.bankDetailsVersion } : {})
+          },
+          { $addToSet: { activePayoutLocks: payout._id } },
+          { new: true, session }
+        ).select('_id version activePayoutLocks accountHolderName bankName lastFourDigits ifsc swiftCode branch country');
+        if (!reservedBank) {
+          throw Object.assign(new Error('A verified bank account is required before this payout can proceed.'), {
+            statusCode: 409,
+            code: 'VERIFIED_BANK_DETAILS_REQUIRED'
+          });
+        }
+      }
 
-    const before = payout.toObject();
-    payout.status = nextStatus;
-    if (bankReference) payout.bankReference = bankReference;
-    Object.entries(fields).forEach(([key, value]) => {
-      payout[key] = typeof value === 'function' ? value(req) : value;
-    });
-    if (nextStatus === 'approved') {
-      payout.approvedAt = new Date();
-      payout.approvedBy = req.user._id;
-    }
-    if (nextStatus === 'processing') {
-      payout.processedAt = new Date();
-      payout.processedBy = req.user._id;
-    }
-    if (nextStatus === 'paid' || nextStatus === 'completed') {
-      payout.paidAt = new Date();
-      payout.paidBy = req.user._id;
-    }
-    if (nextStatus === 'failed' || nextStatus === 'rejected') {
-      payout.failureReason = reason || 'Rejected by admin';
-    }
-    if (nextStatus === 'cancelled') {
-      payout.cancelledAt = new Date();
-      payout.cancelledBy = req.user._id;
-      payout.cancellationReason = reason || 'Cancelled by admin';
-    }
-    await payout.save();
+      before = payout.toObject();
+      const update = { status: nextStatus };
+      if (reservedBank) {
+        update.bankDetails = reservedBank._id;
+        update.bankDetailsVersion = Math.max(1, Number(reservedBank.version || 1));
+        if (!payout.bankDetailsSnapshot?.capturedAt) {
+          update.bankDetailsSnapshot = maskedBankSnapshot(reservedBank);
+        }
+      }
+      if (normalizedBankReference) update.bankReference = normalizedBankReference;
+      Object.entries(fields).forEach(([key, value]) => {
+        update[key] = typeof value === 'function' ? value(req) : value;
+      });
+      if (nextStatus === 'approved') Object.assign(update, { approvedAt: new Date(), approvedBy: req.user._id });
+      if (nextStatus === 'processing') Object.assign(update, { processedAt: new Date(), processedBy: req.user._id });
+      if (nextStatus === 'paid' || nextStatus === 'completed') Object.assign(update, { paidAt: new Date(), paidBy: req.user._id });
+      if (nextStatus === 'failed' || nextStatus === 'rejected') update.failureReason = String(reason || 'Rejected by admin').trim().slice(0, 500);
+      if (nextStatus === 'cancelled') Object.assign(update, { cancelledAt: new Date(), cancelledBy: req.user._id, cancellationReason: String(reason || 'Cancelled by admin').trim().slice(0, 500) });
+
+      updated = await CreatorPayout.findOneAndUpdate(
+        { _id: payout._id, status: payout.status },
+        { $set: update },
+        { new: true, runValidators: true, session }
+      );
+      if (!updated) throw Object.assign(new Error('Payout changed while processing this action. Refresh and try again.'), { statusCode: 409 });
+      if (['paid', 'completed', 'failed', 'rejected', 'cancelled'].includes(nextStatus)) {
+        await CreatorBankDetails.updateOne(
+          updated.bankDetails ? { _id: updated.bankDetails } : { user: updated.user },
+          { $pull: { activePayoutLocks: updated._id } },
+          { session }
+        );
+      }
+    }, FINANCIAL_TRANSACTION_OPTIONS);
 
     res.locals.auditBefore = before;
-    res.locals.auditAfter = payout.toObject();
+    res.locals.auditAfter = updated.toObject();
+    const terminalEmailOptions = ['paid', 'failed'].includes(updated.status)
+      ? notificationEmail(EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, `payout_${updated.status}`)
+      : null;
     await createSystemNotification(
-      payout.user,
+      updated.user,
       'Creator Payout Updated',
-      `Your creator payout status is now ${payout.status}.`,
-      { type: 'creator_payout_updated', payoutId: payout._id, status: payout.status },
-      notificationEmail(EMAIL_INTENTS.PAYMENT_TRANSACTIONAL, `creator_payout_${payout.status}`)
-    );
+      `Your creator payout status is now ${updated.status}.`,
+      {
+        type: 'creator_payout_updated',
+        payoutId: updated._id,
+        status: updated.status,
+        customData: { notificationDedupeKey: `creator-payout-${updated.status}:${String(updated._id)}` }
+      },
+      ...(terminalEmailOptions ? [terminalEmailOptions] : [])
+    ).catch((notificationError) => {
+      log.error('Creator payout notification enqueue failed after committed transition', {
+        payoutId: String(updated._id),
+        status: updated.status,
+        error: String(notificationError)
+      });
+    });
 
-    res.json({ success: true, message: `Payout marked ${nextStatus}`, data: { payout } });
+    res.json({ success: true, message: `Payout marked ${nextStatus}`, data: { payout: updated } });
   } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
+    }
     log.error('Update creator payout error:', { error: String(error) });
-    res.status(500).json({ success: false, message: 'Failed to update creator payout' });
+    return res.status(500).json({ success: false, message: 'Failed to update creator payout' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
 const approveCreatorPayout = (req, res) => updateCreatorPayoutStatus(req, res, 'approved');
 const markCreatorPayoutProcessing = (req, res) => updateCreatorPayoutStatus(req, res, 'processing');
 const markCreatorPayoutPaid = (req, res) => updateCreatorPayoutStatus(req, res, 'paid');
+const markCreatorPayoutFailed = (req, res) => updateCreatorPayoutStatus(req, res, 'failed');
 const rejectCreatorPayout = (req, res) => updateCreatorPayoutStatus(req, res, 'rejected');
 const cancelCreatorPayout = (req, res) => updateCreatorPayoutStatus(req, res, 'cancelled');
 
@@ -2292,96 +2924,205 @@ const exportCreatorsCsv = async (req, res) => {
 };
 
 const suspendMonetization = async (req, res) => {
+  let session;
   try {
     const { userId } = req.params;
-    const { reason = 'Suspended by admin' } = req.body || {};
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Only individual user accounts can use creator monetization' });
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ success: false, code: 'INVALID_USER_ID', message: 'Valid user ID is required.' });
+    const reason = String(req.body?.reason || 'Suspended by admin').trim().slice(0, 500) || 'Suspended by admin';
+    const adminId = req.user?._id || null;
+    let user;
+    let before;
+    let application;
+    let affectedPayouts = 0;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      user = await User.findOne({ _id: userId, userType: 'player', isActive: true }).session(session);
+      if (!user) throw Object.assign(new Error('Active individual creator account not found.'), { statusCode: 404, code: 'CREATOR_NOT_FOUND' });
+      if (!user.isCreator || user.creatorMonetizationStatus !== 'approved') {
+        throw Object.assign(new Error('Only active approved creator monetization can be suspended.'), { statusCode: 409, code: 'CREATOR_MONETIZATION_NOT_ACTIVE' });
+      }
 
-    const before = user.toObject();
-    user.isCreator = false;
-    user.creatorMonetizationStatus = 'suspended';
-    await user.save();
-
-    const application = await MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 });
-    if (application) {
+      before = user.toObject();
+      const applicationResult = await getOrCreateLatestMonetizationApplication({
+        userId,
+        status: 'suspended',
+        adminId,
+        reason,
+        session
+      });
+      application = applicationResult.application;
+      const previousApplicationStatus = applicationResult.created ? null : application.status;
+      const activePayouts = await CreatorPayout.find({
+        user: userId,
+        status: { $in: ['pending', 'approved', 'processing'] }
+      }).session(session);
+      const activePayoutIds = activePayouts.map((payout) => payout._id);
+      user.isCreator = false;
+      user.creatorMonetizationStatus = 'suspended';
       application.status = 'suspended';
-      application.adminRemark = String(reason).slice(0, 1000);
+      application.adminRemark = reason;
       application.reviewedAt = new Date();
-      application.reviewedBy = req.user._id;
-      await application.save();
+      application.reviewedBy = adminId;
+      await user.save({ session });
+      await application.save({ session });
+
+      // Do not rewrite already-paid or independently held earnings. The same
+      // snapshot writes contend with payout/withdrawal reservation attempts,
+      // so suspension cannot race a disbursement into existence.
+      await EarningsSnapshot.updateMany(
+        {
+          user: userId,
+          held: { $ne: true },
+          $or: [
+            { disbursementId: null },
+            ...(activePayoutIds.length ? [{ disbursementId: { $in: activePayoutIds } }] : [])
+          ]
+        },
+        { $set: { held: true, holdReason: reason } },
+        { session }
+      );
+      for (const payout of activePayouts) {
+        const previousStatus = payout.status;
+        const nextVersion = Number(payout.version || 0) + 1;
+        const changed = await CreatorPayout.updateOne(
+          { _id: payout._id, status: previousStatus, version: Number(payout.version || 0) === 0 ? { $in: [0, null] } : payout.version },
+          { $set: { status: 'held', preHoldStatus: previousStatus, heldReason: reason }, $inc: { version: 1 } },
+          { runValidators: true, session }
+        );
+        if (changed.matchedCount !== 1) throw Object.assign(new Error('A payout changed while monetization was being suspended.'), { statusCode: 409, code: 'PAYOUT_VERSION_CONFLICT' });
+        const amountMinor = Number.isSafeInteger(payout.amountMinor) ? payout.amountMinor : Math.round(Number(payout.amount || 0) * 100);
+        await CreatorPayoutHistory.create([{
+          payout: payout._id,
+          user: payout.user,
+          payoutCycle: payout.payoutCycle,
+          action: 'held',
+          previousStatus,
+          newStatus: 'held',
+          amount: payout.amount,
+          amountMinor,
+          currency: payout.currency || 'INR',
+          idempotencyKey: `monetization-suspend:${String(payout._id)}:v${nextVersion}`,
+          actor: {
+            actorKey: adminId ? `user:${String(adminId)}` : `hardcoded:${String(req.user?.username || 'admin').toLowerCase()}`,
+            user: adminId,
+            username: req.user?.username || 'admin',
+            role: req.user?.adminRole || (req.user?.isSuperUser ? 'super_admin' : 'admin')
+          },
+          reason,
+          ip: String(req.ip || req.headers?.['x-forwarded-for'] || ''),
+          userAgent: req.get ? (req.get('user-agent') || '') : '',
+          metadata: { source: 'monetization_suspension', applicationId: application._id }
+        }], { session });
+        affectedPayouts += 1;
+      }
       await recordMonetizationTimeline({
         applicationId: application._id,
         userId,
         action: 'suspended',
-        actor: req.user._id,
+        actor: adminId,
         reason,
-        oldValue: { isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus },
-        newValue: { isCreator: false, creatorMonetizationStatus: 'suspended' }
+        oldValue: {
+          isCreator: before.isCreator,
+          creatorMonetizationStatus: before.creatorMonetizationStatus,
+          applicationStatus: previousApplicationStatus
+        },
+        newValue: { isCreator: false, creatorMonetizationStatus: 'suspended', applicationStatus: 'suspended' },
+        session
       });
-    }
+    }, FINANCIAL_TRANSACTION_OPTIONS);
 
-    await invalidateUserCache(userId);
+    await invalidateUserCache(userId).catch((cacheError) => {
+      log.error('Creator cache invalidation failed after committed suspension', { userId, error: String(cacheError) });
+    });
     res.locals.auditBefore = { userId, isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus };
-    res.locals.auditAfter = { userId, isCreator: user.isCreator, creatorMonetizationStatus: user.creatorMonetizationStatus, reason };
+    res.locals.auditAfter = { userId, isCreator: user.isCreator, creatorMonetizationStatus: user.creatorMonetizationStatus, affectedPayouts, reason };
     await createSystemNotification(
       userId,
       'Creator Monetization Suspended',
       String(reason),
       { type: 'monetization_suspended' }
-    );
+    ).catch((notificationError) => {
+      log.error('Monetization suspension notification failed after commit', { userId, error: String(notificationError) });
+    });
     res.json({ success: true, message: 'Monetization suspended successfully' });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
     log.error('Suspend monetization error:', { error: String(error) });
     res.status(500).json({ success: false, message: 'Failed to suspend monetization' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
 const resumeMonetization = async (req, res) => {
+  let session;
   try {
     const { userId } = req.params;
-    const { reason = 'Resumed by admin' } = req.body || {};
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.userType !== 'player') return res.status(400).json({ success: false, message: 'Only individual user accounts can use creator monetization' });
-
-    const before = user.toObject();
-    user.isCreator = true;
-    user.creatorMonetizationStatus = 'approved';
-    await user.save();
-
-    const application = await MonetizationApplication.findOne({ user: userId }).sort({ appliedAt: -1 });
-    if (application) {
+    if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ success: false, code: 'INVALID_USER_ID', message: 'Valid user ID is required.' });
+    const adminId = req.user?._id || null;
+    const reason = String(req.body?.reason || 'Resumed by admin').trim().slice(0, 500) || 'Resumed by admin';
+    let user;
+    let before;
+    let application;
+    session = await startFinancialSession();
+    await session.withTransaction(async () => {
+      user = await User.findOne({ _id: userId, userType: 'player', isActive: true }).session(session);
+      if (!user) throw Object.assign(new Error('Active individual creator account not found.'), { statusCode: 404, code: 'CREATOR_NOT_FOUND' });
+      if (user.isCreator && user.creatorMonetizationStatus === 'approved') {
+        throw Object.assign(new Error('Creator monetization is already active.'), { statusCode: 409, code: 'MONETIZATION_ALREADY_APPROVED' });
+      }
+      before = user.toObject();
+      const applicationResult = await getOrCreateLatestMonetizationApplication({
+        userId,
+        status: 'approved',
+        adminId,
+        reason,
+        session
+      });
+      application = applicationResult.application;
+      const previousApplicationStatus = applicationResult.created ? null : application.status;
+      user.isCreator = true;
+      user.creatorMonetizationStatus = 'approved';
       application.status = 'approved';
-      application.adminRemark = String(reason).slice(0, 1000);
+      application.rejectionReason = '';
+      application.reapplyAfter = undefined;
+      application.adminRemark = reason;
       application.reviewedAt = new Date();
-      application.reviewedBy = req.user._id;
-      await application.save();
+      application.reviewedBy = adminId;
+      await user.save({ session });
+      await application.save({ session });
       await recordMonetizationTimeline({
         applicationId: application._id,
         userId,
         action: 'resumed',
-        actor: req.user._id,
+        actor: adminId,
         reason,
-        oldValue: { isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus },
-        newValue: { isCreator: true, creatorMonetizationStatus: 'approved' }
+        oldValue: {
+          isCreator: before.isCreator,
+          creatorMonetizationStatus: before.creatorMonetizationStatus,
+          applicationStatus: previousApplicationStatus
+        },
+        newValue: { isCreator: true, creatorMonetizationStatus: 'approved', applicationStatus: 'approved' },
+        session
       });
-    }
+    }, FINANCIAL_TRANSACTION_OPTIONS);
 
-    await invalidateUserCache(userId);
+    await invalidateUserCache(userId).catch((cacheError) => log.error('Creator cache invalidation failed after committed resume', { userId, error: String(cacheError) }));
     res.locals.auditBefore = { userId, isCreator: before.isCreator, creatorMonetizationStatus: before.creatorMonetizationStatus };
-    res.locals.auditAfter = { userId, isCreator: user.isCreator, creatorMonetizationStatus: user.creatorMonetizationStatus, reason };
+    res.locals.auditAfter = { userId, isCreator: true, creatorMonetizationStatus: 'approved', reason };
     await createSystemNotification(
       userId,
       'Creator Monetization Reactivated',
       'Your creator monetization access has been reactivated.',
-      { type: 'monetization_reactivated' }
-    );
-    res.json({ success: true, message: 'Monetization resumed successfully' });
+      { type: 'monetization_reactivated', applicationId: application._id }
+    ).catch((notificationError) => log.error('Monetization resume notification failed after commit', { userId, error: String(notificationError) }));
+    return res.json({ success: true, message: 'Monetization resumed successfully' });
   } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
     log.error('Resume monetization error:', { error: String(error) });
-    res.status(500).json({ success: false, message: 'Failed to resume monetization' });
+    return res.status(500).json({ success: false, message: 'Failed to resume monetization' });
+  } finally {
+    if (session) await session.endSession().catch(() => null);
   }
 };
 
@@ -3024,6 +3765,7 @@ module.exports = {
   approveMonetizationApplication,
   rejectMonetizationApplication,
   holdCreatorPayout,
+  releaseCreatorPayoutHold,
   getCreatorAnalytics,
   getCreatorBankDetailsForAdmin,
   getApprovedCreators,
@@ -3037,10 +3779,14 @@ module.exports = {
   listWithdrawalRequests,
   approveWithdrawalRequest,
   rejectWithdrawalRequest,
+  markWithdrawalPaid,
+  markWithdrawalFailed,
+  cancelWithdrawalRequest,
   listCreatorPayouts,
   approveCreatorPayout,
   markCreatorPayoutProcessing,
   markCreatorPayoutPaid,
+  markCreatorPayoutFailed,
   rejectCreatorPayout,
   cancelCreatorPayout,
   exportCreatorPayoutsCsv,
