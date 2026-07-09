@@ -53,7 +53,15 @@ router.post(
 router.post("/generate-post", aiCoachLimiter, aiRecruitmentController.generateRecruitmentPost);
 
 // Generate interview questions
-router.post("/generate-questions", aiCoachLimiter, aiRecruitmentController.generateInterviewQuestions);
+router.post(
+  "/generate-questions",
+  aiCoachLimiter,
+  body("game").isIn(allowedGames).withMessage("Invalid game"),
+  body("role").isString().trim().isLength({ min: 1, max: 120 }).withMessage("Role is required and cannot exceed 120 characters"),
+  body("playerProfileId").optional().isString().isMongoId().withMessage("Invalid player profile ID"),
+  handleValidationErrors,
+  aiRecruitmentController.generateInterviewQuestions
+);
 
 // Rank candidates for a recruitment post
 router.post(

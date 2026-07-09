@@ -143,6 +143,14 @@ const messageSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
     },
+    recruitmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TeamRecruitment'
+    },
+    applicationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'RecruitmentApplication'
+    },
     game: String,
     role: String,
     inGameName: String,

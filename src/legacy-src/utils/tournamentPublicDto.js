@@ -71,6 +71,63 @@ const sanitizeMatch = (match = {}) => {
   return safe;
 };
 
+// `isSubmitted` was added after results already existed in production. Treat
+// the durable submission timestamp or a complete positive-rank table as the
+// legacy publication markers, but never let an initialized rank-zero row pass
+// through Array#every's empty-array behaviour.
+const isPublishedTournamentGroupResult = (result) => {
+  if (result?.isSubmitted === true || result?.submittedAt != null) return true;
+  const teams = Array.isArray(result?.teams) ? result.teams : [];
+  return teams.length > 0 && teams.every((team) => Number(team?.rank) > 0);
+};
+
+const sanitizeTournamentGroupResults = (results = [], { includeDrafts = false } = {}) => (
+  (Array.isArray(results) ? results : [])
+    .filter((result) => includeDrafts || isPublishedTournamentGroupResult(result))
+    .map((result) => {
+      const safeResult = toPlainObject(result) || {};
+      return {
+        ...safeResult,
+        isSubmitted: isPublishedTournamentGroupResult(safeResult),
+        teams: Array.isArray(safeResult.teams)
+          ? safeResult.teams.map((team) => {
+              const safeTeam = toPlainObject(team) || {};
+              return {
+                ...safeTeam,
+                teamId: safeTeam.teamId && typeof safeTeam.teamId === 'object'
+                  ? minimalTournamentUser(safeTeam.teamId)
+                  : safeTeam.teamId
+              };
+            })
+          : []
+      };
+    })
+);
+
+const finalistFromStanding = (standing) => {
+  if (!standing) return undefined;
+  const populatedTeam = standing.teamId && typeof standing.teamId === 'object'
+    ? minimalTournamentUser(standing.teamId)
+    : null;
+  const teamName = String(
+    standing.teamName
+    || populatedTeam?.profile?.displayName
+    || populatedTeam?.username
+    || ''
+  );
+  const teamLogo = standing.teamLogo || populatedTeam?.profile?.avatar || '';
+  return {
+    _id: populatedTeam?._id || standing.teamId,
+    username: populatedTeam?.username || teamName,
+    profile: {
+      displayName: teamName,
+      avatar: teamLogo
+    },
+    profilePicture: teamLogo,
+    avatar: teamLogo
+  };
+};
+
 /**
  * Public tournament endpoints are shareable by design. Keep competition data
  * public, but never serialize team profile internals, chat history, channel
@@ -103,6 +160,7 @@ const sanitizePublicTournament = (value) => {
       })
     : [];
   safe.matches = Array.isArray(safe.matches) ? safe.matches.map(sanitizeMatch) : [];
+  safe.groupResults = sanitizeTournamentGroupResults(safe.groupResults);
   safe.winners = Array.isArray(safe.winners)
     ? safe.winners.map((winner) => ({
         ...winner,
@@ -121,12 +179,24 @@ const sanitizePublicTournament = (value) => {
     delete safe.finalResult;
   }
 
+  // The public Web results tab consumes the historical finalist aliases while
+  // the host dashboard consumes finalResult.standings. Derive both views from
+  // the same published standings instead of persisting duplicate winner data.
+  if (safe.finalResult?.generatedAt && Array.isArray(safe.finalResult.standings)) {
+    const standingsByRank = [...safe.finalResult.standings]
+      .sort((left, right) => Number(left?.rank || 0) - Number(right?.rank || 0));
+    if (!safe.winner) safe.winner = finalistFromStanding(standingsByRank.find((entry) => Number(entry?.rank) === 1));
+    if (!safe.runnerUp) safe.runnerUp = finalistFromStanding(standingsByRank.find((entry) => Number(entry?.rank) === 2));
+    if (!safe.thirdPlace) safe.thirdPlace = finalistFromStanding(standingsByRank.find((entry) => Number(entry?.rank) === 3));
+  }
+
   // Chat data has dedicated authenticated, membership-authorized endpoints.
   delete safe.tournamentMessages;
   delete safe.groupMessages;
   delete safe.broadcastChannels;
   delete safe.bannerPublicId;
   delete safe.duoRegistrationMembers;
+  delete safe.entryFee;
 
   return safe;
 };
@@ -150,6 +220,8 @@ const sanitizePublicScrim = (value) => {
 module.exports = {
   minimalTournamentUser,
   minimalTournamentTeam,
+  isPublishedTournamentGroupResult,
+  sanitizeTournamentGroupResults,
   sanitizePublicTournament,
   sanitizePublicScrim
 };

@@ -4,7 +4,8 @@ const {
   _private: {
     canReadTournamentMessages,
     canReadGroupMessages,
-    sanitizeTournamentMessages
+    sanitizeTournamentMessages,
+    attachViewerMessageHistory
   }
 } = require('./tournamentController');
 
@@ -52,6 +53,50 @@ const id = (value) => ({ _id: value, toString: () => value });
     assert.strictEqual(message.sender.lastSeen, undefined);
     assert.strictEqual(message.sender.privacySettings, undefined);
     assert.strictEqual(message.sender.profile.bio, undefined);
+
+    const contextualParticipant = {
+      viewerParticipation: true,
+      viewerRole: 'participant',
+      viewerRegisteredTeamId: null
+    };
+    const sourceTournament = {
+      groups: [
+        { _id: id('group-a'), name: 'Group A', participants: [id('participant')] },
+        { _id: id('group-b'), name: 'Group B', participants: [id('other')] }
+      ]
+    };
+    const messageState = {
+      tournamentMessages: [{ message: 'Everyone registered', sender: { _id: 'host', username: 'host' } }],
+      groupMessages: [
+        { groupId: 'group-a', round: 1, messages: [{ message: 'A only', sender: { _id: 'host', username: 'host' } }] },
+        { groupId: 'group-b', round: 1, messages: [{ message: 'B only', sender: { _id: 'host', username: 'host' } }] }
+      ]
+    };
+    const participantHistory = attachViewerMessageHistory(
+      contextualParticipant,
+      sourceTournament,
+      messageState,
+      id('participant')
+    );
+    assert.strictEqual(participantHistory.tournamentMessages.length, 1);
+    assert.deepStrictEqual(participantHistory.groupMessages.map((thread) => thread.groupId), ['group-a']);
+
+    const unrelatedHistory = attachViewerMessageHistory(
+      { viewerParticipation: false, viewerRole: null },
+      sourceTournament,
+      messageState,
+      id('unrelated')
+    );
+    assert.strictEqual(unrelatedHistory.groupMessages, undefined);
+    assert.strictEqual(unrelatedHistory.tournamentMessages, undefined);
+
+    const hostHistory = attachViewerMessageHistory(
+      { viewerParticipation: false, viewerRole: 'host' },
+      sourceTournament,
+      messageState,
+      id('host')
+    );
+    assert.strictEqual(hostHistory.groupMessages.length, 2);
   } finally {
     User.exists = originalExists;
   }

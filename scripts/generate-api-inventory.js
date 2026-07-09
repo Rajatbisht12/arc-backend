@@ -186,12 +186,20 @@ const scanRouteFile = (file, prefix, inheritedAccessSource = '') => {
     const semicolon = masked.indexOf(';', chainStart);
     const chainEnd = semicolon >= 0 ? semicolon : masked.length;
     const chain = source.slice(chainStart, chainEnd);
+    const maskedChain = masked.slice(chainStart, chainEnd);
     const methodExpression = /\.(get|post|put|patch|delete)\s*\(/g;
-    for (const methodMatch of chain.matchAll(methodExpression)) {
+    for (const methodMatch of maskedChain.matchAll(methodExpression)) {
+      const methodOpenIndex = methodMatch.index + methodMatch[0].lastIndexOf('(');
+      const methodCloseIndex = findClosingParen(maskedChain, methodOpenIndex);
+      if (methodCloseIndex < 0) continue;
+      // Access middleware belongs to this HTTP method, not to every sibling in
+      // the router.route() chain. Merging the complete chain incorrectly made a
+      // public GET authenticated whenever POST/PUT/DELETE used `protect`.
+      const methodArguments = chain.slice(methodOpenIndex + 1, methodCloseIndex);
       routeRecords.push({
         method: methodMatch[1].toUpperCase(),
         path: normalizePath(prefix, match[2]),
-        access: mergeAccess(routerAccessSource, chain),
+        access: mergeAccess(routerAccessSource, methodArguments),
         source: relative(file),
         line: lineNumberAt(source, chainStart + methodMatch.index)
       });

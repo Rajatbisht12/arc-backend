@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-07-03T06:00:18.619Z",
-  "endpointCount": 443,
-  "socketEventCount": 61,
+  "generatedAt": "2026-07-09T11:04:58.339Z",
+  "endpointCount": 475,
+  "socketEventCount": 62,
   "byAccess": {
     "public": 23,
-    "admin": 110,
-    "authenticated": 284,
+    "admin": 140,
+    "authenticated": 282,
     "authenticated-onboarding": 4,
-    "public-optional-auth": 9,
+    "public-optional-auth": 13,
     "user-or-guest": 13
   },
   "endpoints": [
@@ -23,21 +23,21 @@
       "path": "/api/admin/activities",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 61
+      "line": 85
     },
     {
       "method": "GET",
       "path": "/api/admin/analytics/users",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 59
+      "line": 83
     },
     {
       "method": "GET",
       "path": "/api/admin/audit-logs",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 62
+      "line": 86
     },
     {
       "method": "POST",
@@ -51,49 +51,49 @@
       "path": "/api/admin/boost-campaigns",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 77
+      "line": 101
     },
     {
       "method": "PATCH",
       "path": "/api/admin/boost-campaigns/:campaignId/delivery/adjust",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 82
+      "line": 106
     },
     {
       "method": "POST",
       "path": "/api/admin/boost-campaigns/:campaignId/delivery/configure",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 80
+      "line": 104
     },
     {
       "method": "POST",
       "path": "/api/admin/boost-campaigns/:campaignId/delivery/control",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 81
+      "line": 105
     },
     {
       "method": "POST",
       "path": "/api/admin/boost-campaigns/:campaignId/manual-delivery",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 79
+      "line": 103
     },
     {
       "method": "PUT",
       "path": "/api/admin/boost-campaigns/:campaignId/status",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 83
+      "line": 107
     },
     {
       "method": "GET",
       "path": "/api/admin/boost-delivery",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 78
+      "line": 102
     },
     {
       "method": "GET",
@@ -233,245 +233,455 @@
       "path": "/api/admin/dashboard",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 57
+      "line": 81
     },
     {
       "method": "GET",
       "path": "/api/admin/health",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 60
+      "line": 84
     },
     {
       "method": "GET",
       "path": "/api/admin/host-verification/applications",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 110
+      "line": 164
     },
     {
       "method": "POST",
       "path": "/api/admin/host-verification/applications/:id/approve",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 111
+      "line": 165
     },
     {
       "method": "POST",
       "path": "/api/admin/host-verification/applications/:id/reject",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 117
+      "line": 171
     },
     {
       "method": "POST",
       "path": "/api/admin/host-verification/revoke/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 124
+      "line": 178
     },
     {
       "method": "GET",
       "path": "/api/admin/host-verification/verified-hosts",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 123
+      "line": 177
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/applications",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 85
+      "line": 125
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/applications/:applicationId/approve",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 86
+      "line": 126
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/applications/:applicationId/reject",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 87
+      "line": 127
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/audit-logs",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 115
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/bank-details",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 118
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/bank-details/:id",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 120
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/bank-details/:id/history",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 119
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/monetization/bank-details/:id/notes",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 123
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/bank-details/:id/request-update",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 122
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/bank-details/:id/reveal",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 124
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/monetization/bank-details/:id/verification",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 121
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/bank-details/export.csv",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 116
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/bank-details/export.xls",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 117
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/charts",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 110
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/cpm/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 99
+      "line": 141
     },
     {
       "method": "PUT",
       "path": "/api/admin/monetization/cpm/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 98
+      "line": 140
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/creators",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 92
+      "line": 134
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/creators/:userId/analytics",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 91
+      "line": 132
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/creators/:userId/bank-details",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 90
+      "line": 131
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/creators/:userId/overview",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 133
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/creators/export.csv",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 89
-    },
-    {
-      "method": "POST",
-      "path": "/api/admin/monetization/disable/:userId",
-      "access": "admin",
-      "source": "src/modules/admin/admin.routes.ts",
-      "line": 97
-    },
-    {
-      "method": "POST",
-      "path": "/api/admin/monetization/grant/:userId",
-      "access": "admin",
-      "source": "src/modules/admin/admin.routes.ts",
-      "line": 94
-    },
-    {
-      "method": "POST",
-      "path": "/api/admin/monetization/payout-hold/:userId",
-      "access": "admin",
-      "source": "src/modules/admin/admin.routes.ts",
-      "line": 88
+      "line": 130
     },
     {
       "method": "GET",
-      "path": "/api/admin/monetization/payouts",
-      "access": "admin",
-      "source": "src/modules/admin/admin.routes.ts",
-      "line": 104
-    },
-    {
-      "method": "POST",
-      "path": "/api/admin/monetization/payouts/:id/approve",
-      "access": "admin",
-      "source": "src/modules/admin/admin.routes.ts",
-      "line": 105
-    },
-    {
-      "method": "POST",
-      "path": "/api/admin/monetization/payouts/:id/cancel",
+      "path": "/api/admin/monetization/dashboard",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
       "line": 109
     },
     {
       "method": "POST",
+      "path": "/api/admin/monetization/disable/:userId",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 139
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/grant/:userId",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 136
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/leaderboards",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 111
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payout-hold/:userId",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 128
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payout-hold/:userId/release",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 129
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/payouts",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 155
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/payouts/:id",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 154
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payouts/:id/approve",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 156
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payouts/:id/cancel",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 163
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payouts/:id/failed",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 159
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/payouts/:id/history",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 151
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payouts/:id/hold",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 160
+    },
+    {
+      "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/paid",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 107
+      "line": 158
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/processing",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 106
+      "line": 157
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/reject",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 108
+      "line": 162
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payouts/:id/resume",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 161
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/payouts/:id/statement",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 153
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payouts/:id/statement",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 152
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payouts/bulk/:action",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 150
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/payouts/export.csv",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 103
+      "line": 148
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/payouts/generate",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 149
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/reports",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 114
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/monetization/reports/export",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 112
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/reports/export",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 113
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/resume/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 96
+      "line": 138
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/revoke/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 93
+      "line": 135
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/summary",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 84
+      "line": 108
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/suspend/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 95
+      "line": 137
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/withdrawal-requests",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 100
+      "line": 142
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/withdrawal-requests/:id/approve",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 101
+      "line": 143
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/withdrawal-requests/:id/cancel",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 147
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/withdrawal-requests/:id/failed",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 146
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/monetization/withdrawal-requests/:id/paid",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 145
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/withdrawal-requests/:id/reject",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 102
+      "line": 144
     },
     {
       "method": "GET",
       "path": "/api/admin/posts",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 71
+      "line": 95
     },
     {
       "method": "DELETE",
       "path": "/api/admin/posts/:postId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 72
+      "line": 96
     },
     {
       "method": "GET",
@@ -625,91 +835,91 @@
       "path": "/api/admin/reports",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 75
+      "line": 99
     },
     {
       "method": "PUT",
       "path": "/api/admin/reports/:reportId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 76
+      "line": 100
     },
     {
       "method": "GET",
       "path": "/api/admin/search",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 58
+      "line": 82
     },
     {
       "method": "GET",
       "path": "/api/admin/tournaments",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 73
+      "line": 97
     },
     {
       "method": "DELETE",
       "path": "/api/admin/tournaments/:tournamentId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 74
+      "line": 98
     },
     {
       "method": "GET",
       "path": "/api/admin/users",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 63
+      "line": 87
     },
     {
       "method": "DELETE",
       "path": "/api/admin/users/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 70
+      "line": 94
     },
     {
       "method": "PUT",
       "path": "/api/admin/users/:userId/controls",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 66
+      "line": 90
     },
     {
       "method": "GET",
       "path": "/api/admin/users/:userId/inspection",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 64
+      "line": 88
     },
     {
       "method": "POST",
       "path": "/api/admin/users/:userId/premium/grant",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 67
+      "line": 91
     },
     {
       "method": "POST",
       "path": "/api/admin/users/:userId/premium/remove",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 68
+      "line": 92
     },
     {
       "method": "PUT",
       "path": "/api/admin/users/:userId/reset-password",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 69
+      "line": 93
     },
     {
       "method": "PUT",
       "path": "/api/admin/users/:userId/status",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 65
+      "line": 89
     },
     {
       "method": "GET",
@@ -821,7 +1031,7 @@
       "path": "/api/ai-recruitment/rank-candidates",
       "access": "authenticated",
       "source": "src/modules/ai-recruitment/ai-recruitment.routes.ts",
-      "line": 59
+      "line": 67
     },
     {
       "method": "POST",
@@ -1612,7 +1822,7 @@
       "path": "/api/monetization/bank-details",
       "access": "authenticated",
       "source": "src/modules/monetization/monetization.routes.ts",
-      "line": 19
+      "line": 20
     },
     {
       "method": "GET",
@@ -1627,6 +1837,13 @@
       "access": "authenticated",
       "source": "src/modules/monetization/monetization.routes.ts",
       "line": 18
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/monetization/bank-details/tax-id",
+      "access": "authenticated",
+      "source": "src/modules/monetization/monetization.routes.ts",
+      "line": 19
     },
     {
       "method": "GET",
@@ -1661,14 +1878,14 @@
       "path": "/api/monetization/status",
       "access": "authenticated",
       "source": "src/modules/monetization/monetization.routes.ts",
-      "line": 20
+      "line": 21
     },
     {
       "method": "POST",
       "path": "/api/monetization/withdrawal-request",
       "access": "authenticated",
       "source": "src/modules/monetization/monetization.routes.ts",
-      "line": 21
+      "line": 22
     },
     {
       "method": "GET",
@@ -1997,21 +2214,21 @@
       "path": "/api/random-connections/active-sessions",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 100
+      "line": 103
     },
     {
       "method": "POST",
       "path": "/api/random-connections/cleanup-current",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 104
+      "line": 107
     },
     {
       "method": "GET",
       "path": "/api/random-connections/current-connection",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 99
+      "line": 102
     },
     {
       "method": "GET",
@@ -2025,7 +2242,7 @@
       "path": "/api/random-connections/disconnect",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 101
+      "line": 104
     },
     {
       "method": "GET",
@@ -2039,21 +2256,21 @@
       "path": "/api/random-connections/join-queue",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 97
+      "line": 100
     },
     {
       "method": "DELETE",
       "path": "/api/random-connections/leave-queue",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 98
+      "line": 101
     },
     {
       "method": "POST",
       "path": "/api/random-connections/next",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 102
+      "line": 105
     },
     {
       "method": "GET",
@@ -2067,70 +2284,70 @@
       "path": "/api/random-connections/send-message",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 103
+      "line": 106
     },
     {
       "method": "POST",
       "path": "/api/random-connections/v2/cleanup-current",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 112
+      "line": 115
     },
     {
       "method": "GET",
       "path": "/api/random-connections/v2/current-connection",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 110
+      "line": 113
     },
     {
       "method": "POST",
       "path": "/api/random-connections/v2/disconnect",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 111
+      "line": 114
     },
     {
       "method": "POST",
       "path": "/api/random-connections/v2/join-queue",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 108
+      "line": 111
     },
     {
       "method": "DELETE",
       "path": "/api/random-connections/v2/leave-queue",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 109
+      "line": 112
     },
     {
       "method": "PUT",
       "path": "/api/recruitment/applications/:applicationId/status",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 43
+      "line": 44
     },
     {
       "method": "GET",
       "path": "/api/recruitment/applications/my",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 40
+      "line": 41
     },
     {
       "method": "GET",
       "path": "/api/recruitment/applications/team",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 41
+      "line": 42
     },
     {
       "method": "GET",
       "path": "/api/recruitment/player-profiles",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 27
+      "line": 28
     },
     {
       "method": "POST",
@@ -2144,42 +2361,49 @@
       "path": "/api/recruitment/player-profiles/:id",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 31
+      "line": 32
     },
     {
       "method": "GET",
       "path": "/api/recruitment/player-profiles/:id",
       "access": "public-optional-auth",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 28
+      "line": 29
     },
     {
       "method": "PUT",
       "path": "/api/recruitment/player-profiles/:id",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 30
+      "line": 31
     },
     {
       "method": "POST",
       "path": "/api/recruitment/player-profiles/:profileId/interest",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 38
+      "line": 39
+    },
+    {
+      "method": "GET",
+      "path": "/api/recruitment/player-profiles/daily-limit",
+      "access": "authenticated",
+      "source": "src/modules/recruitment/recruitment.routes.ts",
+      "line": 27
     },
     {
       "method": "GET",
       "path": "/api/recruitment/profile/:code",
       "access": "public-optional-auth",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 29
+      "line": 30
     },
     {
       "method": "POST",
       "path": "/api/recruitment/profile/:profileId/interest",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 39
+      "line": 40
     },
     {
       "method": "GET",
@@ -2193,21 +2417,21 @@
       "path": "/api/recruitment/recruitment/:recruitmentId/apply",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 36
+      "line": 37
     },
     {
       "method": "POST",
       "path": "/api/recruitment/recruitment/:recruitmentId/withdraw",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 37
+      "line": 38
     },
     {
       "method": "GET",
       "path": "/api/recruitment/team-applications",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 42
+      "line": 43
     },
     {
       "method": "GET",
@@ -2263,21 +2487,21 @@
       "path": "/api/recruitment/team-recruitments/:recruitmentId/apply",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 34
+      "line": 35
     },
     {
       "method": "POST",
       "path": "/api/recruitment/team-recruitments/:recruitmentId/apply",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 33
+      "line": 34
     },
     {
       "method": "POST",
       "path": "/api/recruitment/team-recruitments/:recruitmentId/withdraw",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 35
+      "line": 36
     },
     {
       "method": "POST",
@@ -2289,7 +2513,7 @@
     {
       "method": "GET",
       "path": "/api/scrims",
-      "access": "authenticated",
+      "access": "public-optional-auth",
       "source": "src/modules/scrims/scrims.routes.ts",
       "line": 7
     },
@@ -2310,7 +2534,7 @@
     {
       "method": "GET",
       "path": "/api/scrims/:id",
-      "access": "authenticated",
+      "access": "public-optional-auth",
       "source": "src/modules/scrims/scrims.routes.ts",
       "line": 13
     },
@@ -2436,674 +2660,674 @@
     {
       "method": "GET",
       "path": "/api/tournaments",
-      "access": "authenticated",
+      "access": "public-optional-auth",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 25
+      "line": 29
     },
     {
       "method": "POST",
       "path": "/api/tournaments",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 26
+      "line": 30
     },
     {
       "method": "DELETE",
       "path": "/api/tournaments/:id",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 34
+      "line": 38
     },
     {
       "method": "GET",
       "path": "/api/tournaments/:id",
-      "access": "authenticated",
+      "access": "public-optional-auth",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 32
+      "line": 36
     },
     {
       "method": "PUT",
       "path": "/api/tournaments/:id",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 33
+      "line": 37
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/assign-groups",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 40
+      "line": 44
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/assign-participant",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 54
+      "line": 58
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/assign-special-prize",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 75
+      "line": 79
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/auto-assign-round-2",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 72
+      "line": 76
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/broadcast-schedule",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 63
+      "line": 67
     },
     {
       "method": "PUT",
       "path": "/api/tournaments/:id/cancel",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 43
+      "line": 47
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/create-round-2",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 71
+      "line": 75
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/generate-final-result",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 74
+      "line": 78
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/group-message",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 45
+      "line": 49
     },
     {
       "method": "DELETE",
       "path": "/api/tournaments/:id/group-message/:groupId/:round/:messageIndex",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 49
+      "line": 53
     },
     {
       "method": "GET",
       "path": "/api/tournaments/:id/group-messages",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 47
+      "line": 51
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/join",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 36
+      "line": 40
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/join-duo",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 37
+      "line": 41
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/leave",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 38
+      "line": 42
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/leave-team",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 39
+      "line": 43
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/next-round",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 67
+      "line": 71
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/open-registration",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 76
+      "line": 80
     },
     {
       "method": "GET",
       "path": "/api/tournaments/:id/participants",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 52
+      "line": 56
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/prize-distribution",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 73
+      "line": 77
     },
     {
       "method": "GET",
       "path": "/api/tournaments/:id/qualification-settings",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 70
+      "line": 74
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/qualification-settings",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 69
+      "line": 73
     },
     {
       "method": "GET",
       "path": "/api/tournaments/:id/qualification-status",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 68
+      "line": 72
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/qualify",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 66
+      "line": 70
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/recreate-groups",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 56
+      "line": 60
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/remove-participant",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 53
+      "line": 57
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/results",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 64
+      "line": 68
     },
     {
       "method": "GET",
       "path": "/api/tournaments/:id/results/:round",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 65
+      "line": 69
     },
     {
       "method": "PUT",
       "path": "/api/tournaments/:id/round-settings",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 55
+      "line": 59
     },
     {
       "method": "GET",
       "path": "/api/tournaments/:id/schedule",
-      "access": "authenticated",
-      "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 58
-    },
-    {
-      "method": "POST",
-      "path": "/api/tournaments/:id/schedule",
-      "access": "authenticated",
-      "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 57
-    },
-    {
-      "method": "PUT",
-      "path": "/api/tournaments/:id/schedule-config",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
       "line": 62
     },
     {
       "method": "POST",
+      "path": "/api/tournaments/:id/schedule",
+      "access": "authenticated",
+      "source": "src/modules/tournaments/tournaments.routes.ts",
+      "line": 61
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tournaments/:id/schedule-config",
+      "access": "authenticated",
+      "source": "src/modules/tournaments/tournaments.routes.ts",
+      "line": 66
+    },
+    {
+      "method": "POST",
       "path": "/api/tournaments/:id/schedule-matches",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 42
+      "line": 46
     },
     {
       "method": "DELETE",
       "path": "/api/tournaments/:id/schedule/:matchId",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 60
+      "line": 64
     },
     {
       "method": "PUT",
       "path": "/api/tournaments/:id/schedule/:matchId",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 59
+      "line": 63
     },
     {
       "method": "DELETE",
       "path": "/api/tournaments/:id/schedule/round/:round",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 61
+      "line": 65
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/start",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 41
+      "line": 45
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/start-match",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 50
+      "line": 54
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/tournament-message",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 44
+      "line": 48
     },
     {
       "method": "DELETE",
       "path": "/api/tournaments/:id/tournament-message/:messageIndex",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 48
+      "line": 52
     },
     {
       "method": "GET",
       "path": "/api/tournaments/:id/tournament-messages",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 46
+      "line": 50
     },
     {
       "method": "POST",
       "path": "/api/tournaments/:id/update-match-result",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 51
+      "line": 55
     },
     {
       "method": "GET",
       "path": "/api/tournaments/by-name/:tournamentName/:hostUsername",
       "access": "public-optional-auth",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 29
+      "line": 33
     },
     {
       "method": "GET",
       "path": "/api/tournaments/code/:code",
       "access": "public-optional-auth",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 28
+      "line": 32
     },
     {
       "method": "GET",
       "path": "/api/tournaments/hosting-limits",
       "access": "authenticated",
       "source": "src/modules/tournaments/tournaments.routes.ts",
-      "line": 22
+      "line": 26
     },
     {
       "method": "GET",
       "path": "/api/users",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 14
+      "line": 72
     },
     {
       "method": "GET",
       "path": "/api/users/:id/clips",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 49
+      "line": 107
     },
     {
       "method": "DELETE",
       "path": "/api/users/:id/follow",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 45
+      "line": 103
     },
     {
       "method": "POST",
       "path": "/api/users/:id/follow",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 44
+      "line": 102
     },
     {
       "method": "GET",
       "path": "/api/users/:id/followers",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 46
+      "line": 104
     },
     {
       "method": "GET",
       "path": "/api/users/:id/following",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 47
+      "line": 105
     },
     {
       "method": "GET",
       "path": "/api/users/:id/posts",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 48
+      "line": 106
     },
     {
       "method": "GET",
       "path": "/api/users/:identifier",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 43
+      "line": 101
     },
     {
       "method": "GET",
       "path": "/api/users/:identifier/tournaments",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 33
+      "line": 91
     },
     {
       "method": "POST",
       "path": "/api/users/:teamId/leave-request",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 58
+      "line": 116
     },
     {
       "method": "GET",
       "path": "/api/users/:teamId/leave-requests",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 59
+      "line": 117
     },
     {
       "method": "GET",
       "path": "/api/users/:teamId/pending-invites",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 57
+      "line": 115
     },
     {
       "method": "DELETE",
       "path": "/api/users/:teamId/roster/:game/:playerId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 52
+      "line": 110
     },
     {
       "method": "DELETE",
       "path": "/api/users/:teamId/roster/:game/leave",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 51
+      "line": 109
     },
     {
       "method": "POST",
       "path": "/api/users/:teamId/roster/add",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 50
+      "line": 108
     },
     {
       "method": "DELETE",
       "path": "/api/users/:teamId/staff/:playerId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 56
+      "line": 114
     },
     {
       "method": "POST",
       "path": "/api/users/:teamId/staff/add",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 53
+      "line": 111
     },
     {
       "method": "POST",
       "path": "/api/users/:teamId/staff/add-by-username",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 54
+      "line": 112
     },
     {
       "method": "DELETE",
       "path": "/api/users/:teamId/staff/cancel-by-username",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 55
+      "line": 113
     },
     {
       "method": "GET",
       "path": "/api/users/:userId/dm-privacy",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 39
+      "line": 97
     },
     {
       "method": "GET",
       "path": "/api/users/:username/tournament-history",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 34
+      "line": 92
     },
     {
       "method": "GET",
       "path": "/api/users/avatar/:userId",
       "access": "public",
       "source": "src/modules/users/users.routes.ts",
-      "line": 17
+      "line": 75
     },
     {
       "method": "DELETE",
       "path": "/api/users/block/:username",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 20
+      "line": 78
     },
     {
       "method": "POST",
       "path": "/api/users/block/:username",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 19
+      "line": 77
     },
     {
       "method": "GET",
       "path": "/api/users/blocked",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 18
+      "line": 76
     },
     {
       "method": "POST",
       "path": "/api/users/create-team",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 16
+      "line": 74
     },
     {
       "method": "POST",
       "path": "/api/users/follow-requests/:requestId/accept",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 41
+      "line": 99
     },
     {
       "method": "POST",
       "path": "/api/users/follow-requests/:requestId/reject",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 42
+      "line": 100
     },
     {
       "method": "GET",
       "path": "/api/users/follow-requests/incoming",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 40
+      "line": 98
     },
     {
       "method": "GET",
       "path": "/api/users/gaming-stats",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 27
+      "line": 85
     },
     {
       "method": "POST",
       "path": "/api/users/gaming-stats",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 28
+      "line": 86
     },
     {
       "method": "DELETE",
       "path": "/api/users/gaming-stats/:statId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 30
+      "line": 88
     },
     {
       "method": "PUT",
       "path": "/api/users/gaming-stats/:statId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 29
+      "line": 87
     },
     {
       "method": "POST",
       "path": "/api/users/gaming-stats/sync-coc",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 31
+      "line": 89
     },
     {
       "method": "POST",
       "path": "/api/users/gaming-stats/sync-cr",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 32
+      "line": 90
     },
     {
       "method": "POST",
       "path": "/api/users/leave-requests/:requestId/approve",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 60
+      "line": 118
     },
     {
       "method": "POST",
       "path": "/api/users/leave-requests/:requestId/reject",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 61
+      "line": 119
     },
     {
       "method": "GET",
       "path": "/api/users/notification-settings",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 37
+      "line": 95
     },
     {
       "method": "PUT",
       "path": "/api/users/notification-settings",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 38
+      "line": 96
     },
     {
       "method": "GET",
       "path": "/api/users/privacy-settings",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 35
+      "line": 93
     },
     {
       "method": "PUT",
       "path": "/api/users/privacy-settings",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 36
+      "line": 94
     },
     {
       "method": "DELETE",
       "path": "/api/users/roster-invite/:inviteId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 21
+      "line": 79
     },
     {
       "method": "GET",
       "path": "/api/users/roster-invites",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 23
+      "line": 81
     },
     {
       "method": "POST",
       "path": "/api/users/roster-invites/:inviteId/accept",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 24
+      "line": 82
     },
     {
       "method": "POST",
       "path": "/api/users/roster-invites/:inviteId/decline",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 25
+      "line": 83
     },
     {
       "method": "GET",
       "path": "/api/users/search",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 15
+      "line": 73
     },
     {
       "method": "DELETE",
       "path": "/api/users/staff-invite/:inviteId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 26
+      "line": 84
     },
     {
       "method": "GET",
@@ -3118,91 +3342,85 @@
       "direction": "outbound",
       "event": "broadcast_message",
       "source": "src/legacy-src/controllers/tournamentController.js",
-      "line": 447
+      "line": 887
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 467
+      "line": 503
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 482
+      "line": 518
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 488
+      "line": 524
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 496
+      "line": 532
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 513
+      "line": 549
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 526
+      "line": 562
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 547
+      "line": 583
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 561
+      "line": 600
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 680
+      "line": 719
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 745
+      "line": 784
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 759
+      "line": 798
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 763
+      "line": 802
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 767
-    },
-    {
-      "direction": "outbound",
-      "event": "call-error",
-      "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 772
+      "line": 806
     },
     {
       "direction": "outbound",
@@ -3214,19 +3432,25 @@
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 855
+      "line": 858
+    },
+    {
+      "direction": "outbound",
+      "event": "call-error",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 902
     },
     {
       "direction": "inbound",
       "event": "call-request",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 453
+      "line": 489
     },
     {
       "direction": "inbound",
       "event": "call-signal",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 688
+      "line": 727
     },
     {
       "direction": "outbound",
@@ -3268,43 +3492,49 @@
       "direction": "inbound",
       "event": "disconnect",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 871
+      "line": 918
     },
     {
       "direction": "inbound",
       "event": "group-call-join",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 801
+      "line": 848
     },
     {
       "direction": "outbound",
       "event": "group-call-joined",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 832
+      "line": 834
+    },
+    {
+      "direction": "outbound",
+      "event": "group-call-joined",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 879
     },
     {
       "direction": "inbound",
       "event": "group-call-leave",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 865
+      "line": 912
     },
     {
       "direction": "outbound",
       "event": "group-call-not-found",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 807
+      "line": 854
     },
     {
       "direction": "inbound",
       "event": "group-call-request",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 752
+      "line": 791
     },
     {
       "direction": "inbound",
       "event": "group-call-signal",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 841
+      "line": 888
     },
     {
       "direction": "inbound",
@@ -3316,13 +3546,13 @@
       "direction": "inbound",
       "event": "join-random-queue",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 318
+      "line": 354
     },
     {
       "direction": "inbound",
       "event": "join-random-room",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 334
+      "line": 370
     },
     {
       "direction": "inbound",
@@ -3340,19 +3570,19 @@
       "direction": "inbound",
       "event": "leave-random-queue",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 327
+      "line": 363
     },
     {
       "direction": "inbound",
       "event": "leave-random-room",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 354
+      "line": 390
     },
     {
       "direction": "inbound",
       "event": "media-state",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 439
+      "line": 475
     },
     {
       "direction": "inbound",
@@ -3388,55 +3618,55 @@
       "direction": "inbound",
       "event": "random-connection-message",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 372
+      "line": 408
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 341
+      "line": 377
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 365
+      "line": 401
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 379
+      "line": 415
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 400
+      "line": 436
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 417
+      "line": 453
     },
     {
       "direction": "inbound",
       "event": "random-session-ready",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 360
+      "line": 396
     },
     {
       "direction": "outbound",
       "event": "random-session-timer-sync",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 351
+      "line": 387
     },
     {
       "direction": "outbound",
       "event": "room-joined",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 346
+      "line": 382
     },
     {
       "direction": "inbound",
@@ -3448,7 +3678,7 @@
       "direction": "outbound",
       "event": "tournament_updated",
       "source": "src/legacy-src/controllers/tournamentController.js",
-      "line": 381
+      "line": 803
     },
     {
       "direction": "inbound",
@@ -3466,19 +3696,19 @@
       "direction": "inbound",
       "event": "video-state-change",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 426
+      "line": 462
     },
     {
       "direction": "inbound",
       "event": "webrtc-request-offer",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 410
+      "line": 446
     },
     {
       "direction": "inbound",
       "event": "webrtc-signal",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 390
+      "line": 426
     }
   ]
 }

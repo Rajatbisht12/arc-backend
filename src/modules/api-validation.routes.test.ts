@@ -17,6 +17,7 @@ import randomConnectionsRouter from "./random-connections/random-connections.rou
 import reportsRouter from "./reports/reports.routes";
 import storiesRouter from "./stories/stories.routes";
 import tournamentsRouter from "./tournaments/tournaments.routes";
+import usersRouter from "./users/users.routes";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const callsRouter = require("../legacy-src/routes/calls.js");
@@ -158,6 +159,18 @@ const run = (): void => {
   assertRateLimited(messagesRouter, "get", "/join/:inviteToken/preview");
 
   [
+    ["post", "/:teamId/roster/add"],
+    ["post", "/:teamId/staff/add"],
+    ["post", "/:teamId/staff/add-by-username"],
+    ["delete", "/:teamId/staff/cancel-by-username"],
+    ["get", "/:teamId/pending-invites"],
+    ["delete", "/roster-invite/:inviteId"],
+    ["post", "/roster-invites/:inviteId/accept"],
+    ["post", "/roster-invites/:inviteId/decline"],
+    ["delete", "/staff-invite/:inviteId"]
+  ].forEach(([method, path]) => assertValidationTerminal(usersRouter, method, path));
+
+  [
     ["get", "/:id"],
     ["post", "/:id/view"],
     ["post", "/:id/like"],
@@ -256,6 +269,27 @@ const run = (): void => {
     "id"
   );
   assert.equal(publicLookupNextCalls, 1, "Public tournament detail must continue accepting share codes");
+
+  const shortGameTournamentLookup = responseRecorder();
+  paramHandler(tournamentsRouter, "id")(
+    { method: "GET", path: "/TRN-FF-A1B2C3D4" },
+    shortGameTournamentLookup,
+    () => { publicLookupNextCalls += 1; },
+    "TRN-FF-A1B2C3D4",
+    "id"
+  );
+  assert.equal(publicLookupNextCalls, 2, "Two-letter game tournament codes must remain valid");
+
+  const malformedPublicLookup = responseRecorder();
+  paramHandler(tournamentsRouter, "id")(
+    { method: "GET", path: "/not-a-code" },
+    malformedPublicLookup,
+    () => { publicLookupNextCalls += 1; },
+    "not-a-code",
+    "id"
+  );
+  assert.equal(malformedPublicLookup.statusCode, 400);
+  assert.equal(publicLookupNextCalls, 2, "Malformed public detail identifiers must not bypass validation");
 
   console.log("Mounted API validation and password-oracle route contracts passed");
 };

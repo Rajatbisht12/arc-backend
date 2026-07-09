@@ -8,6 +8,7 @@ const Story = require('../models/Story');
 const TeamRecruitment = require('../models/TeamRecruitment');
 const PlayerProfile = require('../models/PlayerProfile');
 const RecruitmentApplication = require('../models/RecruitmentApplication');
+const RecruitmentPostingQuota = require('../models/RecruitmentPostingQuota');
 const RandomConnection = require('../models/RandomConnection');
 const Feedback = require('../models/Feedback');
 const BoostCampaign = require('../models/BoostCampaign');
@@ -37,6 +38,22 @@ const { invalidateUserCache } = require('../middleware/auth');
 const { invalidateProfileCache } = require('../utils/profileCache');
 const { evictPresenceAudience } = require('../utils/presencePrivacy');
 const { disconnectUserSockets } = require('../utils/realtimePrivacy');
+const {
+  getTournamentPhase,
+  getNextTournamentTransitionAt,
+  registrationWindowQuery,
+  upcomingWindowQuery,
+  registrationClosedWindowQuery,
+  ongoingWindowQuery,
+  completedWindowQuery
+} = require('../utils/tournamentDateTime');
+const { getTournamentCapacity } = require('../utils/tournamentCapacity');
+const { deleteTournamentAndCleanup } = require('../services/tournamentDeletionService');
+const {
+  approve: approveHostVerificationReview,
+  reject: rejectHostVerificationReview,
+  revoke: revokeHostVerificationReview
+} = require('../services/hostVerificationReviewService');
 const { PLATFORM_DEFAULT_CPM, getOrCreateCurrentCycle } = require('../services/CreatorEarningsCalculationService');
 const { buildUniquePostViewPipeline } = require('../services/postEngagementAnalytics');
 const {
@@ -126,6 +143,37 @@ const normalizeLimit = (value, fallback = 20, max = 100) => Math.min(max, Math.m
 const normalizePage = (value) => Math.min(10000, Math.max(1, parseInt(value, 10) || 1));
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const normalizeSearchPattern = (value, maxLength = 100) => escapeRegex(String(value || '').trim().slice(0, maxLength));
+
+const hostVerificationResultObject = (value) => (
+  value && typeof value.toObject === 'function' ? value.toObject() : value
+);
+
+const bestEffortHostVerificationSideEffect = async (action, userId, operation, errorLogger = log) => {
+  try {
+    await operation();
+  } catch (error) {
+    errorLogger.error(`Host verification ${action} side effect failed after commit`, {
+      action,
+      userId: String(userId || ''),
+      error: String(error)
+    });
+  }
+};
+
+const sendHostVerificationMutationError = (res, error, fallbackMessage) => {
+  if (error?.statusCode) {
+    return res.status(error.statusCode).json({
+      success: false,
+      code: error.code,
+      message: error.message
+    });
+  }
+  return res.status(500).json({
+    success: false,
+    message: fallbackMessage,
+    error: process.env.NODE_ENV === 'development' ? error?.message : undefined
+  });
+};
 
 const getAdminActor = (req) => ({
   username: req.user?.username || 'admin',
@@ -699,12 +747,13 @@ const deleteUser = async (req, res) => {
     // withdrawal history.
     // Resolve owned recruitment IDs before deleting the account so dependent
     // applications cannot survive as broken references.
-    const ownedRecruitmentIds = await TeamRecruitment.distinct('_id', { team: userId });
+    let ownedRecruitmentIds = [];
 
     let deletionSession;
     try {
       deletionSession = await startFinancialSession();
       await deletionSession.withTransaction(async () => {
+        ownedRecruitmentIds = await TeamRecruitment.distinct('_id', { team: userId }).session(deletionSession);
         const hasPayoutHistory = await CreatorPayout.exists({ user: userId }).session(deletionSession);
         const hasWithdrawalHistory = await WithdrawalRequest.exists({ user: userId }).session(deletionSession);
         if (hasPayoutHistory || hasWithdrawalHistory) {
@@ -747,6 +796,27 @@ const deleteUser = async (req, res) => {
             throw Object.assign(new Error('Bank details became reserved while deleting this account.'), { code: 'FINANCIAL_RECORD_RETENTION_REQUIRED' });
           }
         }
+        await Promise.all([
+          TeamRecruitment.deleteMany({ team: userId }, { session: deletionSession }),
+          PlayerProfile.deleteMany({ player: userId }, { session: deletionSession }),
+          RecruitmentApplication.deleteMany({
+            $or: [
+              { applicant: userId },
+              { recruitment: { $in: ownedRecruitmentIds } }
+            ]
+          }, { session: deletionSession }),
+          TeamRecruitment.updateMany(
+            {},
+            { $pull: { applicants: { user: userId } } },
+            { session: deletionSession }
+          ),
+          PlayerProfile.updateMany(
+            {},
+            { $pull: { interestedTeams: { team: userId } } },
+            { session: deletionSession }
+          ),
+          RecruitmentPostingQuota.deleteMany({ player: userId }, { session: deletionSession })
+        ]);
         const deletedUser = await User.deleteOne({ _id: userId }, { session: deletionSession });
         if (deletedUser.deletedCount !== 1) throw Object.assign(new Error('User changed while being deleted.'), { code: 'USER_DELETE_CONFLICT' });
       }, FINANCIAL_TRANSACTION_OPTIONS);
@@ -765,16 +835,6 @@ const deleteUser = async (req, res) => {
       Post.deleteMany({ author: userId }),
       Message.deleteMany({ $or: [{ sender: userId }, { recipient: userId }] }),
       Notification.deleteMany({ $or: [{ recipient: userId }, { sender: userId }] }),
-      TeamRecruitment.deleteMany({ team: userId }),
-      PlayerProfile.deleteMany({ player: userId }),
-      RecruitmentApplication.deleteMany({
-        $or: [
-          { applicant: userId },
-          { recruitment: { $in: ownedRecruitmentIds } }
-        ]
-      }),
-      TeamRecruitment.updateMany({}, { $pull: { applicants: { user: userId } } }),
-      PlayerProfile.updateMany({}, { $pull: { interestedTeams: { team: userId } } }),
       Follow.deleteMany({ $or: [{ follower: userId }, { following: userId }] }),
       FollowRequest.deleteMany({ $or: [{ requester: userId }, { target: userId }] })
     ]);
@@ -890,6 +950,13 @@ const getTournaments = async (req, res) => {
     const limit = normalizeLimit(req.query.limit, 10, 100);
     const search = normalizeSearchPattern(req.query.search);
     const { status } = req.query;
+    const allowedStatuses = new Set([
+      'all', 'Upcoming', 'Registration Open', 'Registration Closed',
+      'Ongoing', 'Completed', 'Cancelled'
+    ]);
+    if (status !== undefined && (typeof status !== 'string' || !allowedStatuses.has(status))) {
+      return res.status(400).json({ success: false, message: 'Invalid tournament status filter' });
+    }
     
     let query = {};
     
@@ -904,11 +971,25 @@ const getTournaments = async (req, res) => {
     
     // Status filter
     if (status && status !== 'all') {
-      query.status = status;
+      const now = new Date();
+      const effectiveStatusQuery = status === 'Registration Open'
+        ? registrationWindowQuery(now)
+        : status === 'Upcoming'
+          ? upcomingWindowQuery(now)
+          : status === 'Registration Closed'
+            ? registrationClosedWindowQuery(now)
+            : status === 'Ongoing'
+              ? ongoingWindowQuery(now)
+              : status === 'Completed'
+                ? completedWindowQuery(now)
+                : { status };
+      query = Object.keys(query).length > 0
+        ? { $and: [query, effectiveStatusQuery] }
+        : effectiveStatusQuery;
     }
     
     const tournaments = await Tournament.find(query)
-      .select('name description game startDate endDate totalSlots participants prizePool status isActive createdAt updatedAt host')
+      .select('name description game format registrationStartDate registrationEndDate registrationDeadline tournamentStartDate tournamentEndDate startDate endDate timezone totalSlots participants teams prizePool prizePoolType prizePoolCurrency status createdAt updatedAt host')
       .populate('host', 'username profile.displayName')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
@@ -916,9 +997,22 @@ const getTournaments = async (req, res) => {
 
     const total = await Tournament.countDocuments(query);
 
+    const serverTime = new Date();
+    const tournamentRows = tournaments.map((tournament) => {
+      const value = tournament.toObject();
+      const nextTransitionAt = getNextTournamentTransitionAt(value, serverTime);
+      return {
+        ...value,
+        effectivePhase: getTournamentPhase(value, serverTime),
+        nextTransitionAt: nextTransitionAt ? nextTransitionAt.toISOString() : null,
+        capacity: getTournamentCapacity(value)
+      };
+    });
+
     res.json({
       success: true,
-      tournaments,
+      tournaments: tournamentRows,
+      serverTime: serverTime.toISOString(),
       pagination: {
         total,
         pages: Math.ceil(total / limit),
@@ -935,13 +1029,27 @@ const getTournaments = async (req, res) => {
 const deleteTournament = async (req, res) => {
   try {
     const { tournamentId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(tournamentId)) {
+      return res.status(400).json({ success: false, message: 'Valid tournament ID is required' });
+    }
     
-    const tournament = await Tournament.findByIdAndDelete(tournamentId);
-    if (!tournament) {
+    const deletion = await deleteTournamentAndCleanup({ tournamentId });
+    if (!deletion) {
       return res.status(404).json({ success: false, message: 'Tournament not found' });
     }
+    if (deletion.blocked) {
+      return res.status(409).json({
+        success: false,
+        code: deletion.code,
+        message: 'This legacy paid tournament must be financially reconciled before deletion.'
+      });
+    }
 
-    res.json({ success: true, message: 'Tournament deleted successfully' });
+    res.json({
+      success: true,
+      message: 'Tournament deleted successfully',
+      data: { cleanupPending: deletion.cleanupFailures.length > 0 }
+    });
   } catch (error) {
     log.error('Delete tournament error:', { error: String(error) });
     res.status(500).json({ success: false, message: 'Server error' });
@@ -985,6 +1093,15 @@ const updateReport = async (req, res) => {
     const { status, adminAction } = req.body;
     const adminId = req.user._id;
 
+    if (!mongoose.Types.ObjectId.isValid(reportId)) {
+      return res.status(400).json({ success: false, message: 'Invalid report ID' });
+    }
+    const allowedStatuses = new Set(['pending', 'dismissed', 'action_taken']);
+    const allowedActions = new Set(['', 'dismiss', 'hide_content', 'delete_content', 'warn_user', 'ban_user']);
+    if ((status && !allowedStatuses.has(status)) || (adminAction !== undefined && !allowedActions.has(adminAction))) {
+      return res.status(400).json({ success: false, message: 'Invalid report moderation action' });
+    }
+
     const report = await Report.findById(reportId);
     if (!report) {
       return res.status(404).json({ success: false, message: 'Report not found' });
@@ -996,38 +1113,69 @@ const updateReport = async (req, res) => {
     report.reviewedAt = new Date();
     if (adminAction === 'dismiss' || !adminAction) report.status = 'dismissed';
     else report.status = 'action_taken';
-    await report.save();
-
     if (adminAction === 'hide_content' && report.targetType === 'post') {
       await Post.findByIdAndUpdate(report.targetId, { hiddenByAdmin: true, isActive: false });
+    } else if (adminAction === 'hide_content' && report.targetType === 'recruitment') {
+      const hidden = await TeamRecruitment.findByIdAndUpdate(
+        report.targetId,
+        { status: 'closed', isActive: false }
+      );
+      if (!hidden) return res.status(404).json({ success: false, message: 'Recruitment report target not found' });
     } else if (adminAction === 'delete_content' && report.targetType === 'post') {
       await Post.findByIdAndDelete(report.targetId);
+    } else if (adminAction === 'delete_content' && report.targetType === 'recruitment') {
+      const session = await mongoose.startSession();
+      let deleted = null;
+      try {
+        await session.withTransaction(async () => {
+          deleted = await TeamRecruitment.findOneAndDelete({ _id: report.targetId }, { session });
+          if (!deleted) return;
+          await RecruitmentApplication.deleteMany({ recruitment: report.targetId }, { session });
+        });
+      } finally {
+        await session.endSession().catch(() => null);
+      }
+      if (!deleted) return res.status(404).json({ success: false, message: 'Recruitment report target not found' });
     } else if (adminAction === 'warn_user') {
-      const post = await Post.findById(report.targetId).select('author');
-      if (post?.author) {
+      const target = report.targetType === 'recruitment'
+        ? await TeamRecruitment.findById(report.targetId).select('team').lean()
+        : await Post.findById(report.targetId).select('author').lean();
+      const targetOwnerId = target?.team || target?.author;
+      if (targetOwnerId) {
         await createSystemNotification(
-          post.author,
+          targetOwnerId,
           'Content Report Warning',
           'Your content was reported and reviewed. Please ensure it follows community guidelines.',
           { type: 'content_report_warning', reportId: report._id }
         );
       }
     } else if (adminAction === 'ban_user') {
-      const post = await Post.findById(report.targetId).select('author');
-      if (post?.author) {
+      const target = report.targetType === 'recruitment'
+        ? await TeamRecruitment.findById(report.targetId).select('team').lean()
+        : await Post.findById(report.targetId).select('author').lean();
+      const targetOwnerId = target?.team || target?.author;
+      if (targetOwnerId) {
         const suspendedUser = await User.findByIdAndUpdate(
-          post.author,
+          targetOwnerId,
           { isActive: false },
           { new: true }
         ).select('username');
         await Promise.all([
-          invalidateUserCache(post.author),
-          invalidateProfileCache(post.author, suspendedUser?.username)
+          invalidateUserCache(targetOwnerId),
+          invalidateProfileCache(targetOwnerId, suspendedUser?.username),
+          TeamRecruitment.updateMany(
+            { team: targetOwnerId, isActive: true },
+            { $set: { status: 'closed', isActive: false } }
+          ),
+          PlayerProfile.updateMany(
+            { player: targetOwnerId, isActive: true },
+            { $set: { status: 'inactive', isActive: false } }
+          )
         ]);
-        evictPresenceAudience(global._arcSocketIO, post.author);
-        await disconnectUserSockets(global._arcSocketIO, post.author, 'account_suspended');
+        evictPresenceAudience(global._arcSocketIO, targetOwnerId);
+        await disconnectUserSockets(global._arcSocketIO, targetOwnerId, 'account_suspended');
         await createSystemNotification(
-          post.author,
+          targetOwnerId,
           'Account Suspended',
           'Your ARC account has been suspended following a report review. Contact ARC support if you believe this was a mistake.',
           { type: 'account_suspended', reportId: report._id },
@@ -1035,6 +1183,8 @@ const updateReport = async (req, res) => {
         );
       }
     }
+
+    await report.save();
 
     const updated = await Report.findById(reportId)
       .populate('reporter', 'username profile.displayName')
@@ -2453,44 +2603,44 @@ const getHostVerificationApplications = async (req, res) => {
 const approveHostVerificationApplication = async (req, res) => {
   try {
     const { id } = req.params;
-    const adminId = req.user._id;
+    const result = await approveHostVerificationReview({
+      applicationId: id,
+      adminId: req.user?._id || null
+    });
+    const application = result.application;
+    const applicationValue = hostVerificationResultObject(application);
+    res.locals.auditBefore = {
+      application: result.beforeApplication,
+      user: result.beforeUser
+    };
+    res.locals.auditAfter = {
+      application: applicationValue,
+      user: { ...result.beforeUser, isVerifiedHost: true }
+    };
 
-    // Find application by ID
-    const application = await HostVerificationApplication.findById(id);
-    if (!application) {
-      return res.status(404).json({
-        success: false,
-        message: 'Application not found'
-      });
-    }
+    // Database state is already committed. Cache eviction and delivery are
+    // best-effort and must never turn a successful review into a false 500.
+    await Promise.all([
+      bestEffortHostVerificationSideEffect('approval cache invalidation', result.userId, () => (
+        invalidateUserCache(result.userId)
+      )),
+      bestEffortHostVerificationSideEffect('approval notification', result.userId, () => (
+        createSystemNotification(
+          result.userId,
+          'Verified Host Application Approved',
+          'Congratulations! Your Verified Host application has been approved. You can now host prize pool tournaments and scrims.',
+          {
+            type: 'host_verification_approved',
+            applicationId: application._id,
+            customData: {
+              notificationDedupeKey: `host-verification-approved:${String(application._id)}:${new Date(application.reviewedAt).toISOString()}`
+            }
+          }
+        )
+      ))
+    ]);
 
-    // Check if application is pending
-    if (application.status !== 'pending') {
-      return res.status(400).json({
-        success: false,
-        message: 'Application is not pending'
-      });
-    }
-
-    // Update application status
-    application.status = 'approved';
-    application.reviewedAt = new Date();
-    application.reviewedBy = adminId;
-    await application.save();
-
-    // Set user.isVerifiedHost = true and invalidate auth cache so authorization updates immediately.
-    await User.findByIdAndUpdate(application.user, { isVerifiedHost: true });
-    await invalidateUserCache(application.user);
-
-    // Send system notification with approval message from Requirement 6.6
-    await createSystemNotification(
-      application.user,
-      'Verified Host Application Approved',
-      'Congratulations! Your Verified Host application has been approved. You can now host prize pool tournaments and scrims.',
-      { type: 'host_verification_approved', applicationId: application._id }
-    );
-
-    res.json({
+    return res.json({
       success: true,
       message: 'Application approved successfully',
       data: {
@@ -2504,11 +2654,7 @@ const approveHostVerificationApplication = async (req, res) => {
     });
   } catch (error) {
     log.error('Approve host verification application error:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to approve application',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendHostVerificationMutationError(res, error, 'Failed to approve application');
   }
 };
 
@@ -2517,46 +2663,41 @@ const rejectHostVerificationApplication = async (req, res) => {
   try {
     const { id } = req.params;
     const { rejectionReason } = req.body || {};
-    const adminId = req.user._id;
-
-    // Find application by ID
-    const application = await HostVerificationApplication.findById(id);
-    if (!application) {
-      return res.status(404).json({
-        success: false,
-        message: 'Application not found'
-      });
-    }
-
-    // Check if application is pending
-    if (application.status !== 'pending') {
-      return res.status(400).json({
-        success: false,
-        message: 'Application is not pending'
-      });
-    }
-
-    // Update application status
-    application.status = 'rejected';
-    application.reviewedAt = new Date();
-    application.reviewedBy = adminId;
-    application.rejectionReason = rejectionReason || '';
-    await application.save();
-
-    // Do NOT change user.isVerifiedHost (as specified in task details)
+    const result = await rejectHostVerificationReview({
+      applicationId: id,
+      adminId: req.user?._id || null,
+      rejectionReason
+    });
+    const application = result.application;
+    const applicationValue = hostVerificationResultObject(application);
+    res.locals.auditBefore = {
+      application: result.beforeApplication,
+      user: result.beforeUser
+    };
+    res.locals.auditAfter = {
+      application: applicationValue,
+      user: result.beforeUser
+    };
 
     // Send system notification with rejection message from Requirement 6.7
-    const notificationMessage = 'Your Verified Host application has been reviewed. Unfortunately, it was not approved at this time.' + 
-      (rejectionReason ? ` ${rejectionReason}` : '');
-    
-    await createSystemNotification(
-      application.user,
-      'Verified Host Application Rejected',
-      notificationMessage,
-      { type: 'host_verification_rejected', applicationId: application._id }
-    );
+    const notificationMessage = 'Your Verified Host application has been reviewed. Unfortunately, it was not approved at this time.' +
+      (result.rejectionReason ? ` ${result.rejectionReason}` : '');
+    await bestEffortHostVerificationSideEffect('rejection notification', result.userId, () => (
+      createSystemNotification(
+        result.userId,
+        'Verified Host Application Rejected',
+        notificationMessage,
+        {
+          type: 'host_verification_rejected',
+          applicationId: application._id,
+          customData: {
+            notificationDedupeKey: `host-verification-rejected:${String(application._id)}:${new Date(application.reviewedAt).toISOString()}`
+          }
+        }
+      )
+    ));
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Application rejected successfully',
       data: {
@@ -2571,11 +2712,7 @@ const rejectHostVerificationApplication = async (req, res) => {
     });
   } catch (error) {
     log.error('Reject host verification application error:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to reject application',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendHostVerificationMutationError(res, error, 'Failed to reject application');
   }
 };
 
@@ -2626,40 +2763,47 @@ const getVerifiedHosts = async (req, res) => {
 const revokeHostVerification = async (req, res) => {
   try {
     const { userId } = req.params;
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    if (!user.isVerifiedHost) {
-      return res.status(400).json({ success: false, message: 'User is not a verified host' });
-    }
-
-    // Revoke verification and invalidate auth cache so authorization updates immediately.
-    await User.findByIdAndUpdate(userId, { isVerifiedHost: false });
-    await invalidateUserCache(userId);
-
-    // Also update their approved application status back to pending (optional — mark as revoked)
-    await HostVerificationApplication.findOneAndUpdate(
-      { user: userId, status: 'approved' },
-      { status: 'rejected', rejectionReason: 'Verification revoked by admin', reviewedAt: new Date(), reviewedBy: req.user._id }
-    );
-
-    await createSystemNotification(
+    const result = await revokeHostVerificationReview({
       userId,
-      'Verified Host Status Revoked',
-      'Your Verified Host status has been revoked by an administrator. Contact ARC support if you believe this was a mistake.',
-      { type: 'host_verification_revoked' }
-    );
+      adminId: req.user?._id || null
+    });
+    const applicationValue = hostVerificationResultObject(result.application);
+    res.locals.auditBefore = {
+      application: result.beforeApplication,
+      user: result.beforeUser
+    };
+    res.locals.auditAfter = {
+      application: applicationValue,
+      user: { ...result.beforeUser, isVerifiedHost: false }
+    };
 
-    res.json({
+    await Promise.all([
+      bestEffortHostVerificationSideEffect('revocation cache invalidation', userId, () => (
+        invalidateUserCache(userId)
+      )),
+      bestEffortHostVerificationSideEffect('revocation notification', userId, () => (
+        createSystemNotification(
+          userId,
+          'Verified Host Status Revoked',
+          'Your Verified Host status has been revoked by an administrator. Contact ARC support if you believe this was a mistake.',
+          {
+            type: 'host_verification_revoked',
+            applicationId: result.application?._id,
+            customData: {
+              notificationDedupeKey: `host-verification-revoked:${String(result.application?._id || userId)}:${new Date(result.application?.reviewedAt || Date.now()).toISOString()}`
+            }
+          }
+        )
+      ))
+    ]);
+
+    return res.json({
       success: true,
-      message: `Host verification revoked for @${user.username}`
+      message: `Host verification revoked for @${result.user.username}`
     });
   } catch (err) {
     log.error('revokeHostVerification error:', { error: String(err) });
-    res.status(500).json({ success: false, message: 'Server error' });
+    return sendHostVerificationMutationError(res, err, 'Server error');
   }
 };
 
@@ -3189,6 +3333,8 @@ const globalSearch = async (req, res) => {
       payments,
       hosts,
       recruitments,
+      playerProfiles,
+      recruitmentApplications,
       tournaments
     ] = await Promise.all([
       User.find({ $or: [{ username: text }, { email: text }, { 'profile.displayName': text }, ...(objectId ? [{ _id: objectId }] : [])] })
@@ -3239,6 +3385,19 @@ const globalSearch = async (req, res) => {
         .lean(),
       TeamRecruitment.find({ $or: [{ recruitmentCode: text }, { game: text }, { role: text }, { staffRole: text }, ...(objectId ? [{ _id: objectId }, { team: objectId }] : [])] })
         .populate('team', 'username profile.displayName')
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean(),
+      PlayerProfile.find({ $or: [{ profileCode: text }, { game: text }, { role: text }, { staffRole: text }, { 'playerInfo.playerName': text }, { 'professionalInfo.fullName': text }, ...(objectId ? [{ _id: objectId }, { player: objectId }] : [])] })
+        .populate('player', 'username profile.displayName')
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean(),
+      RecruitmentApplication.find({ $or: [{ status: text }, ...(objectId ? [{ _id: objectId }, { applicant: objectId }, { recruitment: objectId }] : [])] })
+        .select('applicant recruitment applicationType status createdAt updatedAt')
+        .populate('applicant', 'username profile.displayName')
+        .populate('recruitment', 'recruitmentCode recruitmentType game role staffRole team')
+        .sort({ createdAt: -1 })
         .limit(limit)
         .lean(),
       Tournament.find({ $or: [{ name: text }, { game: text }, { status: text }, ...(objectId ? [{ _id: objectId }, { host: objectId }] : [])] })
@@ -3252,7 +3411,21 @@ const globalSearch = async (req, res) => {
       success: true,
       data: {
         query,
-        results: { users, teams, posts, clips, stories, reports, boosts, payments, hosts, recruitments, tournaments }
+        results: {
+          users,
+          teams,
+          posts,
+          clips,
+          stories,
+          reports,
+          boosts,
+          payments,
+          hosts,
+          recruitments,
+          playerProfiles,
+          recruitmentApplications,
+          tournaments
+        }
       }
     });
   } catch (error) {
@@ -3272,6 +3445,8 @@ const getUserInspection = async (req, res) => {
       clips,
       stories,
       recruitments,
+      recruitmentProfiles,
+      recruitmentApplications,
       tournaments,
       payments,
       boosts,
@@ -3283,6 +3458,8 @@ const getUserInspection = async (req, res) => {
       Post.countDocuments({ author: userId, 'content.media.type': 'video' }),
       Story.countDocuments({ author: userId }),
       TeamRecruitment.countDocuments({ team: userId }),
+      PlayerProfile.countDocuments({ player: userId }),
+      RecruitmentApplication.countDocuments({ applicant: userId }),
       Tournament.countDocuments({ host: userId }),
       PaymentTransaction.find({ user: userId }).sort({ createdAt: -1 }).limit(20).lean(),
       BoostCampaign.find({ user: userId }).sort({ createdAt: -1 }).limit(20).lean(),
@@ -3302,6 +3479,8 @@ const getUserInspection = async (req, res) => {
           clips,
           stories,
           recruitments,
+          recruitmentProfiles,
+          recruitmentApplications,
           tournaments
         },
         payments,
@@ -3806,5 +3985,9 @@ module.exports = {
   configureBoostDelivery,
   controlBoostDelivery,
   adjustBoostDelivery,
-  updateBoostCampaignStatus
+  updateBoostCampaignStatus,
+  __testables: {
+    bestEffortHostVerificationSideEffect,
+    sendHostVerificationMutationError
+  }
 };

@@ -38,6 +38,25 @@ const normalizeUserAvatarFields = (dto) => {
   return dto;
 };
 
+const filterInactiveTeamMemberships = (dto) => {
+  if (!dto?.teamInfo || typeof dto.teamInfo !== 'object') return dto;
+  if (Array.isArray(dto.teamInfo.rosters)) {
+    dto.teamInfo.rosters = dto.teamInfo.rosters.map((roster) => ({
+      ...roster,
+      players: Array.isArray(roster?.players)
+        ? roster.players.filter((player) => player?.user && player.isActive !== false)
+        : []
+    }));
+  }
+  if (Array.isArray(dto.teamInfo.staff)) {
+    dto.teamInfo.staff = dto.teamInfo.staff.filter((staff) => (
+      staff?.user
+      && (staff.isActive !== false || staff.leaveRequestStatus === 'pending')
+    ));
+  }
+  return dto;
+};
+
 const formatUserDTO = (user, isGuest = false, isSelf = false, canSeeOnlineStatus = false) => {
   if (!user) return null;
   
@@ -47,6 +66,7 @@ const formatUserDTO = (user, isGuest = false, isSelf = false, canSeeOnlineStatus
     : JSON.parse(JSON.stringify(user));
 
   normalizeUserAvatarFields(dto);
+  filterInactiveTeamMemberships(dto);
 
   // ALWAYS remove these highly sensitive fields from ANY response
   for (const field of [
@@ -189,5 +209,6 @@ const formatPostDTO = (post, isGuest = false, isAuthor = false) => {
 
 module.exports = {
   formatUserDTO,
-  formatPostDTO
+  formatPostDTO,
+  filterInactiveTeamMemberships
 };

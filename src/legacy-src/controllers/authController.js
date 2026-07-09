@@ -17,6 +17,7 @@ const { validateOnboardingProfile } = require('../utils/onboardingValidation');
 const { recordSuccessfulLogin } = require('../utils/userLoginAudit');
 const { normalizeMatchmakingGender } = require('../utils/randomConnectGender');
 const { FINANCIAL_TRANSACTION_OPTIONS, startFinancialSession } = require('../utils/financialTransactions');
+const { TEAM_TYPES, normalizeTeamType } = require('../utils/teamType');
 
 const INVALID_LOGIN_MESSAGE = 'Invalid email or password.';
 
@@ -687,6 +688,17 @@ const updateProfile = async (req, res) => {
 
     // Handle team-specific updates
     if (req.user.userType === 'team' && updates.teamInfo) {
+      if (Object.prototype.hasOwnProperty.call(updates.teamInfo, 'teamType')) {
+        const normalizedTeamType = normalizeTeamType(updates.teamInfo.teamType);
+        if (!normalizedTeamType) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_TEAM_TYPE',
+            message: `Team type must be one of: ${TEAM_TYPES.join(', ')}`
+          });
+        }
+        updates.teamInfo.teamType = normalizedTeamType;
+      }
       Object.keys(updates.teamInfo).forEach(key => {
         updateObject[`teamInfo.${key}`] = updates.teamInfo[key];
       });
@@ -963,9 +975,29 @@ const deleteAccount = async (req, res) => {
       if (financialSession) await financialSession.endSession().catch(() => null);
     }
 
+    let competitionCleanup = { cleanupPending: false, failures: [] };
+    try {
+      const { cleanupAccountCompetitionReferences } = require('../services/accountCompetitionCleanupService');
+      competitionCleanup = await cleanupAccountCompetitionReferences({
+        userId,
+        userType: user.userType
+      });
+    } catch (cleanupError) {
+      competitionCleanup = {
+        cleanupPending: true,
+        failures: [{ step: 'initialize_competition_cleanup', error: String(cleanupError) }]
+      };
+      log.error('Account competition cleanup failed after account deactivation', {
+        userId: String(userId),
+        error: String(cleanupError)
+      });
+    }
+
     const TeamRecruitment = require('../models/TeamRecruitment');
     const PlayerProfile = require('../models/PlayerProfile');
     const RecruitmentApplication = require('../models/RecruitmentApplication');
+    const RecruitmentPostingQuota = require('../models/RecruitmentPostingQuota');
+    const ownedRecruitmentIds = await TeamRecruitment.distinct('_id', { team: userId });
     await Promise.all([
       TeamRecruitment.updateMany(
         { team: userId },
@@ -976,9 +1008,15 @@ const deleteAccount = async (req, res) => {
         { $set: { status: 'inactive', isActive: false } }
       ),
       RecruitmentApplication.updateMany(
-        { applicant: userId },
+        {
+          $or: [
+            { applicant: userId },
+            ...(ownedRecruitmentIds.length ? [{ recruitment: { $in: ownedRecruitmentIds } }] : [])
+          ]
+        },
         { $set: { isActive: false } }
       ),
+      RecruitmentPostingQuota.deleteMany({ player: userId }),
       TeamRecruitment.updateMany({}, { $pull: { applicants: { user: userId } } }),
       PlayerProfile.updateMany({}, { $pull: { interestedTeams: { team: userId } } }),
       Follow.deleteMany({ $or: [{ follower: userId }, { following: userId }] }),
@@ -995,7 +1033,8 @@ const deleteAccount = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Account deleted successfully'
+      message: 'Account deleted successfully',
+      data: { cleanupPending: competitionCleanup.cleanupPending }
     });
 
   } catch (error) {

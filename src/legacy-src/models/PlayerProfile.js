@@ -1,24 +1,9 @@
 const mongoose = require('mongoose');
-const crypto = require('crypto');
+const { generatePlayerProfileCode } = require('../utils/recruitmentShareCode');
 
 // Generate unique shareable ID with prefix and role
 const generateShareableId = function() {
-  const prefix = this.profileType === 'looking-for-team' ? 'PLR' : 'STF';
-  
-  // Get role abbreviation (first 2-3 letters)
-  let roleAbbr = '';
-  if (this.profileType === 'looking-for-team' && this.role) {
-    roleAbbr = this.role.substring(0, 3).toUpperCase().replace(/\s/g, '');
-  } else if (this.profileType === 'staff-position' && this.staffRole) {
-    roleAbbr = this.staffRole.substring(0, 3).toUpperCase().replace(/\s/g, '');
-  } else {
-    roleAbbr = 'GEN';
-  }
-  
-  // Generate random part (8 chars)
-  const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
-  
-  return `${prefix}-${roleAbbr}-${randomPart}`;
+  return generatePlayerProfileCode(this);
 };
 
 const playerProfileSchema = new mongoose.Schema({
@@ -31,7 +16,8 @@ const playerProfileSchema = new mongoose.Schema({
   profileCode: {
     type: String,
     unique: true,
-    index: true
+    index: true,
+    default: generateShareableId
   },
   profileType: {
     type: String,
@@ -48,6 +34,7 @@ const playerProfileSchema = new mongoose.Schema({
   },
   role: {
     type: String,
+    maxlength: 120,
     required: function() {
       return this.profileType === 'looking-for-team';
     }
@@ -62,34 +49,34 @@ const playerProfileSchema = new mongoose.Schema({
   },
   // Player/Staff Information
   playerInfo: {
-    playerName: String,
-    currentRank: String,
-    experienceLevel: String,
-    tournamentExperience: String,
-    achievements: String,
-    availability: String,
-    languages: String,
-    additionalInfo: String
+    playerName: { type: String, maxlength: 120 },
+    currentRank: { type: String, maxlength: 120 },
+    experienceLevel: { type: String, maxlength: 120 },
+    tournamentExperience: { type: String, maxlength: 500 },
+    achievements: { type: String, maxlength: 1500 },
+    availability: { type: String, maxlength: 500 },
+    languages: { type: String, maxlength: 300 },
+    additionalInfo: { type: String, maxlength: 1000 }
   },
   // Staff specific information
   professionalInfo: {
-    fullName: String,
-    experienceLevel: String,
-    availability: String,
-    preferredLocation: String,
-    skillsAndExpertise: String,
-    professionalAchievements: String,
-    portfolio: String
+    fullName: { type: String, maxlength: 120 },
+    experienceLevel: { type: String, maxlength: 120 },
+    availability: { type: String, maxlength: 500 },
+    preferredLocation: { type: String, maxlength: 120 },
+    skillsAndExpertise: { type: String, maxlength: 1500 },
+    professionalAchievements: { type: String, maxlength: 1500 },
+    portfolio: { type: String, maxlength: 800 }
   },
   // Expectations and Contact
   expectations: {
-    expectedSalary: String,
-    compensationPreference: String,
-    preferredTeamSize: String,
-    teamType: String,
-    preferredLocation: String,
-    additionalInfo: String,
-    contactInformation: String
+    expectedSalary: { type: String, maxlength: 200 },
+    compensationPreference: { type: String, maxlength: 200 },
+    preferredTeamSize: { type: String, maxlength: 120 },
+    teamType: { type: String, maxlength: 120 },
+    preferredLocation: { type: String, maxlength: 120 },
+    additionalInfo: { type: String, maxlength: 1000 },
+    contactInformation: { type: String, maxlength: 300 }
   },
   // Status and Metadata
   status: {
@@ -112,7 +99,7 @@ const playerProfileSchema = new mongoose.Schema({
       enum: ['pending', 'reviewed', 'shortlisted', 'rejected', 'accepted'],
       default: 'pending'
     },
-    message: String
+    message: { type: String, maxlength: 1000 }
   }],
   views: {
     type: Number,
@@ -138,6 +125,7 @@ playerProfileSchema.index({ profileType: 1, game: 1, status: 1 });
 playerProfileSchema.index({ 'expectations.preferredLocation': 1 });
 playerProfileSchema.index({ createdAt: -1 });
 playerProfileSchema.index({ expiresAt: 1 });
+playerProfileSchema.index({ isActive: 1, status: 1, expiresAt: 1, profileType: 1, game: 1, createdAt: -1 });
 
 // Virtual for interested teams count
 playerProfileSchema.virtual('interestedTeamsCount').get(function() {

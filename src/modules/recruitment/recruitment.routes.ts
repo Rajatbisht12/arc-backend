@@ -24,6 +24,7 @@ router.post("/team-recruitments/:id/reopen", protect, recruitmentController.reop
 router.delete("/team-recruitments/:id", protect, recruitmentController.deleteTeamRecruitment);
 
 router.post("/player-profiles", protect, ...validatePlayerProfile, recruitmentController.createPlayerProfile);
+router.get("/player-profiles/daily-limit", protect, recruitmentController.getPlayerCardLimit);
 router.get("/player-profiles", protect, recruitmentController.getPlayerProfiles);
 router.get("/player-profiles/:id", publicOptionalAuth, recruitmentController.getPlayerProfile);
 router.get("/profile/:code", publicOptionalAuth, recruitmentController.getPlayerProfile);
