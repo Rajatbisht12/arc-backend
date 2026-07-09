@@ -1,24 +1,9 @@
 const mongoose = require('mongoose');
-const crypto = require('crypto');
+const { generateRecruitmentCode } = require('../utils/recruitmentShareCode');
 
 // Generate unique shareable ID with prefix and role
 const generateShareableId = function() {
-  const prefix = this.recruitmentType === 'roster' ? 'RST' : 'STF';
-  
-  // Get role abbreviation (first 2-3 letters)
-  let roleAbbr = '';
-  if (this.recruitmentType === 'roster' && this.role) {
-    roleAbbr = this.role.substring(0, 3).toUpperCase().replace(/\s/g, '');
-  } else if (this.recruitmentType === 'staff' && this.staffRole) {
-    roleAbbr = this.staffRole.substring(0, 3).toUpperCase().replace(/\s/g, '');
-  } else {
-    roleAbbr = 'GEN';
-  }
-  
-  // Generate random part (8 chars)
-  const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
-  
-  return `${prefix}-${roleAbbr}-${randomPart}`;
+  return generateRecruitmentCode(this);
 };
 
 const teamRecruitmentSchema = new mongoose.Schema({
@@ -49,6 +34,7 @@ const teamRecruitmentSchema = new mongoose.Schema({
   },
   role: {
     type: String,
+    maxlength: 120,
     required: function() {
       return this.recruitmentType === 'roster';
     }
@@ -63,24 +49,24 @@ const teamRecruitmentSchema = new mongoose.Schema({
   },
   // Requirements
   requirements: {
-    dailyPlayingTime: String,
-    tournamentExperience: String,
-    requiredDevice: String,
-    experienceLevel: String,
-    language: String,
-    additionalRequirements: String,
+    dailyPlayingTime: { type: String, maxlength: 120 },
+    tournamentExperience: { type: String, maxlength: 500 },
+    requiredDevice: { type: String, maxlength: 200 },
+    experienceLevel: { type: String, maxlength: 120 },
+    language: { type: String, maxlength: 300 },
+    additionalRequirements: { type: String, maxlength: 1500 },
     // Staff specific requirements
-    availability: String,
-    requiredSkills: String,
-    portfolioRequirements: String
+    availability: { type: String, maxlength: 500 },
+    requiredSkills: { type: String, maxlength: 1500 },
+    portfolioRequirements: { type: String, maxlength: 800 }
   },
   // Benefits and Contact
   benefits: {
-    salary: String,
-    customSalary: String,
-    location: String,
-    benefitsAndPerks: String,
-    contactInformation: String
+    salary: { type: String, maxlength: 200 },
+    customSalary: { type: String, maxlength: 200 },
+    location: { type: String, maxlength: 120 },
+    benefitsAndPerks: { type: String, maxlength: 1000 },
+    contactInformation: { type: String, maxlength: 300 }
   },
   // Status and Metadata
   status: {
@@ -103,9 +89,9 @@ const teamRecruitmentSchema = new mongoose.Schema({
       enum: ['pending', 'reviewed', 'shortlisted', 'rejected', 'accepted'],
       default: 'pending'
     },
-    message: String,
-    resume: String,
-    portfolio: String
+    message: { type: String, maxlength: 1000 },
+    resume: { type: String, maxlength: 2000 },
+    portfolio: { type: String, maxlength: 2000 }
   }],
   views: {
     type: Number,
@@ -131,6 +117,7 @@ teamRecruitmentSchema.index({ recruitmentType: 1, game: 1, status: 1 });
 teamRecruitmentSchema.index({ 'benefits.location': 1 });
 teamRecruitmentSchema.index({ createdAt: -1 });
 teamRecruitmentSchema.index({ expiresAt: 1 });
+teamRecruitmentSchema.index({ isActive: 1, status: 1, expiresAt: 1, recruitmentType: 1, game: 1, createdAt: -1 });
 
 // Virtual for applicant count
 teamRecruitmentSchema.virtual('applicantCount').get(function() {

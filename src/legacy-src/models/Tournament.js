@@ -101,7 +101,9 @@ const tournamentSchema = new mongoose.Schema({
   },
   prizePool: {
     type: Number,
-    default: 0
+    default: 0,
+    min: 0,
+    max: Number.MAX_SAFE_INTEGER
   },
   totalSlots: {
     type: Number,
@@ -130,17 +132,26 @@ const tournamentSchema = new mongoose.Schema({
     enum: ['INR', 'USD', 'EUR', 'GBP'],
     default: 'INR'
   },
+  // Historical builds supported participant-paid tournaments. New payment
+  // endpoints are intentionally retired, but retaining this hidden field lets
+  // the server identify and quarantine unresolved legacy rows instead of
+  // accidentally registering a paid-looking tournament for free.
+  entryFee: {
+    type: Number,
+    default: undefined,
+    select: false
+  },
   // Prize Distribution — host decides how to split the prize pool
   prizeDistribution: [{
     rank: { type: Number, required: true },
     label: { type: String, default: '' },
-    amount: { type: Number, required: true },
+    amount: { type: Number, required: true, min: 0, max: Number.MAX_SAFE_INTEGER },
     percentage: { type: Number, default: 0 }
   }],
   // Special Prizes — custom categories like Most Finishes, Most Wins
   specialPrizes: [{
     category: { type: String, required: true },
-    amount: { type: Number, required: true },
+    amount: { type: Number, required: true, min: 0, max: Number.MAX_SAFE_INTEGER },
     winnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     winnerName: { type: String, default: '' }
   }],
@@ -340,8 +351,9 @@ const tournamentSchema = new mongoose.Schema({
       }
     }],
     timezone: {
-      type: String,
-      default: 'Asia/Kolkata'
+      // Tournament.timezone is canonical. This remains optional only for
+      // legacy schedule documents created before that field existed.
+      type: String
     }
   },
   
@@ -497,11 +509,11 @@ const tournamentSchema = new mongoose.Schema({
       wins: { type: Number, default: 0 },
       finishPoints: { type: Number, default: 0 },
       positionPoints: { type: Number, default: 0 },
-      prizeAmount: { type: Number, default: 0 }
+      prizeAmount: { type: Number, default: 0, min: 0, max: Number.MAX_SAFE_INTEGER }
     }],
     specialPrizeWinners: [{
       category: String,
-      amount: Number,
+      amount: { type: Number, min: 0, max: Number.MAX_SAFE_INTEGER },
       winnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
       winnerName: String
     }],
@@ -521,6 +533,9 @@ tournamentSchema.pre('save', function(next) {
 
 // Indexes for better performance
 tournamentSchema.index({ status: 1, startDate: 1 });
+tournamentSchema.index({ status: 1, registrationStartDate: 1, registrationEndDate: 1 });
+tournamentSchema.index({ status: 1, tournamentStartDate: 1 });
+tournamentSchema.index({ status: 1, tournamentEndDate: 1 });
 tournamentSchema.index({ host: 1 });
 tournamentSchema.index({ game: 1, format: 1 });
 

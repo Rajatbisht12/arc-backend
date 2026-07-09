@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const { 
   createTournament, 
@@ -48,6 +49,25 @@ const {
   getHostingLimits
 } = require('../controllers/tournamentController');
 const { protect, publicOptionalAuth } = require('../middleware/auth');
+
+const tournamentCodePattern = /^TRN-[A-Z0-9]+-[A-Z0-9]{8}$/i;
+
+// Mutations and nested resources are canonical ObjectId APIs. The base public
+// detail GET also retains the historical flexible-code fallback used by Web
+// and Mobile (notably `TRN-FF-XXXXXXXX`, whose game segment has two letters).
+router.param('id', (req, res, next, value) => {
+  const candidate = String(value || '');
+  const isBaseDetailGet = req.method === 'GET' && /^\/[^/]+\/?$/.test(req.path);
+  const validDetailCode = isBaseDetailGet && tournamentCodePattern.test(candidate);
+  if (!mongoose.Types.ObjectId.isValid(candidate) && !validDetailCode) {
+    return res.status(400).json({
+      success: false,
+      code: 'INVALID_TOURNAMENT_ID',
+      message: 'Valid tournament ID is required'
+    });
+  }
+  return next();
+});
 
 // Most routes require authentication, but GET tournaments should be public
 // router.use(protect); // Commented out to allow public access to some routes
@@ -134,6 +154,5 @@ router.post('/:id/assign-special-prize', protect, assignSpecialPrize);
 
 // Registration and tournament control routes
 router.post('/:id/open-registration', protect, openRegistration);
-router.post('/:id/start', protect, startTournament);
 
 module.exports = router;

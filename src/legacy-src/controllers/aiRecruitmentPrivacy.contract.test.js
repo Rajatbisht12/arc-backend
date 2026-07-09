@@ -5,6 +5,9 @@ const {
   addPlayerProfileIntegrityFilters,
   listCanonicalRecruitmentRecords
 } = require('../services/recruitmentPolicy');
+const {
+  buildSmartSearchCandidate
+} = require('../services/aiRecruitmentCandidateContract');
 
 const source = fs.readFileSync(
   path.join(__dirname, 'aiRecruitmentController.js'),
@@ -46,11 +49,65 @@ for (const [name, section] of [
 assert(!matchSection.includes(".populate('player'"));
 assert(!interviewSection.includes(".populate('player'"));
 assert(!searchSection.includes(".populate('player'"));
+assert(
+  interviewSection.includes("req.user.userType !== 'team'"),
+  'interview-question generation must enforce the Web TeamOnlyRoute permission server-side'
+);
 assert(interviewSection.includes('mongoose.Types.ObjectId.isValid'));
 assert(source.includes('viewerBlockedIds: viewer?.blockedUsers || []'));
 assert(source.includes('ownerProjection: AI_CANDIDATE_OWNER_PROJECTION'));
 assert(!source.match(/AI_CANDIDATE_OWNER_PROJECTION[\s\S]*?privacySettings:\s*1/));
 assert(!source.match(/AI_CANDIDATE_OWNER_PROJECTION[\s\S]*?blockedUsers:\s*1/));
+assert.strictEqual(
+  (searchSection.match(/buildSmartSearchCandidate\(/g) || []).length,
+  2,
+  'normal and Gemini-error smart-search paths must share one candidate projector'
+);
+
+const candidateContract = buildSmartSearchCandidate({
+  candidate: {
+    profileId: 'profile-1',
+    playerId: 'player-1',
+    profileCode: 'LFT-ABC123',
+    playerName: 'Fallback Player',
+    game: 'BGMI',
+    role: 'IGL',
+    rank: 'Ace',
+    experience: 'Professional',
+    tournamentExperience: 'National',
+    kdRatio: 2.5,
+    winRate: 68,
+    inGameName: 'FallbackIGN',
+    expectedSalary: 'INR 50,000',
+    preferredLocation: 'Remote'
+  },
+  analysis: {
+    compatibilityScore: 82,
+    summary: 'Fallback summary',
+    strengths: [],
+    concerns: [],
+    reasoning: 'Fallback reasoning',
+    rank: 1
+  },
+  profile: {
+    profileCode: 'LFT-ABC123',
+    player: {
+      _id: 'player-1',
+      username: 'fallback-player',
+      profile: { displayName: 'Fallback Player', avatar: 'avatar.jpg' }
+    }
+  },
+  profileType: 'looking-for-team',
+  searchType: 'players'
+});
+
+assert.strictEqual(candidateContract.player.profile.displayName, 'Fallback Player');
+assert.strictEqual(candidateContract.player.username, 'fallback-player');
+assert.strictEqual(candidateContract.profile.profileCode, 'LFT-ABC123');
+assert.strictEqual(candidateContract.profile.rank, 'Ace');
+assert.strictEqual(candidateContract.profile.kdRatio, 2.5);
+assert.strictEqual(candidateContract.expectations.expectedSalary, 'INR 50,000');
+assert.strictEqual(candidateContract.expectations.preferredLocation, 'Remote');
 
 (async () => {
   const capturedPipelines = [];

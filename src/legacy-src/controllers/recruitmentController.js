@@ -8,6 +8,17 @@ const log = require('../utils/logger');
 const { createAndEmitNotification } = require('../utils/notificationEmitter');
 const { resolvePrivacyAccess } = require('../utils/privacyPolicy');
 const {
+  generateRecruitmentCode,
+  generatePlayerProfileCode,
+  saveWithUniqueShareCode,
+  backfillUniqueShareCode
+} = require('../utils/recruitmentShareCode');
+const {
+  getPlayerCardDailyLimit,
+  reservePlayerCardSlot,
+  releasePlayerCardSlot
+} = require('../services/recruitmentPostingQuota');
+const {
   TEAM_RECRUITMENT_STATUSES,
   PLAYER_PROFILE_STATUSES,
   TEAM_APPLICATION_STATUSES,
@@ -25,7 +36,9 @@ const {
   sameId,
   parsePagination,
   escapeRegex,
-  mergeAllowedObject
+  mergeAllowedObject,
+  validateTeamRecruitmentCreateProgression,
+  validatePlayerProfileCreateProgression
 } = require('../services/recruitmentPolicy');
 
 const RECRUITMENT_REQUIREMENT_FIELDS = [
@@ -97,13 +110,17 @@ const isSameOptionalString = (incoming, existing) => {
 
 const notifyRecruitmentEvent = ({ recipient, sender, title, message, eventType, deliveryKey, data = {} }) =>
   createAndEmitNotification({
-    recipient,
-    sender,
+    recipient: recipient?._id || recipient,
+    sender: sender?._id || sender,
     type: 'recruitment',
     title,
     message,
     data: {
-      deepLink: '/recruitment',
+      deepLink: data.recruitmentCode
+        ? `/recruitment/${encodeURIComponent(String(data.recruitmentCode))}`
+        : data.profileCode
+          ? `/profile/${encodeURIComponent(String(data.profileCode))}`
+          : '/recruitment',
       customData: {
         eventType,
         notificationDedupeKey: deliveryKey,
@@ -161,6 +178,14 @@ const emitRecruitmentDirectMessage = (applicantId, teamId, message) => {
   return true;
 };
 
+const getCanonicalApplicantRecipientIds = async (recruitmentId) => {
+  const recipientIds = await RecruitmentApplication.distinct('applicant', {
+    recruitment: recruitmentId,
+    isActive: true
+  });
+  return Array.from(new Set(recipientIds.map((id) => String(id)).filter(Boolean)));
+};
+
 // Team Recruitment Controllers
 
 // Create team recruitment post
@@ -176,19 +201,15 @@ const createTeamRecruitment = safeAsyncHandler(async (req, res) => {
   // Validate team user
   if (!requireUserType(req, res, 'team', 'Only teams can create recruitment posts')) return;
 
-  // Validate required fields based on recruitment type
-  if (recruitmentType === 'staff' && !staffRole) {
-    return res.status(400).json({
-      success: false,
-      message: 'Staff role is required for staff recruitment'
-    });
-  }
-
-  if (recruitmentType === 'roster' && !role) {
-    return res.status(400).json({
-      success: false,
-      message: 'Role is required for roster recruitment'
-    });
+  const normalizedRequirements = mergeAllowedObject({}, requirements, RECRUITMENT_REQUIREMENT_FIELDS);
+  const normalizedBenefits = mergeAllowedObject({}, benefits, RECRUITMENT_BENEFIT_FIELDS);
+  const progressionError = validateTeamRecruitmentCreateProgression({
+    recruitmentType, game, role, staffRole,
+    requirements: normalizedRequirements,
+    benefits: normalizedBenefits
+  });
+  if (progressionError) {
+    return res.status(400).json({ success: false, message: progressionError });
   }
 
   const recruitment = new TeamRecruitment({
@@ -197,25 +218,15 @@ const createTeamRecruitment = safeAsyncHandler(async (req, res) => {
     game: game || undefined,
     role: recruitmentType === 'roster' ? role : undefined,
     staffRole: recruitmentType === 'staff' ? staffRole : undefined,
-    requirements: mergeAllowedObject({}, requirements, RECRUITMENT_REQUIREMENT_FIELDS),
-    benefits: mergeAllowedObject({}, benefits, RECRUITMENT_BENEFIT_FIELDS)
+    requirements: normalizedRequirements,
+    benefits: normalizedBenefits
   });
 
-  // Generate shareable code with prefix and role
-  const prefix = recruitmentType === 'roster' ? 'RST' : 'STF';
-  let roleAbbr = '';
-  if (recruitmentType === 'roster' && role) {
-    roleAbbr = role.substring(0, 3).toUpperCase().replace(/\s/g, '');
-  } else if (recruitmentType === 'staff' && staffRole) {
-    roleAbbr = staffRole.substring(0, 3).toUpperCase().replace(/\s/g, '');
-  } else {
-    roleAbbr = 'GEN';
-  }
-  const crypto = require('crypto');
-  const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
-  recruitment.recruitmentCode = `${prefix}-${roleAbbr}-${randomPart}`;
-
-  await recruitment.save();
+  await saveWithUniqueShareCode({
+    document: recruitment,
+    codeField: 'recruitmentCode',
+    generateCode: () => generateRecruitmentCode(recruitment)
+  });
 
   // Populate team information
   await recruitment.populate('team', 'username profile.displayName profile.avatar');
@@ -265,23 +276,12 @@ const getTeamRecruitments = safeAsyncHandler(async (req, res) => {
   if (recruitmentType) query.recruitmentType = recruitmentType;
   if (location) query['benefits.location'] = { $regex: escapeRegex(location), $options: 'i' };
 
-  // Search functionality
-  if (search) {
-    const searchPattern = escapeRegex(search);
-    query.$and = query.$and || [];
-    query.$and.push({
-      $or: [
-        { game: { $regex: searchPattern, $options: 'i' } },
-        { role: { $regex: searchPattern, $options: 'i' } },
-        { staffRole: { $regex: searchPattern, $options: 'i' } },
-        { 'requirements.additionalRequirements': { $regex: searchPattern, $options: 'i' } },
-        { 'requirements.requiredSkills': { $regex: searchPattern, $options: 'i' } },
-        { 'requirements.experienceLevel': { $regex: searchPattern, $options: 'i' } },
-        { 'requirements.language': { $regex: searchPattern, $options: 'i' } },
-        { 'benefits.location': { $regex: searchPattern, $options: 'i' } }
-      ]
-    });
-  }
+  const searchPattern = search ? escapeRegex(search) : '';
+  const searchFields = [
+    'game', 'role', 'staffRole', 'requirements.additionalRequirements',
+    'requirements.requiredSkills', 'requirements.experienceLevel',
+    'requirements.language', 'benefits.location'
+  ];
 
   const sortDirection = sortOrder === 'desc' ? -1 : 1;
   const allowedSortFields = new Set(['createdAt', 'game', 'role', 'staffRole', 'applicantCount']);
@@ -298,7 +298,9 @@ const getTeamRecruitments = safeAsyncHandler(async (req, res) => {
     page,
     limit,
     viewerId: req.user?._id,
-    viewerBlockedIds: req.user?.blockedUsers
+    viewerBlockedIds: req.user?.blockedUsers,
+    searchPattern,
+    searchFields
   });
   const totalPages = Math.ceil(total / limit);
 
@@ -354,14 +356,12 @@ const getTeamRecruitment = safeAsyncHandler(async (req, res) => {
 
   // Backfill a shareable code for legacy records without exposing applicant data.
   if (!recruitment.recruitmentCode) {
-    const prefix = recruitment.recruitmentType === 'roster' ? 'RST' : 'STF';
-    const sourceRole = recruitment.recruitmentType === 'roster' ? recruitment.role : recruitment.staffRole;
-    const roleAbbr = sourceRole
-      ? sourceRole.substring(0, 3).toUpperCase().replace(/\s/g, '')
-      : 'GEN';
-    const crypto = require('crypto');
-    recruitment.recruitmentCode = `${prefix}-${roleAbbr}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-    await recruitment.save();
+    await backfillUniqueShareCode({
+      model: TeamRecruitment,
+      document: recruitment,
+      codeField: 'recruitmentCode',
+      generateCode: () => generateRecruitmentCode(recruitment)
+    });
   }
 
   if (!isOwner) {
@@ -452,7 +452,7 @@ const mutateTeamRecruitment = async (req, res, forcedStatus) => {
   await recruitment.populate('team', 'username profile.displayName profile.avatar');
 
   if (requestedStatus !== undefined && requestedStatus !== previousStatus) {
-    const recipients = Array.from(new Set((recruitment.applicants || []).map((entry) => String(entry.user)).filter(Boolean)));
+    const recipients = await getCanonicalApplicantRecipientIds(recruitment._id);
     const notificationResults = await Promise.allSettled(recipients.map((recipient) => notifyRecruitmentEvent({
       recipient,
       sender: teamId,
@@ -460,7 +460,11 @@ const mutateTeamRecruitment = async (req, res, forcedStatus) => {
       message: `The recruitment post status is now ${recruitment.status}.`,
       eventType: 'recruitment_post_status',
       deliveryKey: `recruitment-post-status:${recruitment._id}:${recruitment.status}:${recruitment.updatedAt.getTime()}`,
-      data: { recruitmentId: recruitment._id, status: recruitment.status }
+      data: {
+        recruitmentId: recruitment._id,
+        recruitmentCode: recruitment.recruitmentCode,
+        status: recruitment.status
+      }
     })));
     notificationResults.forEach((result, index) => {
       if (result.status === 'rejected') {
@@ -506,7 +510,7 @@ const deleteTeamRecruitment = safeAsyncHandler(async (req, res) => {
     });
   }
 
-  const recipients = Array.from(new Set((recruitment.applicants || []).map((entry) => String(entry.user)).filter(Boolean)));
+  const recipients = await getCanonicalApplicantRecipientIds(recruitment._id);
   await TeamRecruitment.findByIdAndDelete(recruitment._id);
   try {
     await RecruitmentApplication.deleteMany({ recruitment: recruitment._id });
@@ -555,42 +559,17 @@ const createPlayerProfile = safeAsyncHandler(async (req, res) => {
   // Validate player user
   if (!requireUserType(req, res, 'player', 'Only individual users can create recruitment profiles')) return;
 
-  // ── Daily rate limit: players can create max 2 player cards per day ──
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date();
-  endOfDay.setHours(23, 59, 59, 999);
-
-  const todayCount = await PlayerProfile.countDocuments({
-    player: playerId,
-    createdAt: { $gte: startOfDay, $lte: endOfDay }
+  const normalizedPlayerInfo = mergeAllowedObject({}, playerInfo, PLAYER_INFO_FIELDS);
+  const normalizedProfessionalInfo = mergeAllowedObject({}, professionalInfo, PROFESSIONAL_INFO_FIELDS);
+  const normalizedExpectations = mergeAllowedObject({}, expectations, EXPECTATION_FIELDS);
+  const progressionError = validatePlayerProfileCreateProgression({
+    profileType, game, role, staffRole,
+    playerInfo: normalizedPlayerInfo,
+    professionalInfo: normalizedProfessionalInfo,
+    expectations: normalizedExpectations
   });
-
-  if (todayCount >= 2) {
-    return res.status(429).json({
-      success: false,
-      message: 'Daily limit reached. You can create a maximum of 2 player cards per day.',
-      limitInfo: {
-        used: todayCount,
-        limit: 2,
-        resetsAt: endOfDay
-      }
-    });
-  }
-
-  // Validate required fields based on profile type
-  if (profileType === 'staff-position' && !staffRole) {
-    return res.status(400).json({
-      success: false,
-      message: 'Staff role is required for staff position profile'
-    });
-  }
-
-  if (profileType === 'looking-for-team' && !role) {
-    return res.status(400).json({
-      success: false,
-      message: 'Role is required for looking for team profile'
-    });
+  if (progressionError) {
+    return res.status(400).json({ success: false, message: progressionError });
   }
 
   const profile = new PlayerProfile({
@@ -599,30 +578,35 @@ const createPlayerProfile = safeAsyncHandler(async (req, res) => {
     game: profileType === 'looking-for-team' ? game : undefined,
     role: profileType === 'looking-for-team' ? role : undefined,
     staffRole: profileType === 'staff-position' ? staffRole : undefined,
-    playerInfo: profileType === 'looking-for-team'
-      ? mergeAllowedObject({}, playerInfo, PLAYER_INFO_FIELDS)
-      : undefined,
-    professionalInfo: profileType === 'staff-position'
-      ? mergeAllowedObject({}, professionalInfo, PROFESSIONAL_INFO_FIELDS)
-      : undefined,
-    expectations: mergeAllowedObject({}, expectations, EXPECTATION_FIELDS)
+    playerInfo: profileType === 'looking-for-team' ? normalizedPlayerInfo : undefined,
+    professionalInfo: profileType === 'staff-position' ? normalizedProfessionalInfo : undefined,
+    expectations: normalizedExpectations
   });
 
-  // Generate shareable code with prefix and role
-  const prefix = profileType === 'looking-for-team' ? 'PLR' : 'STF';
-  let roleAbbr = '';
-  if (profileType === 'looking-for-team' && role) {
-    roleAbbr = role.substring(0, 3).toUpperCase().replace(/\s/g, '');
-  } else if (profileType === 'staff-position' && staffRole) {
-    roleAbbr = staffRole.substring(0, 3).toUpperCase().replace(/\s/g, '');
-  } else {
-    roleAbbr = 'GEN';
+  const quotaReservation = await reservePlayerCardSlot({ playerId });
+  if (!quotaReservation) {
+    const limitInfo = await getPlayerCardDailyLimit({ playerId });
+    return res.status(429).json({
+      success: false,
+      message: 'Daily limit reached. You can create a maximum of 2 player cards per day.',
+      limitInfo
+    });
   }
-  const crypto = require('crypto');
-  const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
-  profile.profileCode = `${prefix}-${roleAbbr}-${randomPart}`;
 
-  await profile.save();
+  try {
+    await saveWithUniqueShareCode({
+      document: profile,
+      codeField: 'profileCode',
+      generateCode: () => generatePlayerProfileCode(profile)
+    });
+  } catch (error) {
+    await releasePlayerCardSlot({ quotaId: quotaReservation.quota._id }).catch((releaseError) => {
+      log.error('Player-card quota rollback failed', {
+        error: String(releaseError), playerId: String(playerId), quotaId: String(quotaReservation.quota._id)
+      });
+    });
+    throw error;
+  }
 
   // Populate player information
   await profile.populate('player', 'username profile.displayName profile.avatar');
@@ -670,27 +654,13 @@ const getPlayerProfiles = safeAsyncHandler(async (req, res) => {
   if (profileType) query.profileType = profileType;
   if (location) query['expectations.preferredLocation'] = { $regex: escapeRegex(location), $options: 'i' };
 
-  // Search functionality
-  if (search) {
-    const searchPattern = escapeRegex(search);
-    query.$and = query.$and || [];
-    query.$and.push({
-      $or: [
-        { game: { $regex: searchPattern, $options: 'i' } },
-        { role: { $regex: searchPattern, $options: 'i' } },
-        { staffRole: { $regex: searchPattern, $options: 'i' } },
-        { 'playerInfo.playerName': { $regex: searchPattern, $options: 'i' } },
-        { 'playerInfo.currentRank': { $regex: searchPattern, $options: 'i' } },
-        { 'playerInfo.experienceLevel': { $regex: searchPattern, $options: 'i' } },
-        { 'playerInfo.languages': { $regex: searchPattern, $options: 'i' } },
-        { 'playerInfo.additionalInfo': { $regex: searchPattern, $options: 'i' } },
-        { 'professionalInfo.fullName': { $regex: searchPattern, $options: 'i' } },
-        { 'professionalInfo.skillsAndExpertise': { $regex: searchPattern, $options: 'i' } },
-        { 'professionalInfo.preferredLocation': { $regex: searchPattern, $options: 'i' } },
-        { 'expectations.preferredLocation': { $regex: searchPattern, $options: 'i' } }
-      ]
-    });
-  }
+  const searchPattern = search ? escapeRegex(search) : '';
+  const searchFields = [
+    'game', 'role', 'staffRole', 'playerInfo.playerName', 'playerInfo.currentRank',
+    'playerInfo.experienceLevel', 'playerInfo.languages', 'playerInfo.additionalInfo',
+    'professionalInfo.fullName', 'professionalInfo.skillsAndExpertise',
+    'professionalInfo.preferredLocation', 'expectations.preferredLocation'
+  ];
 
   const sortDirection = sortOrder === 'desc' ? -1 : 1;
   const allowedSortFields = new Set(['createdAt', 'game', 'profileType', 'interestedTeamsCount']);
@@ -707,7 +677,9 @@ const getPlayerProfiles = safeAsyncHandler(async (req, res) => {
     page,
     limit,
     viewerId: req.user?._id,
-    viewerBlockedIds: req.user?.blockedUsers
+    viewerBlockedIds: req.user?.blockedUsers,
+    searchPattern,
+    searchFields
   });
   const totalPages = Math.ceil(total / limit);
 
@@ -762,24 +734,21 @@ const getPlayerProfile = safeAsyncHandler(async (req, res) => {
   }
 
   if (isOwner) {
-    await profile.populate('interestedTeams.team', 'username profile.displayName profile.avatar');
+    await profile.populate({
+      path: 'interestedTeams.team',
+      match: getValidRecruitmentOwnerMatch('team'),
+      select: 'username userType isActive needsProfileCompletion profile.displayName profile.avatar'
+    });
   }
 
   // If profile doesn't have a code yet (old profiles), generate one
   if (!profile.profileCode) {
-    const prefix = profile.profileType === 'looking-for-team' ? 'PLR' : 'STF';
-    let roleAbbr = '';
-    if (profile.profileType === 'looking-for-team' && profile.role) {
-      roleAbbr = profile.role.substring(0, 3).toUpperCase().replace(/\s/g, '');
-    } else if (profile.profileType === 'staff-position' && profile.staffRole) {
-      roleAbbr = profile.staffRole.substring(0, 3).toUpperCase().replace(/\s/g, '');
-    } else {
-      roleAbbr = 'GEN';
-    }
-    const crypto = require('crypto');
-    const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase();
-    profile.profileCode = `${prefix}-${roleAbbr}-${randomPart}`;
-    await profile.save();
+    await backfillUniqueShareCode({
+      model: PlayerProfile,
+      document: profile,
+      codeField: 'profileCode',
+      generateCode: () => generatePlayerProfileCode(profile)
+    });
   }
 
   if (!isOwner) {
@@ -881,6 +850,12 @@ const updatePlayerProfile = safeAsyncHandler(async (req, res) => {
   });
 });
 
+const getPlayerCardLimit = safeAsyncHandler(async (req, res) => {
+  if (!requireUserType(req, res, 'player', 'Only individual users have a player-card posting limit')) return;
+  const limitInfo = await getPlayerCardDailyLimit({ playerId: req.user._id });
+  res.json({ success: true, data: limitInfo });
+});
+
 // Delete player profile
 const deletePlayerProfile = safeAsyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -917,8 +892,12 @@ const deletePlayerProfile = safeAsyncHandler(async (req, res) => {
 // Apply to team recruitment (by ID or code)
 const applyToRecruitment = safeAsyncHandler(async (req, res) => {
   const { recruitmentId } = req.params;
-  const { message, resume, portfolio } = req.body;
+  let { message, resume, portfolio } = req.body;
   const applicantId = req.user._id;
+
+  message = normalizeOptionalString(message);
+  resume = normalizeOptionalString(resume);
+  portfolio = normalizeOptionalString(portfolio);
 
   if (!requireUserType(req, res, 'player', 'Only individual users can apply to team recruitments')) return;
 
@@ -958,7 +937,7 @@ const applyToRecruitment = safeAsyncHandler(async (req, res) => {
   });
 
   if (existingApplication) {
-    return res.status(400).json({
+    return res.status(409).json({
       success: false,
       message: 'You have already applied to this recruitment'
     });
@@ -984,21 +963,38 @@ const applyToRecruitment = safeAsyncHandler(async (req, res) => {
 
   // Re-authorize lifecycle state at the write boundary so a concurrent close
   // cannot accept one final application after the earlier read check.
-  const appendResult = await TeamRecruitment.updateOne(
-    addLiveFilters({ _id: recruitment._id }),
-    {
-      $push: {
-        applicants: {
-          user: applicantId,
-          appliedAt: new Date(),
-          status: 'pending',
-          message,
-          resume,
-          portfolio
+  let appendResult;
+  try {
+    // Canonical uniqueness guarantees this applicant has no other active
+    // application. Remove only stale legacy/withdrawn embedded rows before the
+    // new append so positional status updates can never target a duplicate.
+    await TeamRecruitment.updateOne(
+      { _id: recruitment._id },
+      { $pull: { applicants: { user: applicantId } } }
+    );
+    appendResult = await TeamRecruitment.updateOne(
+      addLiveFilters({ _id: recruitment._id }),
+      {
+        $push: {
+          applicants: {
+            user: applicantId,
+            appliedAt: new Date(),
+            status: 'pending',
+            message,
+            resume,
+            portfolio
+          }
         }
       }
-    }
-  );
+    );
+  } catch (appendError) {
+    await RecruitmentApplication.deleteOne({ _id: application._id }).catch((rollbackError) => {
+      log.error('Recruitment application compensation failed', {
+        error: String(rollbackError), applicationId: String(application._id), recruitmentId: String(recruitment._id)
+      });
+    });
+    throw appendError;
+  }
 
   if (appendResult.modifiedCount !== 1) {
     await RecruitmentApplication.deleteOne({ _id: application._id });
@@ -1015,7 +1011,11 @@ const applyToRecruitment = safeAsyncHandler(async (req, res) => {
     message: `${req.user.profile?.displayName || req.user.username} applied to your recruitment post.`,
     eventType: 'recruitment_application_submitted',
     deliveryKey: `recruitment-application-submitted:${application._id}`,
-    data: { applicationId: application._id, recruitmentId: recruitment._id }
+    data: {
+      applicationId: application._id,
+      recruitmentId: recruitment._id,
+      recruitmentCode: recruitment.recruitmentCode
+    }
   }, { applicationId: String(application._id), recruitmentId: String(recruitment._id) });
 
   res.status(201).json({
@@ -1074,10 +1074,28 @@ const withdrawApplication = safeAsyncHandler(async (req, res) => {
     return res.status(409).json({ success: false, message: 'Application status changed; refresh and try again' });
   }
 
-  await TeamRecruitment.updateOne(
-    { _id: recruitment._id },
-    { $pull: { applicants: { user: applicantId } } }
-  );
+  try {
+    await TeamRecruitment.updateOne(
+      { _id: recruitment._id },
+      { $pull: { applicants: { user: applicantId } } }
+    );
+  } catch (pullError) {
+    const rollback = await RecruitmentApplication.updateOne(
+      { _id: application._id, status: 'withdrawn', isActive: false },
+      { $set: { status: application.status, isActive: true } }
+    ).catch((rollbackError) => {
+      log.error('Recruitment withdrawal compensation failed', {
+        error: String(rollbackError), applicationId: String(application._id), recruitmentId: String(recruitment._id)
+      });
+      return null;
+    });
+    if (!rollback || rollback.modifiedCount !== 1) {
+      log.error('Recruitment withdrawal left a consistency repair pending', {
+        applicationId: String(application._id), recruitmentId: String(recruitment._id)
+      });
+    }
+    throw pullError;
+  }
 
   queueRecruitmentNotification({
     recipient: recruitment.team,
@@ -1086,7 +1104,11 @@ const withdrawApplication = safeAsyncHandler(async (req, res) => {
     message: `${req.user.profile?.displayName || req.user.username} withdrew their application.`,
     eventType: 'recruitment_application_withdrawn',
     deliveryKey: `recruitment-application-withdrawn:${application._id}`,
-    data: { applicationId: application._id, recruitmentId: recruitment._id }
+    data: {
+      applicationId: application._id,
+      recruitmentId: recruitment._id,
+      recruitmentCode: recruitment.recruitmentCode
+    }
   }, { applicationId: String(application._id), recruitmentId: String(recruitment._id) });
 
   res.json({
@@ -1098,8 +1120,10 @@ const withdrawApplication = safeAsyncHandler(async (req, res) => {
 // Show interest in player profile
 const showInterestInProfile = safeAsyncHandler(async (req, res) => {
   const { profileId } = req.params;
-  const { message } = req.body;
+  let { message } = req.body;
   const teamId = req.user._id;
+
+  message = normalizeOptionalString(message);
 
   if (!requireUserType(req, res, 'team', 'Only teams can show interest in player profiles')) return;
 
@@ -1129,12 +1153,12 @@ const showInterestInProfile = safeAsyncHandler(async (req, res) => {
   }
 
   // Check if team already showed interest
-  const existingInterest = profile.interestedTeams.find(
-    interest => interest.team.toString() === teamId.toString()
+  const existingInterest = (profile.interestedTeams || []).find(
+    interest => sameId(interest?.team, teamId)
   );
 
   if (existingInterest) {
-    return res.status(400).json({
+    return res.status(409).json({
       success: false,
       message: 'You have already shown interest in this profile'
     });
@@ -1171,7 +1195,7 @@ const showInterestInProfile = safeAsyncHandler(async (req, res) => {
     message: `${req.user.profile?.displayName || req.user.username} showed interest in your player profile.`,
     eventType: 'recruitment_profile_interest',
     deliveryKey: `recruitment-profile-interest:${profile._id}:${teamId}`,
-    data: { profileId: profile._id, teamId }
+    data: { profileId: profile._id, profileCode: profile.profileCode, teamId }
   }, { profileId: String(profile._id), teamId: String(teamId) });
 
   res.json({
@@ -1294,8 +1318,19 @@ const getTeamApplications = safeAsyncHandler(async (req, res) => {
 // Update application status
 const updateApplicationStatus = safeAsyncHandler(async (req, res) => {
   const { applicationId } = req.params;
-  const { status, message } = req.body;
+  const { status } = req.body;
+  if (req.body.message !== undefined && typeof req.body.message !== 'string') {
+    return res.status(400).json({ success: false, message: 'Message must be text' });
+  }
+  const message = normalizeOptionalString(req.body.message);
+  if (message && message.length > 1000) {
+    return res.status(400).json({ success: false, message: 'Message cannot exceed 1000 characters' });
+  }
   const teamId = req.user._id;
+
+  if (!mongoose.Types.ObjectId.isValid(applicationId)) {
+    return res.status(400).json({ success: false, message: 'Invalid application ID' });
+  }
 
   if (!TEAM_APPLICATION_STATUSES.includes(status)) {
     return res.status(400).json({
@@ -1308,7 +1343,11 @@ const updateApplicationStatus = safeAsyncHandler(async (req, res) => {
 
   const application = await RecruitmentApplication.findById(applicationId)
     .populate('recruitment')
-    .populate('applicant', 'username email profile.displayName profile.avatar');
+    .populate({
+      path: 'applicant',
+      match: getValidRecruitmentOwnerMatch('player'),
+      select: 'username email userType isActive needsProfileCompletion profile.displayName profile.avatar'
+    });
 
   if (!application || !application.applicant) {
     return res.status(404).json({
@@ -1452,7 +1491,12 @@ const updateApplicationStatus = safeAsyncHandler(async (req, res) => {
         message: notifMessage,
         eventType: 'recruitment_application_status',
         deliveryKey: `recruitment-application-status:${application._id}:${status}`,
-        data: { applicationId: application._id, recruitmentId: recruitment._id, status }
+        data: {
+          applicationId: application._id,
+          recruitmentId: recruitment._id,
+          recruitmentCode: recruitment.recruitmentCode,
+          status
+        }
       });
     } catch (e) {
       log.error('Recruitment status notification failed', {
@@ -1482,8 +1526,6 @@ const updateApplicationStatus = safeAsyncHandler(async (req, res) => {
 
         } else if (status === 'accepted') {
           log.debug(`[Recruitment] Sending ACCEPTED card DM to applicant ${applicantId}`);
-          // Delete any previous recruitment_result cards so only the latest shows
-          await Message.deleteMany({ sender: teamId, recipient: applicantId, 'inviteData.type': 'recruitment_result' });
           const dm = await Message.create({
             sender: teamId,
             recipient: applicantId,
@@ -1496,6 +1538,8 @@ const updateApplicationStatus = safeAsyncHandler(async (req, res) => {
             },
             inviteData: {
               type: 'recruitment_result',
+              recruitmentId: recruitment._id,
+              applicationId: application._id,
               teamId: teamId,
               game: recruitment.game || '',
               role: roleLabel,
@@ -1508,8 +1552,6 @@ const updateApplicationStatus = safeAsyncHandler(async (req, res) => {
 
         } else if (status === 'rejected') {
           log.debug(`[Recruitment] Sending REJECTED card DM to applicant ${applicantId}`);
-          // Delete any previous recruitment_result cards so only the latest shows
-          await Message.deleteMany({ sender: teamId, recipient: applicantId, 'inviteData.type': 'recruitment_result' });
           const dm = await Message.create({
             sender: teamId,
             recipient: applicantId,
@@ -1522,6 +1564,8 @@ const updateApplicationStatus = safeAsyncHandler(async (req, res) => {
             },
             inviteData: {
               type: 'recruitment_result',
+              recruitmentId: recruitment._id,
+              applicationId: application._id,
               teamId: teamId,
               game: recruitment.game || '',
               role: roleLabel,
@@ -1563,6 +1607,7 @@ module.exports = {
   
   // Player Profile
   createPlayerProfile,
+  getPlayerCardLimit,
   getPlayerProfiles,
   getPlayerProfile,
   updatePlayerProfile,

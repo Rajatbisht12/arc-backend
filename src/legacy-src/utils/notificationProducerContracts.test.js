@@ -36,7 +36,7 @@ const serviceNotificationCreators = fs.readdirSync(path.join(legacyRoot, 'servic
   .filter((name) => /Notification\.(?:create|createNotification|insertMany|bulkWrite)\s*\(/.test(readLegacy(`services/${name}`)));
 assert.deepEqual(serviceNotificationCreators, []);
 
-assert(messageController.includes('await createMessageNotification(message.inviteData.teamId, userId, responseMsg._id, {'));
+assert(messageController.includes('await createMessageNotification(outcome.invite.team, userId, responseMsg._id, {'));
 assert(messageController.includes('await createMessageNotification(targetUserId, callerId, message._id, {'));
 assert(messageController.includes('await createMessageNotification(recipientIdResolved, senderId, message._id, {'));
 assert(messageController.includes('deepLink: `/conversation/direct_${senderId}`'));
@@ -118,7 +118,11 @@ for (const eventType of [
 }
 assert(scrimController.includes('notificationDedupeKey: broadcastDeliveryKey'));
 assert(tournamentController.includes("type: 'tournament',\n      title: 'New Tournament Registration'"));
-assert(tournamentController.includes('enqueueBulkNotifications('), 'large tournament fan-out must use the durable bulk producer');
+assert(
+  tournamentController.includes('enqueue = enqueueBulkNotifications')
+    && tournamentController.includes('await enqueue('),
+  'large tournament fan-out must use the durable bulk producer'
+);
 assert(!tournamentController.includes('Notification.createNotification('));
 assert(!tournamentController.includes('Notification.bulkWrite('));
 for (const eventType of [

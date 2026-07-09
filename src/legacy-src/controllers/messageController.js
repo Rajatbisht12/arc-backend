@@ -6,6 +6,7 @@ const Notification = require('../models/Notification');
 const { uploadMultipleFiles } = require('../utils/cloudinary');
 const { createMessageNotification } = require('../utils/notificationService');
 const { getCallSessionForParticipant } = require('../services/callSessionService');
+const { respondToInvitation } = require('../services/teamInvitationService');
 const log = require('../utils/logger');
 const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const {
@@ -2028,275 +2029,125 @@ const updateMemberRole = async (req, res) => {
 };
 
 // Handle invite response from message
+// Canonical invite responder. Membership and invite/message state transition in
+// one transaction; the acknowledgement DM is a post-commit, best-effort side effect.
 const handleInviteResponse = async (req, res) => {
   try {
     const { messageId } = req.params;
-    const { response } = req.body; // 'accept' or 'decline'
+    const { response } = req.body;
     const userId = req.user._id;
-
-    // Find the message with invite data
     const message = await Message.findById(messageId);
-    if (!message || !message.inviteData) {
-      return res.status(404).json({
-        success: false,
-        message: 'Invite message not found'
-      });
-    }
 
-    // Check if user is the recipient of the invite
-    if (message.recipient.toString() !== userId.toString()) {
+    if (!message?.inviteData) {
+      return res.status(404).json({ success: false, message: 'Invite message not found' });
+    }
+    if (!message.recipient || idString(message.recipient) !== idString(userId)) {
       return res.status(403).json({
         success: false,
         message: 'You can only respond to invites sent to you'
       });
     }
 
-    // Check if invite is still valid (not expired)
-    const RosterInvite = require('../models/RosterInvite');
-    const StaffInvite = require('../models/StaffInvite');
-    
-    let invite;
-    if (message.inviteData.type === 'roster') {
-      invite = await RosterInvite.findById(message.inviteData.inviteId);
-    } else if (message.inviteData.type === 'staff') {
-      invite = await StaffInvite.findById(message.inviteData.inviteId);
-    }
-
-    if (!invite || invite.status !== 'pending') {
+    const inviteType = message.inviteData.type;
+    if (!['roster', 'staff'].includes(inviteType)
+      || !message.inviteData.inviteId
+      || !message.inviteData.teamId) {
       return res.status(400).json({
         success: false,
-        message: 'Invite is no longer valid or has already been responded to'
+        code: 'INVALID_TEAM_INVITE_MESSAGE',
+        message: 'Invite message is invalid or no longer supported'
       });
     }
 
-    // Update invite status
-    invite.status = response === 'accept' ? 'accepted' : 'declined';
-    await invite.save();
-
-    // Handle the response based on type
-    if (response === 'accept') {
-      if (message.inviteData.type === 'roster') {
-        // Add player to team roster
-        const team = await User.findById(message.inviteData.teamId);
-        if (team) {
-          // Ensure teamInfo and rosters exist
-          if (!team.teamInfo) {
-            team.teamInfo = { rosters: [] };
-          }
-          if (!team.teamInfo.rosters) {
-            team.teamInfo.rosters = [];
-          }
-
-          let roster = team.teamInfo.rosters.find(r => r.game === message.inviteData.game);
-          if (!roster) {
-            // Create new roster with proper Mongoose schema structure
-            roster = {
-              game: message.inviteData.game,
-              players: [],
-              isActive: true
-            };
-            team.teamInfo.rosters.push(roster);
-          }
-
-          // Check if player already exists in this roster (handle both ObjectId and populated user)
-          const existingPlayerIndex = roster.players.findIndex(
-            p => {
-              const playerUserId = p.user ? (p.user._id ? p.user._id.toString() : p.user.toString()) : null;
-              return playerUserId === userId.toString();
-            }
-          );
-
-          if (existingPlayerIndex !== -1) {
-            // Update existing player entry
-            roster.players[existingPlayerIndex].role = message.inviteData.role || 'Player';
-            roster.players[existingPlayerIndex].inGameName = message.inviteData.inGameName || null;
-            roster.players[existingPlayerIndex].joinedAt = new Date();
-            roster.players[existingPlayerIndex].leftAt = null;
-            roster.players[existingPlayerIndex].isActive = true;
-          } else {
-            // Add new player to roster
-            roster.players.push({
-              user: userId,
-              role: message.inviteData.role || 'Player',
-              inGameName: message.inviteData.inGameName || null,
-              joinedAt: new Date(),
-              leftAt: null,
-              isActive: true
-            });
-          }
-
-          // Mark roster as active if it wasn't
-          roster.isActive = true;
-          
-          // Force markModified to ensure Mongoose detects the nested array changes
-          team.markModified('teamInfo.rosters');
-          team.markModified('teamInfo');
-          
-          await team.save();
-          
-          // Verify the save worked by fetching the team again (fresh from DB)
-          const verifyTeam = await User.findById(team._id);
-          const verifyRoster = verifyTeam?.teamInfo?.rosters?.find(r => r.game === message.inviteData.game);
-          const verifyPlayer = verifyRoster?.players?.find(p => {
-            const pid = p.user ? (p.user._id ? p.user._id.toString() : p.user.toString()) : p.user?.toString();
-            return pid === userId.toString();
-          });
-          
-          log.debug('Player added to roster successfully:', {
-            teamId: team._id,
-            game: message.inviteData.game,
-            playerId: userId,
-            role: message.inviteData.role,
-            rosterPlayersCountBeforeSave: roster.players.length,
-            rosterPlayersCountAfterSave: verifyRoster?.players?.length || 0,
-            playerFoundInDB: !!verifyPlayer,
-            playerIsActive: verifyPlayer?.isActive
-          });
-          
-          if (!verifyPlayer || verifyPlayer.isActive !== true) {
-            log.error('WARNING: Player was not properly saved to roster or isActive is not true!');
-          }
-        }
-
-        // Add team to player's joinedTeams array
-        const player = await User.findById(userId);
-        if (player && player.userType === 'player') {
-          // Ensure playerInfo and joinedTeams exist
-          if (!player.playerInfo) {
-            player.playerInfo = { joinedTeams: [] };
-          }
-          if (!player.playerInfo.joinedTeams) {
-            player.playerInfo.joinedTeams = [];
-          }
-
-          // Check if player is already in this team for this game
-          const existingTeamIndex = player.playerInfo.joinedTeams.findIndex(
-            teamEntry => teamEntry.team && teamEntry.team.toString() === message.inviteData.teamId.toString() && 
-                        teamEntry.game === message.inviteData.game
-          );
-
-          if (existingTeamIndex === -1) {
-            // Add new team entry
-            player.playerInfo.joinedTeams.push({
-              team: message.inviteData.teamId,
-              game: message.inviteData.game,
-              role: message.inviteData.role,
-              inGameName: message.inviteData.inGameName,
-              joinedAt: new Date(),
-              isActive: true
-            });
-          } else {
-            // Update existing entry
-            player.playerInfo.joinedTeams[existingTeamIndex].isActive = true;
-            player.playerInfo.joinedTeams[existingTeamIndex].leftAt = null;
-            player.playerInfo.joinedTeams[existingTeamIndex].role = message.inviteData.role;
-            player.playerInfo.joinedTeams[existingTeamIndex].inGameName = message.inviteData.inGameName;
-          }
-          
-          await player.save();
-        }
-      } else if (message.inviteData.type === 'staff') {
-        // Add player to team staff
-        const team = await User.findById(message.inviteData.teamId);
-        if (team) {
-          team.teamInfo.staff.push({
-            user: userId,
-            role: message.inviteData.role,
-            game: message.inviteData.game || 'General',
-            joinedAt: new Date(),
-            isActive: true
-          });
-          
-          await team.save();
-        }
-
-        // Add team to player's joinedTeams array for staff role
-        const player = await User.findById(userId);
-        if (player && player.userType === 'player') {
-          // Check if player is already in this team for staff role
-          const existingTeamIndex = player.playerInfo.joinedTeams.findIndex(
-            teamEntry => teamEntry.team.toString() === message.inviteData.teamId.toString() && 
-                        teamEntry.role === message.inviteData.role &&
-                        teamEntry.game === (message.inviteData.game || 'General')
-          );
-
-          if (existingTeamIndex === -1) {
-            // Add new team entry for staff role
-            player.playerInfo.joinedTeams.push({
-              team: message.inviteData.teamId,
-              game: message.inviteData.game || 'General',
-              role: message.inviteData.role,
-              inGameName: '', // Staff members don't have in-game names
-              joinedAt: new Date(),
-              isActive: true
-            });
-          } else {
-            // Update existing entry
-            player.playerInfo.joinedTeams[existingTeamIndex].isActive = true;
-            player.playerInfo.joinedTeams[existingTeamIndex].leftAt = null;
-            player.playerInfo.joinedTeams[existingTeamIndex].role = message.inviteData.role;
-            player.playerInfo.joinedTeams[existingTeamIndex].game = message.inviteData.game || 'General';
-          }
-          
-          await player.save();
+    const outcome = await respondToInvitation({
+      type: inviteType,
+      inviteId: message.inviteData.inviteId,
+      actorId: userId,
+      response,
+      expectedTeamId: message.inviteData.teamId,
+      onTransition: async ({ session, status }) => {
+        const updated = await Message.updateOne(
+          {
+            _id: message._id,
+            recipient: userId,
+            'inviteData.inviteId': message.inviteData.inviteId
+          },
+          { $set: { 'inviteData.status': status } },
+          { session }
+        );
+        if (updated.matchedCount !== 1) {
+          const error = new Error('Invite message changed while the response was being processed');
+          error.status = 409;
+          error.code = 'TEAM_INVITE_MESSAGE_STATE_CHANGED';
+          throw error;
         }
       }
-    }
-
-    // Send response message back to team
-    const responseMessage = response === 'accept' 
-      ? `✅ Invitation Accepted\n\nI've accepted your invitation to join the team. Looking forward to working with you!`
-      : `❌ Invitation Declined\n\nI've decided to decline the invitation. Thank you for considering me.`;
-
-    const responseMessageData = {
-      sender: userId,
-      recipient: message.inviteData.teamId,
-      messageType: 'direct',
-      content: {
-        text: responseMessage,
-        media: []
-      }
-    };
-
-    const responseMsg = await Message.create(responseMessageData);
-    
-    // Populate sender and recipient info
-    await responseMsg.populate([
-      { path: 'sender', select: 'username profile.displayName profile.avatar' },
-      { path: 'recipient', select: 'username profile.displayName profile.avatar' }
-    ]);
-
-    // Route the automated response through the same mute-aware message
-    // producer as every other direct message.
-    await createMessageNotification(message.inviteData.teamId, userId, responseMsg._id, {
-      conversationId: `direct_${userId}`,
-      chatId: `direct_${userId}`,
-      muteKey: userId,
-      title: 'New Message',
-      message: `${req.user.profile?.displayName || req.user.username} sent you a message`,
-      messageKind: 'invite_response',
-      hasMedia: false,
-      deepLink: `/conversation/direct_${userId}`
     });
 
-    // Update the original invite message to include status
-    message.inviteData.status = invite.status;
-    message.markModified('inviteData');
-    await message.save();
+    message.inviteData.status = outcome.status;
+    let responseMsg = null;
+    try {
+      const accepted = response === 'accept';
+      responseMsg = await Message.create({
+        sender: userId,
+        recipient: outcome.invite.team,
+        messageType: 'direct',
+        content: {
+          text: accepted
+            ? '✅ Invitation Accepted\n\nI\'ve accepted your invitation to join the team. Looking forward to working with you!'
+            : '❌ Invitation Declined\n\nI\'ve decided to decline the invitation. Thank you for considering me.',
+          media: []
+        }
+      });
+      await responseMsg.populate([
+        { path: 'sender', select: 'username profile.displayName profile.avatar' },
+        { path: 'recipient', select: 'username profile.displayName profile.avatar' }
+      ]);
+      try {
+        await createMessageNotification(outcome.invite.team, userId, responseMsg._id, {
+          conversationId: `direct_${userId}`,
+          chatId: `direct_${userId}`,
+          muteKey: userId,
+          title: 'New Message',
+          message: `${req.user.profile?.displayName || req.user.username} sent you a message`,
+          messageKind: 'invite_response',
+          hasMedia: false,
+          deepLink: `/conversation/direct_${userId}`
+        });
+      } catch (notificationError) {
+        log.warn('Invite response notification failed after acknowledgement DM creation', {
+          inviteId: String(outcome.invite._id),
+          messageId: String(responseMsg._id),
+          error: String(notificationError)
+        });
+      }
+    } catch (acknowledgementError) {
+      log.warn('Invite response committed but acknowledgement DM failed', {
+        inviteId: String(outcome.invite._id),
+        status: outcome.status,
+        error: String(acknowledgementError)
+      });
+    }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: `Invitation ${response}d successfully`,
+      message: `Invitation ${response === 'accept' ? 'accepted' : 'declined'} successfully`,
       data: {
-        inviteStatus: invite.status,
+        inviteStatus: outcome.status,
         updatedMessage: message,
         responseMessage: responseMsg
       }
     });
-
   } catch (error) {
     log.error('Error handling invite response:', { error: String(error) });
-    res.status(500).json({
+    if (Number.isInteger(error?.status) && error?.code) {
+      return res.status(error.status).json({
+        success: false,
+        code: error.code,
+        message: error.message
+      });
+    }
+    return res.status(500).json({
       success: false,
       message: 'Failed to process invite response',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined

@@ -11,6 +11,9 @@ const {
   addPlayerProfileIntegrityFilters,
   listCanonicalRecruitmentRecords
 } = require('../services/recruitmentPolicy');
+const {
+  buildSmartSearchCandidate
+} = require('../services/aiRecruitmentCandidateContract');
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -958,6 +961,15 @@ const generateInterviewQuestions = safeAsyncHandler(async (req, res) => {
   try {
     const { game, role, playerProfileId } = req.body;
 
+    // The Web source exposes this workflow only through TeamOnlyRoute. Enforce
+    // the same permission at the API boundary so a player cannot bypass the UI.
+    if (req.user.userType !== 'team') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only teams can generate recruitment interview questions'
+      });
+    }
+
     if (!game || !role) {
       return res.status(400).json({
         success: false,
@@ -1387,6 +1399,9 @@ const smartSearch = safeAsyncHandler(async (req, res) => {
         preferredLocation: profile.expectations?.preferredLocation || 'Not specified'
       };
     });
+    const profilesById = new Map(
+      profiles.map((profile) => [profile._id.toString(), profile])
+    );
 
     // Use AI to analyze and rank candidates based on description
     const aiPrompt = `You are a professional esports recruitment analyst. Analyze candidates based on team requirements.
@@ -1448,37 +1463,13 @@ IMPORTANT:
           reasoning: 'Analyzed based on available profile data.'
         };
 
-        const profile = profiles.find(p => p._id.toString() === candidate.profileId);
-        
-        return {
-          ...candidate,
-          ...analysis,
-          profile: {
-            _id: candidate.profileId,
-            profileType,
-            game: candidate.game,
-            role: searchType === 'players' ? candidate.role : undefined,
-            staffRole: searchType === 'staff' ? candidate.role : undefined,
-            rank: candidate.rank,
-            experience: candidate.experience,
-            tournamentExperience: candidate.tournamentExperience,
-            kdRatio: candidate.kdRatio,
-            winRate: candidate.winRate,
-            inGameName: candidate.inGameName,
-            profileCode: profile?.profileCode || candidate.profileCode
-          },
-          player: profile?.player || {
-            _id: candidate.playerId,
-            username: candidate.playerName,
-            profile: {
-              displayName: candidate.playerName
-            }
-          },
-          expectations: {
-            expectedSalary: candidate.expectedSalary,
-            preferredLocation: candidate.preferredLocation
-          }
-        };
+        return buildSmartSearchCandidate({
+          candidate,
+          analysis,
+          profile: profilesById.get(candidate.profileId),
+          profileType,
+          searchType
+        });
       });
 
       // Sort by compatibility score
@@ -1501,22 +1492,22 @@ IMPORTANT:
     } catch (aiError) {
       log.error('AI analysis error:', { error: String(aiError) });
       // Fallback: return candidates with basic scoring
-      const fallbackCandidates = candidatesData.map((candidate, idx) => ({
-        ...candidate,
-        compatibilityScore: calculateCompatibilityScore(candidate, { description }),
-        summary: `${candidate.playerName} is a ${candidate.role} player for ${candidate.game}.`,
-        strengths: [],
-        concerns: [],
-        reasoning: 'Basic analysis based on profile data.',
-        rank: idx + 1,
-        profile: {
-          _id: candidate.profileId,
+      const fallbackCandidates = candidatesData.map((candidate, idx) =>
+        buildSmartSearchCandidate({
+          candidate,
+          analysis: {
+            compatibilityScore: calculateCompatibilityScore(candidate, { description }),
+            summary: `${candidate.playerName} is a ${candidate.role} player for ${candidate.game}.`,
+            strengths: [],
+            concerns: [],
+            reasoning: 'Basic analysis based on profile data.',
+            rank: idx + 1
+          },
+          profile: profilesById.get(candidate.profileId),
           profileType,
-          game: candidate.game,
-          role: searchType === 'players' ? candidate.role : undefined,
-          staffRole: searchType === 'staff' ? candidate.role : undefined
-        }
-      }));
+          searchType
+        })
+      );
 
       res.status(200).json({
         success: true,

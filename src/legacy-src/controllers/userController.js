@@ -19,6 +19,24 @@ const log = require('../utils/logger');
 const { normalizeQuerySearch, buildPrefixRegex } = require('../utils/searchQuery');
 const { recordSuccessfulProfileVisit } = require('../services/profileVisitService');
 const {
+  activePendingQuery,
+  cancelInvitation,
+  createPendingInvitation,
+  respondToInvitation,
+  revokeUndeliveredInvitation
+} = require('../services/teamInvitationService');
+const {
+  getTournamentPhase,
+  isTournamentRegistrationOpen,
+  registrationWindowQuery
+} = require('../utils/tournamentDateTime');
+const {
+  normalizeTournamentHistoryFilters,
+  normalizeTournamentHistoryPagination,
+  paginateTournamentHistory,
+  tournamentHistoryStatus
+} = require('../utils/tournamentHistory');
+const {
   PROFILE_VISIBILITY,
   MESSAGE_AUDIENCE,
   normalizePrivacySettings,
@@ -33,6 +51,63 @@ const {
 const PROFILE_CACHE_TTL = 300; // 5 minutes
 const TEAM_CACHE_TTL = 300; // 5 minutes
 const teamCacheKey = (id) => `team:membership:${id}`;
+
+const normalizeTournamentHistoryIdentifier = (value) => {
+  if (typeof value !== 'string') return '';
+  const identifier = value.trim();
+  if (/^[0-9a-fA-F]{24}$/.test(identifier)) return identifier;
+  return /^[a-zA-Z0-9_]{3,20}$/.test(identifier) ? identifier : '';
+};
+
+const findTeamByIdentifier = (identifier) => (
+  mongoose.Types.ObjectId.isValid(identifier)
+    ? User.findById(identifier)
+    : User.findOne({ username: identifier })
+);
+
+const sendTeamInvitationError = (res, error, fallbackMessage) => {
+  if (Number.isInteger(error?.status) && error?.code) {
+    return res.status(error.status).json({
+      success: false,
+      code: error.code,
+      message: error.message
+    });
+  }
+  return res.status(500).json({
+    success: false,
+    message: fallbackMessage,
+    error: process.env.NODE_ENV === 'development' ? error?.message : undefined
+  });
+};
+
+const notifyTeamOfDirectInviteResponse = async ({ invite, actor, response }) => {
+  try {
+    const actorName = actor?.profile?.displayName || actor?.username || 'A player';
+    const pastTense = response === 'accept' ? 'accepted' : 'declined';
+    await createAndEmitNotification({
+      recipient: invite.team,
+      sender: actor?._id,
+      type: 'recruitment',
+      title: `Roster invitation ${pastTense}`,
+      message: `${actorName} ${pastTense} your ${invite.game} roster invitation`,
+      data: {
+        deepLink: `/profile/${invite.team}`,
+        customData: {
+          eventType: `team_invite_${pastTense}`,
+          inviteId: String(invite._id),
+          teamId: String(invite.team),
+          playerId: String(actor?._id || ''),
+          notificationDedupeKey: `team-invite:${invite._id}:${pastTense}`
+        }
+      }
+    });
+  } catch (error) {
+    log.warn('Team invite response notification failed', {
+      inviteId: String(invite?._id || ''),
+      error: String(error)
+    });
+  }
+};
 
 // Get all users (with search and filters)
 const getUsers = async (req, res) => {
@@ -192,16 +267,38 @@ const getUsers = async (req, res) => {
 // Get tournament history for a user/team by ID or username (live query from Tournament collection)
 const getLiveTournamentHistory = async (req, res) => {
   try {
-    const { identifier } = req.params;
-
-    let user;
-    if (identifier && identifier.match(/^[0-9a-fA-F]{24}$/)) {
-      user = await User.findById(identifier);
-    } else {
-      user = await User.findOne({ username: identifier });
+    const identifier = normalizeTournamentHistoryIdentifier(req.params.identifier);
+    if (!identifier) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_USER_IDENTIFIER',
+        message: 'Invalid user identifier'
+      });
     }
 
-    if (!user || !user.isActive) {
+    const { page, limit } = normalizeTournamentHistoryPagination(req.query, {
+      defaultLimit: 10,
+      maxLimit: 50
+    });
+    const filters = normalizeTournamentHistoryFilters(req.query);
+    if (!filters.valid) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_TOURNAMENT_HISTORY_FILTER',
+        message: filters.message
+      });
+    }
+
+    let user;
+    if (/^[0-9a-fA-F]{24}$/.test(identifier)) {
+      user = await User.findOne({ _id: identifier, isActive: true })
+        .select('_id username userType isActive blockedUsers privacySettings profile');
+    } else {
+      user = await User.findOne({ username: identifier, isActive: true })
+        .select('_id username userType isActive blockedUsers privacySettings profile');
+    }
+
+    if (!user) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
@@ -224,14 +321,19 @@ const getLiveTournamentHistory = async (req, res) => {
         { 'groupResults.teams.teamId': userId }
       ]
     })
-      .select('name game format mode status startDate endDate prizePool prizePoolType tournamentCode host banner createdAt updatedAt groupResults')
-      .populate('host', 'username profile.displayName profile.avatar')
+      .select('name game format mode status registrationStartDate registrationEndDate tournamentStartDate tournamentEndDate registrationDeadline startDate endDate prizePool prizePoolType tournamentCode host banner createdAt updatedAt groupResults')
+      .populate({
+        path: 'host',
+        match: { isActive: true },
+        select: 'username profile.displayName profile.avatar'
+      })
       .sort({ startDate: -1 })
       .lean();
 
     const userIdStr = String(userId);
 
-    const tournaments = (tournamentsRaw || []).map((t) => {
+    const validTournaments = (tournamentsRaw || []).filter((tournament) => tournament?.host);
+    const tournaments = validTournaments.map((t) => {
       let lastRoundReached = null;
       let bestRank = null;
 
@@ -256,18 +358,32 @@ const getLiveTournamentHistory = async (req, res) => {
 
       return {
         ...t,
+        startDate: t.startDate || t.tournamentStartDate || null,
+        endDate: t.endDate || t.tournamentEndDate || null,
+        status: tournamentHistoryStatus(t, t.status),
+        effectiveStatus: getTournamentPhase(t),
         teamProgress: {
           lastRoundReached,
           bestRank
         }
       };
-    });
+    })
+      .filter((tournament) => !filters.game || tournament.game === filters.game)
+      .filter((tournament) => !filters.status || tournament.status === filters.status)
+      .sort((left, right) => {
+        const rightTime = new Date(right.startDate || right.createdAt || 0).getTime() || 0;
+        const leftTime = new Date(left.startDate || left.createdAt || 0).getTime() || 0;
+        return rightTime - leftTime;
+      });
+
+    const historyPage = paginateTournamentHistory(tournaments, page, limit);
 
     res.status(200).json({
       success: true,
       data: {
         userId: String(userId),
-        tournaments
+        tournaments: historyPage.items,
+        pagination: historyPage.pagination
       }
     });
   } catch (error) {
@@ -282,11 +398,32 @@ const getLiveTournamentHistory = async (req, res) => {
 // Get player tournament history from user.playerInfo.tournamentHistory
 const getUserTournamentHistory = async (req, res) => {
   try {
-    const { username } = req.params;
-    const { game, status, page = 1, limit = 10 } = req.query;
+    const username = normalizeTournamentHistoryIdentifier(req.params.username);
+    if (!username) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_USER_IDENTIFIER',
+        message: 'Invalid username'
+      });
+    }
 
-    const user = await User.findOne({ username });
-    if (!user || user.userType !== 'player') {
+    const { page, limit } = normalizeTournamentHistoryPagination(req.query, {
+      defaultLimit: 10,
+      maxLimit: 50
+    });
+    const filters = normalizeTournamentHistoryFilters(req.query);
+    if (!filters.valid) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_TOURNAMENT_HISTORY_FILTER',
+        message: filters.message
+      });
+    }
+
+    const user = await User.findOne({ username, userType: 'player', isActive: true })
+      .select('_id username userType isActive blockedUsers privacySettings profile playerInfo.tournamentHistory')
+      .lean();
+    if (!user) {
       return res.status(404).json({ success: false, message: 'Player not found' });
     }
 
@@ -295,26 +432,73 @@ const getUserTournamentHistory = async (req, res) => {
       return privacyDenied(res, user, tournamentPrivacy.access, 'Tournament history is private');
     }
 
-    let history = user.playerInfo?.tournamentHistory || [];
+    const history = Array.isArray(user.playerInfo?.tournamentHistory)
+      ? user.playerInfo.tournamentHistory
+      : [];
+
+    const tournamentIds = history
+      .map((entry) => entry?.tournamentId?._id || entry?.tournamentId)
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+    const teamIds = history
+      .map((entry) => entry?.teamId?._id || entry?.teamId)
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    // Embedded history is a snapshot for display, but its references remain
+    // authoritative. Filter orphaned/deactivated resources before pagination
+    // so totals and pages never include records the client cannot open.
+    const [referencedTournaments, activeReferencedUsers] = await Promise.all([
+      Tournament.find({ _id: { $in: tournamentIds } })
+        .select('name game status registrationStartDate registrationEndDate tournamentStartDate tournamentEndDate registrationDeadline startDate endDate host')
+        .populate({
+          path: 'host',
+          match: { isActive: true },
+          select: '_id'
+        })
+        .lean(),
+      User.find({ _id: { $in: teamIds }, isActive: true }).select('_id').lean()
+    ]);
+
+    const tournamentById = new Map(
+      (referencedTournaments || [])
+        .filter((tournament) => tournament?.host)
+        .map((tournament) => [String(tournament._id), tournament])
+    );
+    const activeTeamIds = new Set(
+      (activeReferencedUsers || []).map((referencedUser) => String(referencedUser._id))
+    );
+
+    let validHistory = history
+      .map((entry) => {
+        const tournamentId = String(entry?.tournamentId?._id || entry?.tournamentId || '');
+        const teamId = String(entry?.teamId?._id || entry?.teamId || '');
+        const tournament = tournamentById.get(tournamentId);
+        if (!tournament || !activeTeamIds.has(teamId)) return null;
+        return {
+          ...entry,
+          status: tournamentHistoryStatus(tournament, entry.status),
+          effectiveStatus: getTournamentPhase(tournament)
+        };
+      })
+      .filter(Boolean);
 
     // Apply filters
-    if (game) history = history.filter(e => e.game === game);
-    if (status) history = history.filter(e => e.status === status);
+    if (filters.game) validHistory = validHistory.filter((entry) => entry.game === filters.game);
+    if (filters.status) validHistory = validHistory.filter((entry) => entry.status === filters.status);
 
     // Sort descending by tournamentStartDate
-    history = history.sort((a, b) => new Date(b.tournamentStartDate) - new Date(a.tournamentStartDate));
+    validHistory.sort((left, right) => {
+      const rightTime = new Date(right.tournamentStartDate || right.joinedAt || 0).getTime() || 0;
+      const leftTime = new Date(left.tournamentStartDate || left.joinedAt || 0).getTime() || 0;
+      return rightTime - leftTime;
+    });
 
-    const total = history.length;
-    const pageNum = Math.max(1, parseInt(page));
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 10));
-    const totalPages = Math.ceil(total / limitNum);
-    const paginated = history.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    const historyPage = paginateTournamentHistory(validHistory, page, limit);
 
     return res.status(200).json({
       success: true,
       data: {
-        tournamentHistory: paginated,
-        pagination: { page: pageNum, limit: limitNum, total, totalPages }
+        tournamentHistory: historyPage.items,
+        pagination: historyPage.pagination
       }
     });
   } catch (error) {
@@ -1269,8 +1453,8 @@ const addPlayerToRoster = async (req, res) => {
     const { playerId, game, role, inGameName, message } = req.body;
 
     // Verify the team exists and current user is the team owner
-    const team = await User.findById(teamId);
-    if (!team || team.userType !== 'team') {
+    const team = await findTeamByIdentifier(teamId);
+    if (!team || team.userType !== 'team' || team.isActive === false) {
       return res.status(404).json({
         success: false,
         message: 'Team not found'
@@ -1285,8 +1469,8 @@ const addPlayerToRoster = async (req, res) => {
     }
 
     // Verify the player exists and is a player
-    const player = await User.findById(playerId);
-    if (!player || player.userType !== 'player') {
+    const player = await User.findOne({ _id: playerId, userType: 'player', isActive: true });
+    if (!player) {
       return res.status(404).json({
         success: false,
         message: 'Player not found'
@@ -1294,9 +1478,11 @@ const addPlayerToRoster = async (req, res) => {
     }
 
     // Check if player is already in this roster (active only)
-    const existingRoster = team.teamInfo.rosters.find(r => r.game === game);
+    const existingRoster = team.teamInfo?.rosters?.find(r => r.game === game);
     if (existingRoster) {
-      const existingPlayer = existingRoster.players.find(p => p.user.toString() === playerId && p.isActive);
+      const existingPlayer = existingRoster.players?.find(
+        p => p.user && p.user.toString() === playerId && p.isActive !== false
+      );
       if (existingPlayer) {
         return res.status(400).json({
           success: false,
@@ -1305,49 +1491,46 @@ const addPlayerToRoster = async (req, res) => {
       }
     }
 
-    // Check if there's already a pending invite
-    const existingInvite = await RosterInvite.findOne({
-      team: teamId,
-      player: playerId,
-      game,
-      status: 'pending'
-    });
-
-    if (existingInvite) {
-      return res.status(400).json({
-        success: false,
-        message: 'Player already has a pending invite for this roster'
-      });
-    }
-
-    // Create roster invite
-    const invite = new RosterInvite({
-      team: teamId,
-      player: playerId,
+    const invite = await createPendingInvitation({
+      type: 'roster',
+      teamId: team._id,
+      playerId,
       game,
       role: role || 'Player',
       inGameName,
       message
     });
 
-    await invite.save();
-
     // Send invite as direct message instead of notification
     if (process.env.NODE_ENV === 'development') { console.log('Sending roster invite message to player:', playerId);}
     if (process.env.NODE_ENV === 'development') { console.log('Team info:', team.profile?.displayName || team.username);
     }
     try {
-      await sendInviteMessage(teamId, playerId, 'roster', {
+      const delivery = await sendInviteMessage(team._id, playerId, 'roster', {
         inviteId: invite._id,
         game,
-        role: role || 'Player',
+        role: invite.role,
         inGameName,
         message
       });
+      if (!delivery) {
+        await revokeUndeliveredInvitation({ type: 'roster', inviteId: invite._id, actorId: team._id });
+        return res.status(403).json({
+          success: false,
+          code: 'TEAM_INVITE_DELIVERY_NOT_ALLOWED',
+          message: 'The player does not allow invitation messages from this team'
+        });
+      }
       if (process.env.NODE_ENV === 'development') { console.log('Roster invite message sent successfully');
       }
     } catch (messageError) {
       log.error('Error sending roster invite message:', { error: String(messageError) });
+      await revokeUndeliveredInvitation({ type: 'roster', inviteId: invite._id, actorId: team._id });
+      return res.status(503).json({
+        success: false,
+        code: 'TEAM_INVITE_DELIVERY_FAILED',
+        message: 'The invitation could not be delivered. Please try again.'
+      });
     }
 
     res.status(201).json({
@@ -1358,11 +1541,7 @@ const addPlayerToRoster = async (req, res) => {
 
   } catch (error) {
     log.error('Error adding player to roster:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to add player to roster',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendTeamInvitationError(res, error, 'Failed to add player to roster');
   }
 };
 
@@ -1373,8 +1552,8 @@ const addStaffMember = async (req, res) => {
     const { memberId, role, game, message } = req.body;
 
     // Verify the team exists and current user is the team owner
-    const team = await User.findById(teamId);
-    if (!team || team.userType !== 'team') {
+    const team = await findTeamByIdentifier(teamId);
+    if (!team || team.userType !== 'team' || team.isActive === false) {
       return res.status(404).json({
         success: false,
         message: 'Team not found'
@@ -1389,7 +1568,7 @@ const addStaffMember = async (req, res) => {
     }
 
     // Verify the member exists
-    const member = await User.findById(memberId);
+    const member = await User.findOne({ _id: memberId, userType: 'player', isActive: true });
     if (!member) {
       return res.status(404).json({
         success: false,
@@ -1397,23 +1576,10 @@ const addStaffMember = async (req, res) => {
       });
     }
 
-    // Check if there's already a pending invite
-    const existingInvite = await StaffInvite.findOne({
-      team: teamId,
-      player: memberId,
-      game: game || 'General',
-      status: 'pending'
-    });
-
-    if (existingInvite) {
-      return res.status(400).json({
-        success: false,
-        message: 'An invite is already pending for this member for this game'
-      });
-    }
-
     // Check if member is already in staff (active only)
-    const existingStaff = team.teamInfo.staff.find(s => s.user.toString() === memberId && s.isActive);
+    const existingStaff = team.teamInfo?.staff?.find(
+      s => s.user && s.user.toString() === memberId && s.isActive !== false
+    );
     if (existingStaff) {
       return res.status(400).json({
         success: false,
@@ -1421,16 +1587,14 @@ const addStaffMember = async (req, res) => {
       });
     }
 
-    // Create staff invite
-    const staffInvite = new StaffInvite({
-      team: teamId,
-      player: memberId,
+    const staffInvite = await createPendingInvitation({
+      type: 'staff',
+      teamId: team._id,
+      playerId: memberId,
       game: game || 'General',
       role,
       message: message || `You've been invited to join ${team.profile?.displayName || team.username} as ${role} for ${game || 'General'}`
     });
-
-    await staffInvite.save();
 
     // Send invite as direct message instead of notification
     if (process.env.NODE_ENV === 'development') { console.log('Sending staff invite message to member:', memberId);}
@@ -1440,34 +1604,41 @@ const addStaffMember = async (req, res) => {
     if (process.env.NODE_ENV === 'development') { console.log('Role:', role);
     }
     try {
-      await sendInviteMessage(teamId, memberId, 'staff', {
+      const delivery = await sendInviteMessage(team._id, memberId, 'staff', {
         inviteId: staffInvite._id,
-        role,
-        game: game || 'General',
+        role: staffInvite.role,
+        game: staffInvite.game,
         message: staffInvite.message
       });
+      if (!delivery) {
+        await revokeUndeliveredInvitation({ type: 'staff', inviteId: staffInvite._id, actorId: team._id });
+        return res.status(403).json({
+          success: false,
+          code: 'TEAM_INVITE_DELIVERY_NOT_ALLOWED',
+          message: 'The member does not allow invitation messages from this team'
+        });
+      }
       if (process.env.NODE_ENV === 'development') { console.log('Staff invite message sent successfully');
       }
     } catch (messageError) {
       log.error('Error sending staff invite message:', { error: String(messageError) });
-      console.error('Error details:', {
-        message: messageError.message,
-        stack: messageError.stack
+      await revokeUndeliveredInvitation({ type: 'staff', inviteId: staffInvite._id, actorId: team._id });
+      return res.status(503).json({
+        success: false,
+        code: 'TEAM_INVITE_DELIVERY_FAILED',
+        message: 'The invitation could not be delivered. Please try again.'
       });
     }
 
-    res.status(200).json({
+    res.status(201).json({
       success: true,
-      message: 'Staff invitation sent successfully'
+      message: 'Staff invitation sent successfully',
+      data: { invite: staffInvite }
     });
 
   } catch (error) {
     log.error('Error sending staff invitation:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to send staff invitation',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendTeamInvitationError(res, error, 'Failed to send staff invitation');
   }
 };
 
@@ -1478,8 +1649,8 @@ const addStaffMemberByUsername = async (req, res) => {
     const { username, role, game, message } = req.body;
 
     // Verify the team exists and current user is the team owner
-    const team = await User.findById(teamId);
-    if (!team || team.userType !== 'team') {
+    const team = await findTeamByIdentifier(teamId);
+    if (!team || team.userType !== 'team' || team.isActive === false) {
       return res.status(404).json({
         success: false,
         message: 'Team not found'
@@ -1494,7 +1665,7 @@ const addStaffMemberByUsername = async (req, res) => {
     }
 
     // Find member by username
-    const member = await User.findOne({ username: username });
+    const member = await User.findOne({ username, userType: 'player', isActive: true });
     if (!member) {
       return res.status(404).json({
         success: false,
@@ -1504,23 +1675,10 @@ const addStaffMemberByUsername = async (req, res) => {
 
     const memberId = member._id;
 
-    // Check if there's already a pending invite
-    const existingInvite = await StaffInvite.findOne({
-      team: teamId,
-      player: memberId,
-      game: game || 'General',
-      status: 'pending'
-    });
-
-    if (existingInvite) {
-      return res.status(400).json({
-        success: false,
-        message: 'An invite is already pending for this member for this game'
-      });
-    }
-
     // Check if member is already in staff (active only)
-    const existingStaff = team.teamInfo.staff.find(s => s.user.toString() === memberId && s.isActive);
+    const existingStaff = team.teamInfo?.staff?.find(
+      s => s.user && s.user.toString() === memberId.toString() && s.isActive !== false
+    );
     if (existingStaff) {
       return res.status(400).json({
         success: false,
@@ -1528,16 +1686,14 @@ const addStaffMemberByUsername = async (req, res) => {
       });
     }
 
-    // Create staff invite
-    const staffInvite = new StaffInvite({
-      team: teamId,
-      player: memberId,
+    const staffInvite = await createPendingInvitation({
+      type: 'staff',
+      teamId: team._id,
+      playerId: memberId,
       game: game || 'General',
       role,
       message: message || `You've been invited to join ${team.profile?.displayName || team.username} as ${role} for ${game || 'General'}`
     });
-
-    await staffInvite.save();
 
     // Send invite as direct message instead of notification
     if (process.env.NODE_ENV === 'development') { console.log('Sending staff invite message to member:', memberId);}
@@ -1548,19 +1704,29 @@ const addStaffMemberByUsername = async (req, res) => {
     if (process.env.NODE_ENV === 'development') { console.log('Role:', role);
     }
     try {
-      await sendInviteMessage(teamId, memberId, 'staff', {
+      const delivery = await sendInviteMessage(team._id, memberId, 'staff', {
         inviteId: staffInvite._id,
-        role,
-        game: game || 'General',
+        role: staffInvite.role,
+        game: staffInvite.game,
         message: staffInvite.message
       });
+      if (!delivery) {
+        await revokeUndeliveredInvitation({ type: 'staff', inviteId: staffInvite._id, actorId: team._id });
+        return res.status(403).json({
+          success: false,
+          code: 'TEAM_INVITE_DELIVERY_NOT_ALLOWED',
+          message: 'The member does not allow invitation messages from this team'
+        });
+      }
       if (process.env.NODE_ENV === 'development') { console.log('Staff invite message sent successfully');
       }
     } catch (messageError) {
       log.error('Error sending staff invite message:', { error: String(messageError) });
-      console.error('Error details:', {
-        message: messageError.message,
-        stack: messageError.stack
+      await revokeUndeliveredInvitation({ type: 'staff', inviteId: staffInvite._id, actorId: team._id });
+      return res.status(503).json({
+        success: false,
+        code: 'TEAM_INVITE_DELIVERY_FAILED',
+        message: 'The invitation could not be delivered. Please try again.'
       });
     }
 
@@ -1573,18 +1739,14 @@ const addStaffMemberByUsername = async (req, res) => {
           username: member.username,
           displayName: member.profile?.displayName
         },
-        role: role,
+        role: staffInvite.role,
         inviteId: staffInvite._id
       }
     });
 
   } catch (error) {
     log.error('Error sending staff invitation:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to send staff invitation',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendTeamInvitationError(res, error, 'Failed to send staff invitation');
   }
 };
 
@@ -1835,14 +1997,7 @@ const getTeamPendingInvites = async (req, res) => {
     const { teamId } = req.params;
     const currentUserId = req.user._id;
 
-    // Support both ObjectId and username
-    const mongoose = require('mongoose');
-    let team;
-    if (mongoose.Types.ObjectId.isValid(teamId)) {
-      team = await User.findById(teamId);
-    } else {
-      team = await User.findOne({ username: teamId });
-    }
+    const team = await findTeamByIdentifier(teamId);
 
     if (!team || team.userType !== 'team') {
       return res.status(404).json({
@@ -1859,22 +2014,31 @@ const getTeamPendingInvites = async (req, res) => {
     }
 
     // Get pending roster invites
+    const now = new Date();
     const pendingRosterInvites = await RosterInvite.find({
-      team: teamId,
-      status: 'pending'
-    }).populate('player', 'username profile.displayName profile.avatar');
+      team: team._id,
+      ...activePendingQuery(now)
+    }).populate({
+      path: 'player',
+      select: 'username profile.displayName profile.avatar',
+      match: { isActive: true, userType: 'player' }
+    });
 
     // Get pending staff invites
     const pendingStaffInvites = await StaffInvite.find({
-      team: teamId,
-      status: 'pending'
-    }).populate('player', 'username profile.displayName profile.avatar');
+      team: team._id,
+      ...activePendingQuery(now)
+    }).populate({
+      path: 'player',
+      select: 'username profile.displayName profile.avatar',
+      match: { isActive: true, userType: 'player' }
+    });
 
     res.status(200).json({
       success: true,
       data: {
-        rosterInvites: pendingRosterInvites,
-        staffInvites: pendingStaffInvites
+        rosterInvites: pendingRosterInvites.filter(invite => invite.player),
+        staffInvites: pendingStaffInvites.filter(invite => invite.player)
       }
     });
 
@@ -1893,13 +2057,23 @@ const getRosterInvites = async (req, res) => {
   try {
     const playerId = req.user._id;
 
-    const invites = await RosterInvite.find({ player: playerId, status: { $in: ['pending', 'accepted', 'declined'] } })
-      .populate('team', 'username profile.displayName profile.avatar')
+    const invites = await RosterInvite.find({
+      player: playerId,
+      $or: [
+        { status: { $in: ['accepted', 'declined'] } },
+        activePendingQuery(new Date())
+      ]
+    })
+      .populate({
+        path: 'team',
+        select: 'username profile.displayName profile.avatar',
+        match: { isActive: true, userType: 'team' }
+      })
       .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
-      data: { invites }
+      data: { invites: invites.filter(invite => invite.team) }
     });
   } catch (error) {
     log.error('Error fetching roster invites:', { error: String(error) });
@@ -1917,67 +2091,21 @@ const acceptRosterInvite = async (req, res) => {
     const { inviteId } = req.params;
     const playerId = req.user._id;
 
-    const invite = await RosterInvite.findById(inviteId).populate('team', 'username profile teamInfo');
-    if (!invite) {
-      return res.status(404).json({ success: false, message: 'Invite not found' });
-    }
-
-    if (invite.player.toString() !== playerId.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorised to accept this invite' });
-    }
-
-    if (invite.status !== 'pending') {
-      return res.status(400).json({ success: false, message: `Invite is already ${invite.status}` });
-    }
-
-    invite.status = 'accepted';
-    await invite.save();
-
-    // Add player to team roster
-    const team = await User.findById(invite.team);
-    if (team) {
-      let roster = team.teamInfo.rosters.find(r => r.game === invite.game);
-      if (!roster) {
-        team.teamInfo.rosters.push({ game: invite.game, players: [] });
-        roster = team.teamInfo.rosters[team.teamInfo.rosters.length - 1];
-      }
-      // Remove any stale entry for this player first
-      roster.players = roster.players.filter(p => p.user.toString() !== playerId.toString());
-      roster.players.push({
-        user: playerId,
-        role: invite.role || 'Player',
-        inGameName: invite.inGameName || '',
-        joinedAt: new Date(),
-        isActive: true
-      });
-      team.markModified('teamInfo.rosters');
-      await team.save();
-    }
-
-    // Update player's joinedTeams
-    const player = await User.findById(playerId);
-    if (player) {
-      if (!player.playerInfo) player.playerInfo = {};
-      if (!player.playerInfo.joinedTeams) player.playerInfo.joinedTeams = [];
-      player.playerInfo.joinedTeams.push({
-        team: invite.team,
-        game: invite.game,
-        role: invite.role || 'Player',
-        inGameName: invite.inGameName || '',
-        joinedAt: new Date(),
-        isActive: true
-      });
-      await player.save();
-    }
-
-    res.status(200).json({ success: true, message: 'Roster invite accepted successfully' });
+    const outcome = await respondToInvitation({
+      type: 'roster',
+      inviteId,
+      actorId: playerId,
+      response: 'accept'
+    });
+    await notifyTeamOfDirectInviteResponse({ invite: outcome.invite, actor: req.user, response: 'accept' });
+    res.status(200).json({
+      success: true,
+      message: 'Roster invite accepted successfully',
+      data: { inviteStatus: outcome.status }
+    });
   } catch (error) {
     log.error('Error accepting roster invite:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to accept roster invite',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendTeamInvitationError(res, error, 'Failed to accept roster invite');
   }
 };
 
@@ -1987,30 +2115,21 @@ const declineRosterInvite = async (req, res) => {
     const { inviteId } = req.params;
     const playerId = req.user._id;
 
-    const invite = await RosterInvite.findById(inviteId);
-    if (!invite) {
-      return res.status(404).json({ success: false, message: 'Invite not found' });
-    }
-
-    if (invite.player.toString() !== playerId.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorised to decline this invite' });
-    }
-
-    if (invite.status !== 'pending') {
-      return res.status(400).json({ success: false, message: `Invite is already ${invite.status}` });
-    }
-
-    invite.status = 'declined';
-    await invite.save();
-
-    res.status(200).json({ success: true, message: 'Roster invite declined successfully' });
+    const outcome = await respondToInvitation({
+      type: 'roster',
+      inviteId,
+      actorId: playerId,
+      response: 'decline'
+    });
+    await notifyTeamOfDirectInviteResponse({ invite: outcome.invite, actor: req.user, response: 'decline' });
+    res.status(200).json({
+      success: true,
+      message: 'Roster invite declined successfully',
+      data: { inviteStatus: outcome.status }
+    });
   } catch (error) {
     log.error('Error declining roster invite:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to decline roster invite',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendTeamInvitationError(res, error, 'Failed to decline roster invite');
   }
 };
 
@@ -2022,33 +2141,7 @@ const cancelRosterInvite = async (req, res) => {
 
     if (process.env.NODE_ENV === 'development') { console.log('Cancelling roster invite:', { inviteId, currentUserId });
 }
-    const invite = await RosterInvite.findById(inviteId);
-    if (!invite) {
-      if (process.env.NODE_ENV === 'development') { console.log('Roster invite not found:', inviteId);}
-      return res.status(404).json({
-        success: false,
-        message: 'Invite not found'
-      });
-    }
-
-    log.debug('Found roster invite:', { 
-      inviteId: invite._id, 
-      team: invite.team, 
-      currentUserId,
-      status: invite.status 
-    });
-
-    // Verify the current user is the team owner
-    if (invite.team.toString() !== currentUserId.toString()) {
-      if (process.env.NODE_ENV === 'development') { console.log('Permission denied: user is not team owner');}
-      return res.status(403).json({
-        success: false,
-        message: 'Only team owners can cancel invites'
-      });
-    }
-
-    invite.status = 'cancelled';
-    await invite.save();
+    await cancelInvitation({ type: 'roster', inviteId, actorId: currentUserId });
 
     if (process.env.NODE_ENV === 'development') { console.log('Roster invite cancelled successfully');
 }
@@ -2059,11 +2152,7 @@ const cancelRosterInvite = async (req, res) => {
 
   } catch (error) {
     log.error('Error cancelling roster invite:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to cancel roster invite',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendTeamInvitationError(res, error, 'Failed to cancel roster invite');
   }
 };
 
@@ -2075,33 +2164,7 @@ const cancelStaffInvite = async (req, res) => {
 
     if (process.env.NODE_ENV === 'development') { console.log('Cancelling staff invite:', { inviteId, currentUserId });
 }
-    const invite = await StaffInvite.findById(inviteId);
-    if (!invite) {
-      if (process.env.NODE_ENV === 'development') { console.log('Staff invite not found:', inviteId);}
-      return res.status(404).json({
-        success: false,
-        message: 'Invite not found'
-      });
-    }
-
-    log.debug('Found staff invite:', { 
-      inviteId: invite._id, 
-      team: invite.team, 
-      currentUserId,
-      status: invite.status 
-    });
-
-    // Verify the current user is the team owner
-    if (invite.team.toString() !== currentUserId.toString()) {
-      if (process.env.NODE_ENV === 'development') { console.log('Permission denied: user is not team owner');}
-      return res.status(403).json({
-        success: false,
-        message: 'Only team owners can cancel invites'
-      });
-    }
-
-    invite.status = 'cancelled';
-    await invite.save();
+    await cancelInvitation({ type: 'staff', inviteId, actorId: currentUserId });
 
     if (process.env.NODE_ENV === 'development') { console.log('Staff invite cancelled successfully');
 }
@@ -2112,11 +2175,7 @@ const cancelStaffInvite = async (req, res) => {
 
   } catch (error) {
     log.error('Error cancelling staff invite:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to cancel staff invite',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendTeamInvitationError(res, error, 'Failed to cancel staff invite');
   }
 };
 
@@ -2130,7 +2189,7 @@ const cancelStaffInviteByUsername = async (req, res) => {
     if (process.env.NODE_ENV === 'development') { console.log('Cancelling staff invite by username:', { teamId, username, currentUserId });
 }
     // Verify the team exists and current user is the team owner
-    const team = await User.findById(teamId);
+    const team = await findTeamByIdentifier(teamId);
     if (!team || team.userType !== 'team') {
       return res.status(404).json({
         success: false,
@@ -2156,10 +2215,10 @@ const cancelStaffInviteByUsername = async (req, res) => {
 
     // Find the pending invite for this user
     const invite = await StaffInvite.findOne({
-      team: teamId,
+      team: team._id,
       player: user._id,
-      status: 'pending'
-    });
+      ...activePendingQuery(new Date())
+    }).sort({ createdAt: -1 });
 
     if (!invite) {
       return res.status(404).json({
@@ -2176,9 +2235,7 @@ const cancelStaffInviteByUsername = async (req, res) => {
       status: invite.status 
     });
 
-    // Cancel the invite
-    invite.status = 'cancelled';
-    await invite.save();
+    await cancelInvitation({ type: 'staff', inviteId: invite._id, actorId: currentUserId });
 
     if (process.env.NODE_ENV === 'development') { console.log('Staff invite cancelled successfully for username:', username);
 }
@@ -2197,11 +2254,7 @@ const cancelStaffInviteByUsername = async (req, res) => {
 
   } catch (error) {
     log.error('Error cancelling staff invite by username:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to cancel staff invite',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    return sendTeamInvitationError(res, error, 'Failed to cancel staff invite');
   }
 };
 
@@ -2470,15 +2523,24 @@ const sendInviteMessage = async (teamId, playerId, inviteType, inviteData) => {
       { path: 'recipient', select: 'username profile.displayName profile.avatar' }
     ]);
 
-    // Use the same durable, preference-aware path as ordinary direct messages.
-    await createMessageNotification(playerId, teamId, message._id, {
-      conversationId: `direct_${teamId}`,
-      chatId: `direct_${teamId}`,
-      muteKey: teamId,
-      messageKind: 'invite',
-      hasMedia: false,
-      deepLink: `/conversation/direct_${teamId}`
-    });
+    // The durable DM is the invitation's source of truth. Notification
+    // delivery is best effort and must not cancel a message that already exists.
+    try {
+      await createMessageNotification(playerId, teamId, message._id, {
+        conversationId: `direct_${teamId}`,
+        chatId: `direct_${teamId}`,
+        muteKey: teamId,
+        messageKind: 'invite',
+        hasMedia: false,
+        deepLink: `/conversation/direct_${teamId}`
+      });
+    } catch (notificationError) {
+      log.warn('Team invite notification delivery failed after DM creation', {
+        inviteId: String(inviteId),
+        messageId: String(message._id),
+        error: String(notificationError)
+      });
+    }
 
     return message;
   } catch (error) {
@@ -2857,11 +2919,25 @@ const createTeam = async (req, res) => {
     }
 
     const [duoTournament, teammate] = await Promise.all([
-      Tournament.findById(tournamentId),
+      Tournament.findById(tournamentId).select('+entryFee'),
       User.findOne({ _id: teammateId, userType: 'player', isActive: true })
     ]);
     if (!duoTournament) {
       return res.status(404).json({ success: false, message: 'Tournament not found' });
+    }
+    if (!await User.exists({ _id: duoTournament.host, isActive: true })) {
+      return res.status(409).json({
+        success: false,
+        code: 'TOURNAMENT_HOST_INACTIVE',
+        message: 'Tournament registration is unavailable because the host account is inactive.'
+      });
+    }
+    if (Number(duoTournament.entryFee) > 0) {
+      return res.status(409).json({
+        success: false,
+        code: 'LEGACY_PAID_TOURNAMENT_REQUIRES_RECONCILIATION',
+        message: 'Registration is unavailable while this legacy paid tournament is reconciled.'
+      });
     }
     if (!teammate) {
       return res.status(404).json({ success: false, message: 'Teammate not found' });
@@ -2877,10 +2953,12 @@ const createTeam = async (req, res) => {
     }
     const now = new Date();
     const registrationDeadline = new Date(duoTournament.registrationEndDate || duoTournament.registrationDeadline || 0);
-    if (duoTournament.status !== 'Registration Open' || Number.isNaN(registrationDeadline.getTime()) || registrationDeadline < now) {
+    if (!isTournamentRegistrationOpen(duoTournament, now)
+      || Number.isNaN(registrationDeadline.getTime())
+      || registrationDeadline < now) {
       return res.status(409).json({ success: false, message: 'Tournament registration is not open' });
     }
-    const registrationCount = (duoTournament.participants?.length || 0) + (duoTournament.teams?.length || 0);
+    const registrationCount = duoTournament.teams?.length || 0;
     if (registrationCount >= duoTournament.totalSlots) {
       return res.status(409).json({ success: false, message: 'Tournament is full' });
     }
@@ -2904,25 +2982,18 @@ const createTeam = async (req, res) => {
     }
 
     reservedMemberIds = [String(currentUserId), String(teammateId)].sort();
+    const registrationQuery = registrationWindowQuery(now);
     const reservation = await Tournament.findOneAndUpdate(
       {
         _id: duoTournament._id,
         format: 'Duo',
-        status: 'Registration Open',
+        status: registrationQuery.status,
         host: { $nin: reservedMemberIds },
         duoRegistrationMembers: { $nin: reservedMemberIds },
-        $or: [
-          { registrationEndDate: { $gte: now } },
-          { registrationEndDate: null, registrationDeadline: { $gte: now } }
-        ],
+        $and: registrationQuery.$and,
         $expr: {
           $lt: [
-            {
-              $add: [
-                { $size: { $ifNull: ['$participants', []] } },
-                { $size: { $ifNull: ['$teams', []] } }
-              ]
-            },
+            { $size: { $ifNull: ['$teams', []] } },
             '$totalSlots'
           ]
         }
@@ -2946,7 +3017,15 @@ const createTeam = async (req, res) => {
     // Check if team username already exists (very unlikely but safe)
     const existingUser = await User.findOne({ username: teamUsername });
     if (existingUser) {
-      return res.status(400).json({
+      // The tournament reservation was already acquired above. A normal
+      // early return bypasses the catch/final compensation path and would
+      // permanently strand both players in duoRegistrationMembers.
+      await Tournament.updateOne(
+        { _id: reservedTournamentId },
+        { $pull: { duoRegistrationMembers: { $in: reservedMemberIds } } }
+      );
+      reservedTournamentId = null;
+      return res.status(409).json({
         success: false,
         message: 'Team username already exists, please try again'
       });
@@ -2968,6 +3047,8 @@ const createTeam = async (req, res) => {
         website: ''
       },
       teamInfo: {
+        isGeneratedDuo: true,
+        generatedForTournament: duoTournament._id,
         teamSize: 2, // Duo team always has 2 members
         recruitingFor: [],
         requirements: '',
@@ -3004,24 +3085,13 @@ const createTeam = async (req, res) => {
       {
         _id: duoTournament._id,
         format: 'Duo',
-        status: 'Registration Open',
-        $or: [
-          { registrationEndDate: { $gte: now } },
-          {
-            registrationEndDate: null,
-            registrationDeadline: { $gte: now }
-          }
-        ],
+        status: registrationQuery.status,
+        $and: registrationQuery.$and,
         participants: { $nin: [currentUserId, teammateId] },
         duoRegistrationMembers: { $all: reservedMemberIds },
         $expr: {
           $lt: [
-            {
-              $add: [
-                { $size: { $ifNull: ['$participants', []] } },
-                { $size: { $ifNull: ['$teams', []] } }
-              ]
-            },
+            { $size: { $ifNull: ['$teams', []] } },
             '$totalSlots'
           ]
         }
@@ -3042,39 +3112,58 @@ const createTeam = async (req, res) => {
         message: 'Tournament registration changed. Please refresh and try again.'
       });
     }
+    // Membership writes are idempotent and verified as a unit. The historical
+    // sequential save loop swallowed one member's failure, leaving a registered
+    // Duo with one-sided profile state. Any failure now falls through to the
+    // compensation block, which removes the team registration and entity.
+    const allMembers = [...new Set([String(currentUserId), ...members.map(String)])];
+    const joinedAt = new Date();
+    await User.bulkWrite(allMembers.map((memberId) => ({
+      updateOne: {
+        filter: {
+          _id: memberId,
+          'playerInfo.joinedTeams': {
+            $not: { $elemMatch: { team: team._id, isActive: true } }
+          }
+        },
+        update: {
+          $push: {
+            'playerInfo.joinedTeams': {
+              team: team._id,
+              game: duoTournament.game,
+              role: memberId === String(currentUserId) ? 'Player 1' : 'Player 2',
+              inGameName: null,
+              joinedAt,
+              leftAt: null,
+              isActive: true
+            }
+          }
+        }
+      }
+    })), { ordered: true });
+    const membershipCount = await User.countDocuments({
+      _id: { $in: allMembers },
+      'playerInfo.joinedTeams': {
+        $elemMatch: { team: team._id, isActive: true }
+      }
+    });
+    if (membershipCount !== allMembers.length) {
+      throw new Error('Duo team membership reconciliation failed');
+    }
     duoRegistrationCommitted = true;
+
+    try {
+      const { _private } = require('./tournamentController');
+      await _private?.createHistoryEntriesForTeam?.(registeredTournament, team);
+    } catch (historyError) {
+      log.error('Duo tournament history update failed', { error: String(historyError) });
+    }
+
     try {
       const { _private } = require('./tournamentController');
       await _private?.emitTournamentUpdated?.(req, registeredTournament._id);
     } catch (realtimeError) {
       log.error('Duo tournament realtime update failed', { error: String(realtimeError) });
-    }
-    // Add team to both users' joined teams
-    const allMembers = [...new Set([currentUserId, ...(members || [])])]; // Remove duplicates
-    
-    for (const memberId of allMembers) {
-      try {
-        const member = await User.findById(memberId);
-        if (member && member.playerInfo) {
-          if (!member.playerInfo.joinedTeams) {
-            member.playerInfo.joinedTeams = [];
-          }
-          member.playerInfo.joinedTeams.push({
-            team: team._id,
-            game: duoTournament.game,
-            role: memberId === currentUserId ? 'Player 1' : 'Player 2',
-            inGameName: null,
-            joinedAt: new Date(),
-            leftAt: null,
-            isActive: true
-          });
-          await member.save();
-          if (process.env.NODE_ENV === 'development') { console.log(`Added team to user ${memberId}`);}
-        }
-      } catch (memberError) {
-        console.error(`Error updating member ${memberId}:`, memberError);
-        // Continue with other members even if one fails
-      }
     }
 
     await createAndEmitNotification({
@@ -3108,10 +3197,19 @@ const createTeam = async (req, res) => {
     if (!duoRegistrationCommitted && reservedTournamentId && reservedMemberIds.length > 0) {
       await Tournament.updateOne(
         { _id: reservedTournamentId },
-        { $pull: { duoRegistrationMembers: { $in: reservedMemberIds } } }
+        {
+          $pull: {
+            duoRegistrationMembers: { $in: reservedMemberIds },
+            ...(createdDuoTeamId ? { teams: createdDuoTeamId } : {})
+          }
+        }
       ).catch(() => {});
     }
     if (!duoRegistrationCommitted && createdDuoTeamId) {
+      await User.updateMany(
+        { 'playerInfo.joinedTeams.team': createdDuoTeamId },
+        { $pull: { 'playerInfo.joinedTeams': { team: createdDuoTeamId } } }
+      ).catch(() => {});
       await User.deleteOne({ _id: createdDuoTeamId }).catch(() => {});
     }
     log.error('Error creating team:', { error: String(error) });

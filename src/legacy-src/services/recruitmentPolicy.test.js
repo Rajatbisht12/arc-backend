@@ -3,7 +3,14 @@ const fs = require('fs');
 const path = require('path');
 const TeamRecruitment = require('../models/TeamRecruitment');
 const { publicOptionalAuth } = require('../middleware/auth');
-const { validateRecruitment, validateRecruitmentUpdate } = require('../middleware/validation');
+const {
+  validateRecruitment,
+  validateRecruitmentUpdate,
+  validatePlayerProfile,
+  validatePlayerProfileUpdate,
+  validateApplication,
+  validateApplicationStatus
+} = require('../middleware/validation');
 const {
   serializeTeamRecruitment,
   serializePlayerProfile,
@@ -20,7 +27,9 @@ const {
   listCanonicalRecruitmentApplications,
   sameId,
   parsePagination,
-  mergeAllowedObject
+  mergeAllowedObject,
+  validateTeamRecruitmentCreateProgression,
+  validatePlayerProfileCreateProgression
 } = require('./recruitmentPolicy');
 
 const future = new Date(Date.now() + 60_000);
@@ -71,7 +80,7 @@ const profile = {
   status: 'active',
   isActive: true,
   expiresAt: future,
-  interestedTeams: [{ team: 'team-1', message: 'private' }]
+  interestedTeams: [{ team: { _id: 'team-1' }, message: 'private' }]
 };
 const serializedProfile = serializePlayerProfile(profile);
 assert.strictEqual(serializedProfile.interestedTeamsCount, 1);
@@ -170,10 +179,10 @@ assert.strictEqual(isPlayerProfileStructurallyValid({
 const teamIntegrityQuery = addTeamRecruitmentIntegrityFilters({ status: 'active' });
 assert.strictEqual(teamIntegrityQuery.status, 'active');
 assert.strictEqual(teamIntegrityQuery.$and[0].$or[0].recruitmentType, 'roster');
-assert.strictEqual(teamIntegrityQuery.$and[0].$or[1].recruitmentType, 'staff');
+assert(teamIntegrityQuery.$and[0].$or.some((branch) => branch.recruitmentType === 'staff'));
 const profileIntegrityQuery = addPlayerProfileIntegrityFilters({ status: 'active' });
 assert.strictEqual(profileIntegrityQuery.$and[0].$or[0].profileType, 'looking-for-team');
-assert.strictEqual(profileIntegrityQuery.$and[0].$or[1].profileType, 'staff-position');
+assert(profileIntegrityQuery.$and[0].$or.some((branch) => branch.profileType === 'staff-position'));
 
 assert.strictEqual(sameId({ _id: 'abc' }, 'abc'), true);
 assert.strictEqual(sameId('abc', 'def'), false);
@@ -192,6 +201,58 @@ assert.deepStrictEqual(
   ),
   { allowed: 'new', retained: 'yes' }
 );
+assert.deepStrictEqual(
+  mergeAllowedObject(
+    { retained: 'yes', cleared: 'old' },
+    { retained: '  trimmed  ', cleared: '   ' },
+    ['retained', 'cleared']
+  ),
+  { retained: 'trimmed', cleared: '' }
+);
+
+assert.strictEqual(validateTeamRecruitmentCreateProgression({
+  recruitmentType: 'roster', game: 'BGMI', role: 'IGL',
+  requirements: { experienceLevel: 'Competitive' },
+  benefits: { contactInformation: 'team@example.com' }
+}), null);
+assert.strictEqual(validateTeamRecruitmentCreateProgression({
+  recruitmentType: 'roster', game: 'BGMI', role: 'Duelist',
+  requirements: { experienceLevel: 'Competitive' },
+  benefits: { contactInformation: 'team@example.com' }
+}), 'Role is not valid for the selected game');
+assert.strictEqual(validateTeamRecruitmentCreateProgression({
+  recruitmentType: 'staff', staffRole: 'Coach', requirements: {},
+  benefits: { contactInformation: 'team@example.com' }
+}), 'Provide at least one experience or availability requirement');
+assert.strictEqual(validateTeamRecruitmentCreateProgression({
+  recruitmentType: 'staff', staffRole: 'Coach', requirements: { availability: 'Evenings' }, benefits: {}
+}), 'Contact information is required');
+
+assert.strictEqual(validatePlayerProfileCreateProgression({
+  profileType: 'looking-for-team', game: 'BGMI', role: 'IGL',
+  playerInfo: { playerName: 'Player', currentRank: 'Bronze' },
+  expectations: { contactInformation: 'player@example.com' }
+}), null);
+assert.strictEqual(validatePlayerProfileCreateProgression({
+  profileType: 'looking-for-team', game: 'BGMI', role: 'Duelist',
+  playerInfo: { playerName: 'Player', currentRank: 'Bronze' },
+  expectations: { contactInformation: 'player@example.com' }
+}), 'Role is not valid for the selected game');
+assert.strictEqual(validatePlayerProfileCreateProgression({
+  profileType: 'looking-for-team', game: 'BGMI', role: 'IGL',
+  playerInfo: { playerName: '', currentRank: 'Bronze' },
+  expectations: { contactInformation: 'player@example.com' }
+}), 'Player name and current rank are required for looking for team profiles');
+assert.strictEqual(validatePlayerProfileCreateProgression({
+  profileType: 'staff-position', staffRole: 'Coach',
+  professionalInfo: { fullName: 'Coach', skillsAndExpertise: '' },
+  expectations: { contactInformation: 'coach@example.com' }
+}), 'Full name and skills and expertise are required for staff profiles');
+assert.strictEqual(validatePlayerProfileCreateProgression({
+  profileType: 'staff-position', staffRole: 'Coach',
+  professionalInfo: { fullName: 'Coach', skillsAndExpertise: 'Strategy' },
+  expectations: {}
+}), 'Contact information is required');
 
 const legacyRoot = path.resolve(__dirname, '..');
 const controllerSource = fs.readFileSync(path.join(legacyRoot, 'controllers/recruitmentController.js'), 'utf8');
@@ -214,6 +275,11 @@ assert(controllerSource.includes('reopenTeamRecruitment'));
 assert(controllerSource.includes('status: previousStatus'));
 assert(controllerSource.includes('syncEmbeddedApplicantStatus'));
 assert(controllerSource.includes('queueRecruitmentNotification'));
+assert(controllerSource.includes('validateTeamRecruitmentCreateProgression'));
+assert(controllerSource.includes('validatePlayerProfileCreateProgression'));
+assert(controllerSource.includes("message: 'Message cannot exceed 1000 characters'"));
+assert(/res\.status\(409\)\.json\(\{\s*success:\s*false,\s*message:\s*'You have already applied to this recruitment'/m.test(controllerSource));
+assert(/res\.status\(409\)\.json\(\{\s*success:\s*false,\s*message:\s*'You have already shown interest in this profile'/m.test(controllerSource));
 assert(controllerSource.includes('includeInterestedTeams: isOwner'));
 assert(controllerSource.includes('listCanonicalRecruitmentRecords({'));
 assert(controllerSource.includes('listCanonicalRecruitmentApplications({'));
@@ -222,8 +288,12 @@ assert(controllerSource.includes("match: getValidRecruitmentOwnerMatch('team')")
 assert(controllerSource.includes("match: getValidRecruitmentOwnerMatch('player')"));
 assert(authControllerSource.includes("{ $set: { status: 'closed', isActive: false } }"));
 assert(authControllerSource.includes("{ $set: { status: 'inactive', isActive: false } }"));
-assert(adminControllerSource.includes('TeamRecruitment.deleteMany({ team: userId })'));
-assert(adminControllerSource.includes('PlayerProfile.deleteMany({ player: userId })'));
+assert(authControllerSource.includes("const ownedRecruitmentIds = await TeamRecruitment.distinct('_id', { team: userId })"));
+assert(authControllerSource.includes('{ recruitment: { $in: ownedRecruitmentIds } }'));
+assert(authControllerSource.includes('RecruitmentPostingQuota.deleteMany({ player: userId })'));
+assert(adminControllerSource.includes('TeamRecruitment.deleteMany({ team: userId }, { session: deletionSession })'));
+assert(adminControllerSource.includes('PlayerProfile.deleteMany({ player: userId }, { session: deletionSession })'));
+assert(adminControllerSource.includes('RecruitmentPostingQuota.deleteMany({ player: userId }, { session: deletionSession })'));
 assert(adminControllerSource.includes('RecruitmentApplication.deleteMany({'));
 assert(!modularUserRoutesSource.includes('/:playerId/add-team/:teamId'));
 assert(!legacyUserRoutesSource.includes('/:playerId/add-team/:teamId'));
@@ -294,7 +364,9 @@ const runValidation = async (middlewares, body) => {
     sortBy: 'createdAt',
     sortDirection: -1,
     page: 1,
-    limit: 10
+    limit: 10,
+    searchPattern: 'squad',
+    searchFields: ['game', 'role']
   });
   assert.deepStrictEqual(canonical, { records: [{ _id: 'valid-1' }], total: 1 });
   assert(!capturedPipelines.some(p => p.some(stage => stage.$facet)), 'canonical query must not use $facet');
@@ -310,6 +382,14 @@ const runValidation = async (middlewares, body) => {
   assert(!lookup.let && !lookup.pipeline, 'owner lookup must not be correlated');
   assertSingleJoinCondition(recordsPipeline, 'records');
   assert(recordsPipeline.some(stage => stage.$unwind === '$__validOwner'));
+  assert(
+    recordsPipeline.some((stage) => stage.$match?.$or?.some((condition) => condition['__validOwner.profile.displayName'])),
+    'search must include owner display name after the owner lookup'
+  );
+  assert(
+    recordsPipeline.some((stage) => stage.$match?.$or?.some((condition) => condition['__validOwner.username'])),
+    'search must include owner username after the owner lookup'
+  );
   // Owner validity runs at the top level against the unwound owner path.
   assert(
     recordsPipeline.some(stage =>
@@ -329,7 +409,57 @@ const runValidation = async (middlewares, body) => {
     !recordsPipeline.some(stage => stage.$set),
     'canonical pipeline must not use the $set stage (unsupported by DocumentDB)'
   );
+  assert(
+    recordsPipeline.some((stage) => stage.$lookup?.from === 'users'
+      && stage.$lookup.localField === 'interestedTeams.team'
+      && stage.$lookup.as === '__validInterestedTeamUsers'),
+    'interestedTeamsCount must resolve referenced teams through a basic lookup'
+  );
+  assert(
+    recordsPipeline.some((stage) => stage.$addFields?.interestedTeamsCount?.$size?.$filter),
+    'interestedTeamsCount must exclude missing, inactive, and invalid team owners'
+  );
+  assert(
+    !countPipeline.some((stage) => stage.$lookup?.as === '__validInterestedTeamUsers'),
+    'pagination total must not perform relationship-count lookups'
+  );
   assert(recordsPipeline.some(stage => stage.$limit === 10), 'records pipeline must paginate');
+
+  capturedPipelines = [];
+  await listCanonicalRecruitmentRecords({
+    model: fakeModel,
+    userModel: { collection: { name: 'users' } },
+    applicationModel: { collection: { name: 'recruitmentapplications' } },
+    query: { status: 'active' },
+    ownerField: 'team',
+    expectedUserType: 'team',
+    countField: 'applicantCount',
+    sortBy: 'createdAt',
+    sortDirection: -1,
+    page: 1,
+    limit: 10
+  });
+  const recruitmentRecordsPipeline = capturedPipelines.find(p => !p.some(stage => stage.$count));
+  assert(
+    recruitmentRecordsPipeline.some((stage) => stage.$lookup?.from === 'recruitmentapplications'
+      && stage.$lookup.localField === '_id'
+      && stage.$lookup.foreignField === 'recruitment'),
+    'applicantCount must come from canonical active applications'
+  );
+  assert(
+    recruitmentRecordsPipeline.some((stage) => stage.$addFields?.__activeCanonicalApplications?.$filter),
+    'canonical application count must ignore inactive/withdrawn rows'
+  );
+  assert(
+    recruitmentRecordsPipeline.some((stage) => stage.$lookup?.from === 'users'
+      && stage.$lookup.localField === '__activeCanonicalApplications.applicant'
+      && stage.$lookup.as === '__validApplicantUsers'),
+    'canonical application count must resolve applicant owners through a basic lookup'
+  );
+  assert(
+    recruitmentRecordsPipeline.some((stage) => stage.$addFields?.applicantCount?.$size?.$filter),
+    'canonical application count must exclude missing, inactive, and invalid applicants'
+  );
 
   let capturedApplicationPipelines = [];
   const canonicalApplications = await listCanonicalRecruitmentApplications({
@@ -405,6 +535,84 @@ const runValidation = async (middlewares, body) => {
     benefits: { contactInformation: 'team@example.com' }
   });
   assert.strictEqual(missingRosterGameResponse?.statusCode, 400);
+
+  const mismatchedRosterRoleResponse = await runValidation(validateRecruitment, {
+    recruitmentType: 'roster',
+    game: 'Valorant',
+    role: 'Sniper',
+    requirements: { experienceLevel: 'Competitive' },
+    benefits: { contactInformation: 'team@example.com' }
+  });
+  assert.strictEqual(mismatchedRosterRoleResponse?.statusCode, 400, 'role must belong to the selected game');
+
+  const missingTeamProgressionResponse = await runValidation(validateRecruitment, {
+    recruitmentType: 'roster', game: 'BGMI', role: 'IGL', requirements: {},
+    benefits: { contactInformation: 'team@example.com' }
+  });
+  assert.strictEqual(missingTeamProgressionResponse?.statusCode, 400, 'team create must enforce the Web requirement gate');
+
+  const missingTeamContactResponse = await runValidation(validateRecruitment, {
+    recruitmentType: 'staff', staffRole: 'Coach', requirements: { availability: 'Evenings' }, benefits: {}
+  });
+  assert.strictEqual(missingTeamContactResponse?.statusCode, 400, 'team create must require contact information');
+
+  const invalidNestedRecruitmentResponse = await runValidation(validateRecruitment, {
+    recruitmentType: 'roster',
+    game: 'BGMI',
+    role: 'IGL',
+    requirements: { experienceLevel: 'Competitive', dailyPlayingTime: { hours: 4 } },
+    benefits: { contactInformation: 'team@example.com' }
+  });
+  assert.strictEqual(invalidNestedRecruitmentResponse?.statusCode, 400, 'nested recruitment fields must be bounded strings');
+
+  const invalidNestedProfileResponse = await runValidation(validatePlayerProfile, {
+    profileType: 'looking-for-team',
+    game: 'BGMI',
+    role: 'IGL',
+    playerInfo: { playerName: 'Player', currentRank: 'Bronze' },
+    expectations: { contactInformation: 'player@example.com', expectedSalary: ['invalid'] }
+  });
+  assert.strictEqual(invalidNestedProfileResponse?.statusCode, 400, 'nested player-profile fields must be bounded strings');
+
+  const mismatchedPlayerRoleResponse = await runValidation(validatePlayerProfile, {
+    profileType: 'looking-for-team',
+    game: 'BGMI',
+    role: 'Duelist',
+    playerInfo: { playerName: 'Player', currentRank: 'Bronze' },
+    expectations: { contactInformation: 'player@example.com' }
+  });
+  assert.strictEqual(mismatchedPlayerRoleResponse?.statusCode, 400, 'player-card role must belong to the selected game');
+
+  const missingPlayerIdentityResponse = await runValidation(validatePlayerProfile, {
+    profileType: 'looking-for-team', game: 'BGMI', role: 'IGL',
+    playerInfo: { currentRank: 'Bronze' }, expectations: { contactInformation: 'player@example.com' }
+  });
+  assert.strictEqual(missingPlayerIdentityResponse?.statusCode, 400, 'LFT create must require player name and current rank');
+
+  const missingStaffSkillsResponse = await runValidation(validatePlayerProfile, {
+    profileType: 'staff-position', staffRole: 'Coach',
+    professionalInfo: { fullName: 'Coach' }, expectations: { contactInformation: 'coach@example.com' }
+  });
+  assert.strictEqual(missingStaffSkillsResponse?.statusCode, 400, 'staff profile create must require full name and skills');
+
+  const missingPlayerContactResponse = await runValidation(validatePlayerProfile, {
+    profileType: 'staff-position', staffRole: 'Coach',
+    professionalInfo: { fullName: 'Coach', skillsAndExpertise: 'Strategy' }, expectations: {}
+  });
+  assert.strictEqual(missingPlayerContactResponse?.statusCode, 400, 'player profile create must require contact information');
+
+  const invalidProfileUpdateResponse = await runValidation(validatePlayerProfileUpdate, {
+    professionalInfo: { professionalAchievements: 'x'.repeat(1501) }
+  });
+  assert.strictEqual(invalidProfileUpdateResponse?.statusCode, 400, 'profile updates must enforce the same limits as creates');
+
+  const invalidApplicationResponse = await runValidation(validateApplication, { resume: { url: 'https://example.com' } });
+  assert.strictEqual(invalidApplicationResponse?.statusCode, 400, 'application URLs must be strings, never objects');
+
+  const oversizedDecisionMessageResponse = await runValidation(validateApplicationStatus, {
+    status: 'accepted', message: 'x'.repeat(1001)
+  });
+  assert.strictEqual(oversizedDecisionMessageResponse?.statusCode, 400, 'application decision messages must remain bounded');
 
   let anonymousNextCalled = false;
   await publicOptionalAuth({ headers: {} }, {}, () => {

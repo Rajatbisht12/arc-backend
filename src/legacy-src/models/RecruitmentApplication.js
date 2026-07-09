@@ -23,10 +23,12 @@ const recruitmentApplicationSchema = new mongoose.Schema({
   },
   resume: {
     type: String,
+    maxlength: [2000, 'Resume URL cannot exceed 2000 characters'],
     default: ''
   },
   portfolio: {
     type: String,
+    maxlength: [2000, 'Portfolio URL cannot exceed 2000 characters'],
     default: ''
   },
   // Application status
@@ -81,6 +83,8 @@ recruitmentApplicationSchema.index({ applicant: 1, createdAt: -1 });
 recruitmentApplicationSchema.index({ recruitment: 1, status: 1 });
 recruitmentApplicationSchema.index({ status: 1, createdAt: -1 });
 recruitmentApplicationSchema.index({ applicationType: 1 });
+recruitmentApplicationSchema.index({ recruitment: 1, isActive: 1, status: 1, createdAt: -1 });
+recruitmentApplicationSchema.index({ applicant: 1, isActive: 1, createdAt: -1 });
 
 // Ensure only one active application per recruitment per applicant
 recruitmentApplicationSchema.index({ 

@@ -3,13 +3,17 @@ import { protect, publicOptionalAuth, tournamentController } from "./tournaments
 
 const router = Router();
 const mongoObjectIdPattern = /^[a-f\d]{24}$/i;
+const tournamentCodePattern = /^TRN-[A-Z0-9]+-[A-Z0-9]{8}$/i;
 
 // The public detail route intentionally accepts either a share code or an
 // ObjectId. Every other `:id` route is backed by `Tournament.findById`; reject
 // malformed identifiers before Mongoose can turn a client error into a 500.
 router.param("id", (req, res, next, value) => {
-  if (req.method === "GET" && /^\/[^/]+\/?$/.test(req.path)) return next();
-  if (!mongoObjectIdPattern.test(String(value || ""))) {
+  const candidate = String(value || "");
+  const validPublicCode = req.method === "GET"
+    && /^\/[^/]+\/?$/.test(req.path)
+    && tournamentCodePattern.test(candidate);
+  if (!mongoObjectIdPattern.test(candidate) && !validPublicCode) {
     return res.status(400).json({
       success: false,
       code: "INVALID_TOURNAMENT_ID",

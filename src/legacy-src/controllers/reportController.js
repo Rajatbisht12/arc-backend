@@ -2,6 +2,7 @@ const Report = require('../models/Report');
 const Post = require('../models/Post');
 const User = require('../models/User');
 const TeamRecruitment = require('../models/TeamRecruitment');
+const mongoose = require('mongoose');
 const log = require('../utils/logger');
 
 const reportTargetExists = async (targetType, targetId) => {
@@ -29,6 +30,9 @@ const createReport = async (req, res) => {
     const allowedTypes = ['post', 'recruitment', 'user', 'comment'];
     if (!allowedTypes.includes(targetType)) {
       return res.status(400).json({ success: false, message: 'Invalid targetType' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(targetId)) {
+      return res.status(400).json({ success: false, message: 'Invalid report target ID' });
     }
     const allowedReasons = ['spam', 'harassment', 'hate_speech', 'violence', 'nudity', 'misinformation', 'copyright', 'other'];
     const finalReason = allowedReasons.includes(reason) ? reason : 'other';

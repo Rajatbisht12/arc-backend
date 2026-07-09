@@ -9,6 +9,7 @@ const {
   reopenTeamRecruitment,
   deleteTeamRecruitment,
   createPlayerProfile,
+  getPlayerCardLimit,
   getPlayerProfiles,
   getPlayerProfile,
   updatePlayerProfile,
@@ -43,6 +44,7 @@ router.delete('/team-recruitments/:id', auth, deleteTeamRecruitment);
 
 // Player Profile Routes
 router.post('/player-profiles', auth, ...validatePlayerProfile, createPlayerProfile);
+router.get('/player-profiles/daily-limit', auth, getPlayerCardLimit);
 router.get('/player-profiles', auth, getPlayerProfiles);
 router.get('/player-profiles/:id', publicOptionalAuth, getPlayerProfile); // Supports both ID and profileCode (public for viewing)
 router.get('/profile/:code', publicOptionalAuth, getPlayerProfile); // Shareable link route (public)

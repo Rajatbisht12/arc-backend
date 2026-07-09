@@ -180,8 +180,9 @@ const userController = fs.readFileSync(
 assert((tournamentController.match(/sanitizePublicTournament\(processTournament\(tournament\)\)/g) || []).length >= 2);
 assert(tournamentController.includes('const processedTournaments = tournamentsToReturn.map'));
 assert(tournamentController.includes('sanitizePublicTournament(processTournament(tournament))'));
-assert(tournamentController.includes("PUBLIC_TOURNAMENT_SELECT = '-groupMessages -tournamentMessages'"));
-assert(tournamentController.includes('publicTournamentViewerShape(payload)'));
+assert(tournamentController.includes("PUBLIC_TOURNAMENT_SELECT = '-groupMessages -tournamentMessages +entryFee'"));
+assert(tournamentController.includes('withoutViewerTournamentContext(payload, tournament, emittedAt)'));
+assert(tournamentController.includes('publicTournamentViewerShape(safeTournament)'));
 assert(tournamentController.includes('canReadParticipantChannels'));
 assert(tournamentController.includes('host: host._id'));
 assert(tournamentController.includes('canReadTournamentMessages(tournament, req.user._id)'));

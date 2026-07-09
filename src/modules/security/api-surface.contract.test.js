@@ -189,6 +189,13 @@ const run = async () => {
   assert.strictEqual(accessFor('GET', '/api/knowledge/stats'), 'admin');
   assert.strictEqual(accessFor('POST', '/api/knowledge/test-retrieval'), 'admin');
   assert.strictEqual(accessFor('POST', '/api/admin/auth/login'), 'public');
+  assert.strictEqual(accessFor('GET', '/api/tournaments'), 'public-optional-auth');
+  assert.strictEqual(accessFor('POST', '/api/tournaments'), 'authenticated');
+  assert.strictEqual(accessFor('GET', '/api/tournaments/:id'), 'public-optional-auth');
+  assert.strictEqual(accessFor('PUT', '/api/tournaments/:id'), 'authenticated');
+  assert.strictEqual(accessFor('DELETE', '/api/tournaments/:id'), 'authenticated');
+  assert.strictEqual(accessFor('GET', '/api/scrims'), 'public-optional-auth');
+  assert.strictEqual(accessFor('POST', '/api/scrims'), 'authenticated');
 
   console.log(`API surface contracts passed (${inventory.endpointCount} HTTP endpoints inventoried).`);
 };

@@ -7,6 +7,26 @@ const RECRUITMENT_GAMES = Object.freeze([
   'BGMI', 'Valorant', 'Free Fire', 'Call of Duty Mobile', 'CS:GO', 'Fortnite',
   'Apex Legends', 'League of Legends', 'Dota 2'
 ]);
+const RECRUITMENT_ROLES_BY_GAME = Object.freeze({
+  BGMI: Object.freeze(['IGL', 'Assaulter', 'Support', 'Sniper']),
+  Valorant: Object.freeze(['Duelist', 'Controller', 'Initiator', 'Sentinel']),
+  'Free Fire': Object.freeze(['Rusher', 'Support', 'Sniper', 'IGL']),
+  'Call of Duty Mobile': Object.freeze(['Assault', 'SMG', 'Sniper', 'Support']),
+  'CS:GO': Object.freeze(['Entry Fragger', 'Support', 'AWPer', 'IGL', 'Lurker']),
+  Fortnite: Object.freeze(['Builder', 'Fighter', 'Support', 'IGL']),
+  'Apex Legends': Object.freeze(['Fragger', 'Support', 'IGL', 'Flex']),
+  'League of Legends': Object.freeze(['Top', 'Jungle', 'Mid', 'ADC', 'Support']),
+  'Dota 2': Object.freeze(['Carry', 'Mid', 'Offlane', 'Support', 'Hard Support'])
+});
+const RECRUITMENT_STAFF_ROLES = Object.freeze([
+  'Coach', 'Manager', 'Content Creator', 'Video Editor', 'Social Media Manager',
+  'GFX Artist', 'Scrims Manager', 'Tournament Manager', 'Analyst', 'Stream Manager'
+]);
+
+const isValidRecruitmentRole = (game, role) => Boolean(
+  typeof role === 'string'
+  && RECRUITMENT_ROLES_BY_GAME[game]?.includes(role.trim())
+);
 
 const toPlainObject = (value) => {
   if (!value) return {};
@@ -41,6 +61,10 @@ const serializePlayerProfile = (value, { includeInterestedTeams = false } = {}) 
   const explicitCount = Number(profile.interestedTeamsCount);
   profile.interestedTeamsCount = Number.isFinite(explicitCount) ? explicitCount : interestedTeams.length;
   if (!includeInterestedTeams) delete profile.interestedTeams;
+  else {
+    profile.interestedTeams = interestedTeams.filter((entry) => entry?.team && typeof entry.team === 'object');
+    profile.interestedTeamsCount = profile.interestedTeams.length;
+  }
   return profile;
 };
 
@@ -92,16 +116,14 @@ const teamRecruitmentIntegrityOr = (prefix = '') => {
   const p = prefix ? `${prefix}.` : '';
   return {
     $or: [
-      {
+      ...Object.entries(RECRUITMENT_ROLES_BY_GAME).map(([game, roles]) => ({
         [`${p}recruitmentType`]: 'roster',
-        [`${p}game`]: { $in: RECRUITMENT_GAMES },
-        [`${p}role`]: { $type: 'string' },
-        $expr: hasNonBlankStringExpression(`${p}role`)
-      },
+        [`${p}game`]: game,
+        [`${p}role`]: { $in: roles }
+      })),
       {
         [`${p}recruitmentType`]: 'staff',
-        [`${p}staffRole`]: { $type: 'string' },
-        $expr: hasNonBlankStringExpression(`${p}staffRole`)
+        [`${p}staffRole`]: { $in: RECRUITMENT_STAFF_ROLES }
       }
     ]
   };
@@ -111,16 +133,14 @@ const addTeamRecruitmentIntegrityFilters = (query = {}) => addAndCondition(query
 
 const addPlayerProfileIntegrityFilters = (query = {}) => addAndCondition(query, {
   $or: [
-    {
+    ...Object.entries(RECRUITMENT_ROLES_BY_GAME).map(([game, roles]) => ({
       profileType: 'looking-for-team',
-      game: { $in: RECRUITMENT_GAMES },
-      role: { $type: 'string' },
-      $expr: hasNonBlankStringExpression('role')
-    },
+      game,
+      role: { $in: roles }
+    })),
     {
       profileType: 'staff-position',
-      staffRole: { $type: 'string' },
-      $expr: hasNonBlankStringExpression('staffRole')
+      staffRole: { $in: RECRUITMENT_STAFF_ROLES }
     }
   ]
 });
@@ -150,28 +170,44 @@ const buildValidOwnerMatchStage = (ownerPath, expectedUserType) => {
   };
 };
 
+// Counts valid joined User rows without relying on a correlated $lookup. This
+// is used for denormalized recruitment relationship arrays: basic lookups
+// naturally collapse duplicate ids, and filtering here prevents deleted or
+// deactivated accounts from inflating the public card counts.
+const countValidJoinedOwnersExpression = (arrayField, expectedUserType) => ({
+  $size: {
+    $filter: {
+      input: { $ifNull: [`$${arrayField}`, []] },
+      as: 'joinedOwner',
+      cond: {
+        $and: [
+          { $eq: ['$$joinedOwner.userType', expectedUserType] },
+          { $eq: ['$$joinedOwner.isActive', true] },
+          { $ne: ['$$joinedOwner.needsProfileCompletion', true] },
+          { $eq: [{ $type: '$$joinedOwner.username' }, 'string'] },
+          hasNonBlankStringExpression('$joinedOwner.username')
+        ]
+      }
+    }
+  }
+});
+
 const isTeamRecruitmentStructurallyValid = (recruitment) => {
   if (!recruitment) return false;
   if (recruitment.recruitmentType === 'roster') {
-    return RECRUITMENT_GAMES.includes(recruitment.game)
-      && typeof recruitment.role === 'string'
-      && Boolean(recruitment.role.trim());
+    return isValidRecruitmentRole(recruitment.game, recruitment.role);
   }
   return recruitment.recruitmentType === 'staff'
-    && typeof recruitment.staffRole === 'string'
-    && Boolean(recruitment.staffRole.trim());
+    && RECRUITMENT_STAFF_ROLES.includes(recruitment.staffRole);
 };
 
 const isPlayerProfileStructurallyValid = (profile) => {
   if (!profile) return false;
   if (profile.profileType === 'looking-for-team') {
-    return RECRUITMENT_GAMES.includes(profile.game)
-      && typeof profile.role === 'string'
-      && Boolean(profile.role.trim());
+    return isValidRecruitmentRole(profile.game, profile.role);
   }
   return profile.profileType === 'staff-position'
-    && typeof profile.staffRole === 'string'
-    && Boolean(profile.staffRole.trim());
+    && RECRUITMENT_STAFF_ROLES.includes(profile.staffRole);
 };
 
 const isValidRecruitmentOwner = (owner, expectedUserType) => Boolean(
@@ -323,6 +359,9 @@ const listCanonicalRecruitmentRecords = async ({
   viewerId,
   viewerBlockedIds,
   followModel,
+  applicationModel,
+  searchPattern = '',
+  searchFields = [],
   ownerProjection = DEFAULT_RECRUITMENT_OWNER_PROJECTION
 }) => {
   const countSource = countField === 'applicantCount' ? 'applicants' : 'interestedTeams';
@@ -345,6 +384,62 @@ const listCanonicalRecruitmentRecords = async ({
       .distinct('following', { follower: new mongoose.Types.ObjectId(String(viewerId)) });
   }
 
+  const canonicalApplicationModel = countField === 'applicantCount'
+    ? (applicationModel || require('../models/RecruitmentApplication'))
+    : null;
+  const countStages = canonicalApplicationModel
+    ? [
+        {
+          $lookup: {
+            from: canonicalApplicationModel.collection.name,
+            localField: '_id',
+            foreignField: 'recruitment',
+            as: '__canonicalApplications'
+          }
+        },
+        {
+          $addFields: {
+            __activeCanonicalApplications: {
+              $filter: {
+                input: { $ifNull: ['$__canonicalApplications', []] },
+                as: 'application',
+                cond: { $eq: ['$$application.isActive', true] }
+              }
+            }
+          }
+        },
+        {
+          $lookup: {
+            from: userModel.collection.name,
+            localField: '__activeCanonicalApplications.applicant',
+            foreignField: '_id',
+            as: '__validApplicantUsers'
+          }
+        },
+        {
+          $addFields: {
+            [countField]: countValidJoinedOwnersExpression('__validApplicantUsers', 'player')
+          }
+        },
+        { $project: { __canonicalApplications: 0, __activeCanonicalApplications: 0, __validApplicantUsers: 0 } }
+      ]
+    : [
+        {
+          $lookup: {
+            from: userModel.collection.name,
+            localField: `${countSource}.team`,
+            foreignField: '_id',
+            as: '__validInterestedTeamUsers'
+          }
+        },
+        {
+          $addFields: {
+            [countField]: countValidJoinedOwnersExpression('__validInterestedTeamUsers', 'team')
+          }
+        },
+        { $project: { __validInterestedTeamUsers: 0 } }
+      ];
+
   const basePipeline = [
     { $match: query },
     {
@@ -363,12 +458,20 @@ const listCanonicalRecruitmentRecords = async ({
       viewerFollowingIds,
       ownerPath: '__validOwner'
     }),
+    ...(searchPattern ? [{
+      $match: {
+        $or: [
+          ...searchFields.map((field) => ({ [field]: { $regex: searchPattern, $options: 'i' } })),
+          { '__validOwner.username': { $regex: searchPattern, $options: 'i' } },
+          { '__validOwner.profile.displayName': { $regex: searchPattern, $options: 'i' } }
+        ]
+      }
+    }] : []),
     // Reduce the joined owner document to exactly the requested projection.
     // Use $addFields, not $set: Amazon DocumentDB does not support the $set
     // pipeline stage ("Unrecognized pipeline stage name: '$set'").
     { $addFields: { [ownerField]: buildOwnerProjectionExpression('__validOwner', ownerProjection) } },
-    { $project: { __validOwner: 0 } },
-    { $addFields: { [countField]: { $size: { $ifNull: [`$${countSource}`, []] } } } }
+    { $project: { __validOwner: 0 } }
   ];
 
   // Amazon DocumentDB does not support $facet, so the page and the total count
@@ -376,6 +479,7 @@ const listCanonicalRecruitmentRecords = async ({
   const [records, countRows] = await Promise.all([
     model.aggregate([
       ...basePipeline,
+      ...countStages,
       { $sort: sort },
       { $skip: (page - 1) * limit },
       { $limit: limit }
@@ -525,11 +629,77 @@ const mergeAllowedObject = (currentValue, incomingValue, allowedKeys) => {
   const merged = { ...current };
   allowedKeys.forEach((key) => {
     if (Object.prototype.hasOwnProperty.call(incomingValue, key)) {
-      merged[key] = incomingValue[key];
+      // Trim transport whitespace without rewriting free-text content. Empty
+      // strings remain empty so an edit can intentionally clear an optional
+      // field instead of silently restoring the previous value.
+      merged[key] = typeof incomingValue[key] === 'string'
+        ? incomingValue[key].trim()
+        : incomingValue[key];
     }
   });
   delete merged._id;
   return merged;
+};
+
+const hasText = (value) => typeof value === 'string' && value.trim().length > 0;
+
+// Defense-in-depth progression gates for callers that invoke controllers
+// without the Express route validators. These mirror the existing Web wizard
+// and update-handler rules; a null result means the payload may be persisted.
+const validateTeamRecruitmentCreateProgression = ({
+  recruitmentType,
+  game,
+  role,
+  staffRole,
+  requirements = {},
+  benefits = {}
+} = {}) => {
+  if (!['roster', 'staff'].includes(recruitmentType)) return 'Invalid recruitment type';
+  if (game && !Object.prototype.hasOwnProperty.call(RECRUITMENT_ROLES_BY_GAME, game)) {
+    return 'Invalid game selection';
+  }
+  if (recruitmentType === 'roster') {
+    if (!hasText(game)) return 'Game is required for roster recruitment';
+    if (!hasText(role)) return 'Role is required for roster recruitment';
+    if (!isValidRecruitmentRole(game, role)) return 'Role is not valid for the selected game';
+  } else if (!hasText(staffRole) || !RECRUITMENT_STAFF_ROLES.includes(staffRole)) {
+    return hasText(staffRole) ? 'Invalid staff role' : 'Staff role is required for staff recruitment';
+  }
+
+  const progressionValues = recruitmentType === 'roster'
+    ? [requirements.experienceLevel, requirements.dailyPlayingTime, requirements.tournamentExperience]
+    : [requirements.experienceLevel, requirements.availability];
+  if (!progressionValues.some(hasText)) return 'Provide at least one experience or availability requirement';
+  if (!hasText(benefits.contactInformation)) return 'Contact information is required';
+  return null;
+};
+
+const validatePlayerProfileCreateProgression = ({
+  profileType,
+  game,
+  role,
+  staffRole,
+  playerInfo = {},
+  professionalInfo = {},
+  expectations = {}
+} = {}) => {
+  if (!['looking-for-team', 'staff-position'].includes(profileType)) return 'Invalid profile type';
+  if (profileType === 'looking-for-team') {
+    if (!hasText(game)) return 'Game is required for looking for team profile';
+    if (!isValidRecruitmentRole(game, role)) return 'Role is not valid for the selected game';
+    if (!hasText(playerInfo.playerName) || !hasText(playerInfo.currentRank)) {
+      return 'Player name and current rank are required for looking for team profiles';
+    }
+  } else {
+    if (!hasText(staffRole) || !RECRUITMENT_STAFF_ROLES.includes(staffRole)) {
+      return hasText(staffRole) ? 'Invalid staff role' : 'Staff role is required for staff position profile';
+    }
+    if (!hasText(professionalInfo.fullName) || !hasText(professionalInfo.skillsAndExpertise)) {
+      return 'Full name and skills and expertise are required for staff profiles';
+    }
+  }
+  if (!hasText(expectations.contactInformation)) return 'Contact information is required';
+  return null;
 };
 
 module.exports = {
@@ -537,12 +707,16 @@ module.exports = {
   PLAYER_PROFILE_STATUSES,
   TEAM_APPLICATION_STATUSES,
   RECRUITMENT_GAMES,
+  RECRUITMENT_ROLES_BY_GAME,
+  RECRUITMENT_STAFF_ROLES,
+  isValidRecruitmentRole,
   serializeTeamRecruitment,
   serializePlayerProfile,
   isRecruitmentLive,
   isPlayerProfileLive,
   addTeamRecruitmentIntegrityFilters,
   addPlayerProfileIntegrityFilters,
+  teamRecruitmentIntegrityOr,
   getValidRecruitmentOwnerMatch,
   isValidRecruitmentOwner,
   isTeamRecruitmentStructurallyValid,
@@ -554,5 +728,7 @@ module.exports = {
   sameId,
   parsePagination,
   escapeRegex,
-  mergeAllowedObject
+  mergeAllowedObject,
+  validateTeamRecruitmentCreateProgression,
+  validatePlayerProfileCreateProgression
 };

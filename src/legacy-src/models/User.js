@@ -1,5 +1,20 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const {
+  TEAM_ROLE_MAX_LENGTH,
+  isValidTeamRole
+} = require('../utils/teamInvitationPolicy');
+const { TEAM_TYPES, normalizeTeamType } = require('../utils/teamType');
+
+const teamRoleField = {
+  type: String,
+  trim: true,
+  maxlength: TEAM_ROLE_MAX_LENGTH,
+  validate: {
+    validator: isValidTeamRole,
+    message: `Role must be between 1 and ${TEAM_ROLE_MAX_LENGTH} characters`
+  }
+};
 
 const tournamentHistoryEntrySchema = new mongoose.Schema({
   tournamentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tournament', required: true },
@@ -312,8 +327,13 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
       },
+      membershipType: {
+        type: String,
+        enum: ['roster', 'staff']
+      },
       game: String,
-      role: String,
+      // Display label only. Team ownership is always derived from the team account id.
+      role: teamRoleField,
       inGameName: String,
       joinedAt: {
         type: Date,
@@ -336,6 +356,17 @@ const userSchema = new mongoose.Schema({
   },
   // Team specific fields
   teamInfo: {
+    isGeneratedDuo: {
+      type: Boolean,
+      default: false,
+      select: false
+    },
+    generatedForTournament: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Tournament',
+      default: null,
+      select: false
+    },
     teamSize: {
       type: Number,
       default: 0
@@ -347,7 +378,8 @@ const userSchema = new mongoose.Schema({
     },
     teamType: {
       type: String,
-      enum: ['casual', 'competitive', 'professional'],
+      enum: TEAM_TYPES,
+      set: normalizeTeamType,
       default: 'casual'
     },
     members: [{
@@ -373,22 +405,7 @@ const userSchema = new mongoose.Schema({
           type: mongoose.Schema.Types.ObjectId,
           ref: 'User'
         },
-        role: {
-          type: String,
-          enum: [
-            // General roles
-            'Captain', 'Player', 'Substitute', 'Coach', 'Manager',
-            // BGMI roles
-            'IGL', 'Assaulter', 'Support', 'Sniper', 'Fragger',
-            // Valorant roles
-            'Duelist', 'Controller', 'Initiator', 'Sentinel',
-            // Free Fire roles
-            'Rusher',
-            // Call of Duty Mobile roles
-            'Assault'
-          ],
-          default: 'Player'
-        },
+        role: { ...teamRoleField, default: 'Player' },
         inGameName: String,
         joinedAt: {
           type: Date,
@@ -414,11 +431,8 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
       },
-      role: {
-        type: String,
-        enum: ['Owner', 'Manager', 'Coach', 'Analyst', 'Content Creator'],
-        required: true
-      },
+      // A role named "Owner" is a display label and never grants account ownership.
+      role: { ...teamRoleField, required: true },
       game: {
         type: String,
         enum: ['BGMI', 'Valorant', 'Free Fire', 'Call of Duty Mobile', 'General'],
