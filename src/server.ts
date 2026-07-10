@@ -42,6 +42,20 @@ const bootstrap = async () => {
   }
 
   await connectMongo();
+
+  // DocumentDB empties a $lookup when the target collection is absent, so the
+  // recruitment listing returns nothing until someone first applies. Create the
+  // canonical recruitment collections up front so a fresh database behaves like
+  // a seeded one. Best-effort: a failure here must not block startup.
+  const recruitmentCollections = safeRequire<{
+    ensureRecruitmentCollections?: (deps: { logger: typeof logger }) => Promise<string[]>;
+  }>(path.join(backendRootPath, "utils", "ensureRecruitmentCollections.js"));
+  try {
+    await recruitmentCollections?.ensureRecruitmentCollections?.({ logger });
+  } catch (ensureErr) {
+    logger.warn("Recruitment collection ensure failed", { error: String(ensureErr) });
+  }
+
   try {
     await connectRedis();
   } catch (redisErr) {
