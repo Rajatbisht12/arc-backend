@@ -71,6 +71,16 @@ const normalizeOptionalString = (value) => {
   return normalized || undefined;
 };
 
+// Owner listings are served by aggregations, and Mongoose does not cast
+// aggregation pipelines. `req.user._id` arrives as a string whenever the auth
+// middleware served the request from its Redis cache, so an uncast owner id
+// would match zero documents instead of raising.
+const toObjectId = (value) => (
+  mongoose.Types.ObjectId.isValid(String(value ?? ''))
+    ? new mongoose.Types.ObjectId(String(value))
+    : value
+);
+
 const requireUserType = (req, res, expectedType, message) => {
   if (req.user?.userType === expectedType) return true;
   res.status(403).json({ success: false, message });
@@ -261,7 +271,7 @@ const getTeamRecruitments = safeAsyncHandler(async (req, res) => {
   const { page, limit } = parsePagination(req.query.page, req.query.limit);
   const ownListing = my === 'true';
   const query = addTeamRecruitmentIntegrityFilters(
-    ownListing ? { team: req.user._id, isActive: true } : addLiveFilters({})
+    ownListing ? { team: toObjectId(req.user._id), isActive: true } : addLiveFilters({})
   );
 
   if (ownListing && status) {
@@ -641,7 +651,7 @@ const getPlayerProfiles = safeAsyncHandler(async (req, res) => {
   const { page, limit } = parsePagination(req.query.page, req.query.limit);
   const ownListing = my === 'true';
   const query = addPlayerProfileIntegrityFilters(
-    ownListing ? { player: req.user._id, isActive: true } : addLiveFilters({})
+    ownListing ? { player: toObjectId(req.user._id), isActive: true } : addLiveFilters({})
   );
 
   if (ownListing && status) {
@@ -1216,7 +1226,7 @@ const getUserApplications = safeAsyncHandler(async (req, res) => {
 
   if (!requireUserType(req, res, 'player', 'Only individual users can view recruitment applications')) return;
 
-  const query = { applicant: userId, isActive: true };
+  const query = { applicant: toObjectId(userId), isActive: true };
   if (status) {
     const allowedStatuses = ['pending', ...TEAM_APPLICATION_STATUSES];
     if (allowedStatuses.includes(status)) query.status = status;

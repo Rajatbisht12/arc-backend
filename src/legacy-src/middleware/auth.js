@@ -21,6 +21,13 @@ async function getCachedUser(userId) {
     delete cached.password;
     delete cached.pushTokens;
     delete cached.notificationClients;
+    // JSON round-tripping turns `_id` into a plain string. Mongoose casts query
+    // filters but never aggregation pipelines, so a string `req.user._id` would
+    // silently match nothing in any `$match` stage. Restore the ObjectId so a
+    // cache hit is type-identical to the `.lean()` path below.
+    if (typeof cached._id === 'string' && mongoose.Types.ObjectId.isValid(cached._id)) {
+      cached._id = new mongoose.Types.ObjectId(cached._id);
+    }
     return cached;
   }
 

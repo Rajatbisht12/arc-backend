@@ -20,7 +20,9 @@ stubModule('../utils/jwt', {
   verifyToken: () => decodedToken
 });
 stubModule('../models/User', {});
-stubModule('mongoose', { connection: { readyState: 1 } });
+// Only the connection state is faked. `Types` stays real because getCachedUser
+// rehydrates a cached `_id` back into an ObjectId.
+stubModule('mongoose', { connection: { readyState: 1 }, Types: require('mongoose').Types });
 stubModule('../utils/redisCache', {
   getJson: async () => cachedUser,
   setJson: async () => {},
