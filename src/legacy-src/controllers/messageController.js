@@ -453,10 +453,16 @@ const getDirectMessages = async (req, res) => {
 
     for (const message of messages) {
       if (message.sharedPost) {
-        const access = await resolvePostAccess({ post: message.sharedPost, viewer: req.user });
-        if (!access.allowed) {
+        const sp = message.sharedPost;
+        const access = await resolvePostAccess({ post: sp, viewer: req.user });
+        const deletedOrHidden = sp.isActive === false || sp.hiddenByAdmin === true;
+        if (!access.allowed || deletedOrHidden) {
+          // Never expose a private/blocked/deleted post's content. Null the
+          // payload but leave a lightweight marker so the client can render a
+          // compact "post unavailable" state instead of a blank message.
           message.sharedPost = null;
           message.sharedPostCaption = '';
+          message.sharedPostUnavailable = true;
         }
       }
     }

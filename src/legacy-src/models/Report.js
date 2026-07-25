@@ -46,6 +46,10 @@ const reportSchema = new mongoose.Schema({
 
 reportSchema.index({ status: 1, createdAt: -1 });
 reportSchema.index({ targetType: 1, targetId: 1 });
-reportSchema.index({ reporter: 1, targetType: 1, targetId: 1, status: 1 });
+// One report per user per piece of content. This unique index is the
+// source of truth that enforces de-duplication atomically, so rapid,
+// retried, offline-replayed, or multi-device submissions can never create
+// a second report even if they race past the application-level check.
+reportSchema.index({ reporter: 1, targetType: 1, targetId: 1 }, { unique: true });
 
 module.exports = mongoose.model('Report', reportSchema);

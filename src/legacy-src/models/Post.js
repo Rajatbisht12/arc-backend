@@ -99,6 +99,25 @@ const postSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
     }],
+    // Threading (Instagram-style, flattened to two visual levels).
+    // Top-level comments leave both null; a reply points parentComment at the
+    // comment it answers and rootComment at the top-level thread it belongs to.
+    // Legacy comments (created before threading) read back as top-level.
+    parentComment: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null
+    },
+    rootComment: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null
+    },
+    // Maintained only on the root (top-level) comment: number of replies in its
+    // thread. Replies keep 0.
+    replyCount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
     createdAt: {
       type: Date,
       default: Date.now
@@ -143,6 +162,18 @@ const postSchema = new mongoose.Schema({
     type: String,
     enum: ['public', 'followers', 'private'],
     default: 'public'
+  },
+  // Genuine user edit of visible content. `timestamps` bumps `updatedAt` on any
+  // write (likes, comments, views, boosts...), so it can never be used to infer
+  // "Edited"; these fields are set ONLY by the post-edit endpoint. Legacy posts
+  // default to not-edited — we never backfill from updatedAt.
+  isEdited: {
+    type: Boolean,
+    default: false
+  },
+  editedAt: {
+    type: Date,
+    default: null
   },
   isActive: {
     type: Boolean,
@@ -233,6 +264,8 @@ postSchema.index({ isActive: 1, hiddenByAdmin: 1, 'content.media.type': 1, creat
 postSchema.index({ 'viewedBy.user': 1, createdAt: -1 });
 postSchema.index({ 'likes.user': 1, createdAt: -1 });
 postSchema.index({ 'comments.user': 1, createdAt: -1 });
+// Reply-thread lookups: group replies by their root top-level comment.
+postSchema.index({ 'comments.rootComment': 1 });
 postSchema.index({ 'boostMeta.status': 1, 'boostMeta.endTime': 1, 'boostMeta.remainingReach': 1 });
 postSchema.index({ 'metrics.organicViews': -1, createdAt: -1 });
 

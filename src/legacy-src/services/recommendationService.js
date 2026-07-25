@@ -3,14 +3,31 @@ const Post = require('../models/Post');
 const User = require('../models/User');
 const Follow = require('../models/Follow');
 const PostEngagement = require('../models/PostEngagement');
+const BoostDeliveryAttribution = require('../models/BoostDeliveryAttribution');
 const { formatPostDTO } = require('../utils/dto');
+const { normalizeTag } = require('../utils/hashtags');
 const log = require('../utils/logger');
-const { getBoostScore, getDeliverySource, recordBoostDelivery } = require('./boostService');
+const { getBoostScore, isActiveBoost, getDeliverySource, recordBoostDelivery } = require('./boostService');
 
 const DEFAULT_LIMIT = 15;
 const MAX_LIMIT = 30;
 const MAX_EXCLUDED_IDS = 120;
 const CANDIDATE_MULTIPLIER = 8;
+// Seen-post cooldown: recently delivered posts are strongly down-ranked and
+// recover eligibility gradually — never permanently hidden.
+const SEEN_LOOKBACK_MS = 48 * 60 * 60 * 1000;
+const SEEN_COOLDOWN_HOURS = 36;
+const SEEN_PENALTY_BASE = 85;
+const SEEN_PENALTY_HALF_LIFE_HOURS = 7;
+const SEEN_FETCH_LIMIT = 400;
+// Boosted delivery fairness: a campaign keeps its paid score bonus, but not
+// for the same viewer back-to-back, and never more than one boosted slot in
+// the first page window.
+const BOOST_USER_COOLDOWN_HOURS = 6;
+const BOOST_FREQUENCY_CAP = 4;
+const BOOST_TOP_WINDOW = 5;
+const NEW_POST_KICKER_HOURS = 6;
+const MAX_SESSION_SEED_LENGTH = 64;
 const MAX_ENGAGEMENT_DURATION_MS = 24 * 60 * 60 * 1000;
 const ENGAGEMENT_CONTEXTS = new Set(['feed', 'clips', 'profile', 'search', 'post', 'unknown']);
 const ENGAGEMENT_CONTEXT_ALIASES = new Map([
@@ -19,7 +36,12 @@ const ENGAGEMENT_CONTEXT_ALIASES = new Map([
   ['profile-saved', 'profile'],
   ['profile_saved', 'profile'],
   ['profile-liked', 'profile'],
-  ['profile_liked', 'profile']
+  ['profile_liked', 'profile'],
+  ['post-card', 'feed'],
+  ['post_card', 'feed'],
+  ['post-detail', 'post'],
+  ['post_detail', 'post'],
+  ['saved', 'profile']
 ]);
 
 function normalizeEngagementDuration(value) {
@@ -207,7 +229,10 @@ function buildAudienceFilter({ user, mode, relationship, query }) {
   if (query.postType) filter.postType = query.postType;
   if (query.author && isValidObjectId(query.author)) filter.author = query.author;
   if (query.tags) {
-    filter.tags = { $in: String(query.tags).split(',').map((tag) => tag.trim()).filter(Boolean) };
+    // Normalize requested tags to the same lowercase keys posts are indexed
+    // under, so hashtag search is case-insensitive (#Valorant === #valorant).
+    const wanted = String(query.tags).split(',').map(normalizeTag).filter(Boolean);
+    if (wanted.length > 0) filter.tags = { $in: wanted };
   }
 
   const isGuest = !user || user.userType === 'guest';
@@ -251,6 +276,13 @@ function buildAudienceFilter({ user, mode, relationship, query }) {
     ];
   }
 
+  // Hide posts the viewer has reported from their own feeds only. This is a
+  // per-viewer suppression (not a global delete) and never affects other
+  // users, admins, or moderation views, which read reports separately.
+  if (relationship.currentUserId) {
+    filter['reports.user'] = { $ne: relationship.currentUserId };
+  }
+
   return filter;
 }
 
@@ -264,16 +296,163 @@ function applyCursorAndExclusions(filter, { cursor, excludedIds }) {
 
   const decoded = decodeCursor(cursor);
   if (decoded) {
-    and.push({
+    const olderThanBoundary = {
       $or: [
         { createdAt: { $lt: decoded.createdAt } },
         { createdAt: decoded.createdAt, _id: { $lt: decoded.id } }
       ]
-    });
+    };
+    // Ranking selects a scored subset of the candidate window, so posts newer
+    // than the boundary can be left undelivered. While the client-reported
+    // exclusion list still covers the delivered set, keep that newer region
+    // eligible (minus exclusions) so ranked-over posts are not skipped
+    // forever. Once the exclusion window saturates, fall back to strictly
+    // chronological progress to guarantee termination.
+    const allowNewerUnseen = excludedIds.length > 0 && excludedIds.length < Math.floor(MAX_EXCLUDED_IDS * 0.75);
+    if (allowNewerUnseen) {
+      and.push({
+        $or: [
+          olderThanBoundary,
+          { createdAt: { $gt: decoded.createdAt } }
+        ]
+      });
+    } else {
+      and.push(olderThanBoundary);
+    }
   }
 
   if (and.length > 0) nextFilter.$and = and;
   return nextFilter;
+}
+
+// The next-page boundary advances only as far as content actually delivered:
+// using the oldest *selected* post keeps unselected candidates eligible for
+// later pages instead of silently skipping everything the ranker passed over.
+function pickNextCursorPost({ selectedPosts, candidates, incomingCursor, excludedCount }) {
+  if (!candidates.length) return null;
+  const lastCandidate = candidates[candidates.length - 1];
+  const oldestSelected = [...selectedPosts].sort((a, b) => {
+    const timeDelta = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    if (timeDelta !== 0) return timeDelta;
+    return String(a._id) < String(b._id) ? -1 : 1;
+  })[0];
+  if (!oldestSelected) return lastCandidate;
+
+  const decoded = decodeCursor(incomingCursor);
+  if (decoded && excludedCount >= Math.floor(MAX_EXCLUDED_IDS * 0.75)) {
+    const boundaryTime = new Date(oldestSelected.createdAt).getTime();
+    if (boundaryTime >= decoded.createdAt.getTime()) {
+      // Exclusion window is saturated and selection stayed inside the newer
+      // region: advance chronologically so pagination always terminates.
+      return lastCandidate;
+    }
+  }
+  return oldestSelected;
+}
+
+function normalizeSessionSeed(raw) {
+  if (typeof raw === 'string' && raw.trim()) {
+    return raw.trim().slice(0, MAX_SESSION_SEED_LENGTH);
+  }
+  // Without a client session, rotate by hour bucket so the ordering still
+  // changes over time instead of staying frozen for a whole day.
+  return new Date().toISOString().slice(0, 13);
+}
+
+// Posts recently delivered to this user in this surface. Impressions are
+// recorded server-side at serve time; real views (client-tracked) reinforce
+// the same signal.
+async function getRecentlySeenMap(userId, mode) {
+  if (!userId) return new Map();
+  const since = new Date(Date.now() - SEEN_LOOKBACK_MS);
+  const rows = await PostEngagement.find({
+    user: userId,
+    context: mode,
+    eventType: { $in: ['impression', 'view'] },
+    updatedAt: { $gte: since }
+  })
+    .sort({ updatedAt: -1 })
+    .limit(SEEN_FETCH_LIMIT)
+    .select('post updatedAt impressionCount')
+    .lean()
+    .catch(() => []);
+
+  const seenMap = new Map();
+  rows.forEach((row) => {
+    const postId = normalizeId(row.post);
+    if (!postId) return;
+    const existing = seenMap.get(postId);
+    const lastShownAt = new Date(row.updatedAt || Date.now()).getTime();
+    const impressionCount = Math.max(1, Number(row.impressionCount) || 1);
+    if (!existing) {
+      seenMap.set(postId, { lastShownAt, impressionCount });
+      return;
+    }
+    existing.lastShownAt = Math.max(existing.lastShownAt, lastShownAt);
+    existing.impressionCount = Math.max(existing.impressionCount, impressionCount);
+  });
+  return seenMap;
+}
+
+async function getBoostDeliveryMap(userId, mode) {
+  if (!userId) return new Map();
+  const rows = await BoostDeliveryAttribution.find({
+    user: userId,
+    context: mode,
+    expiresAt: { $gt: new Date() }
+  })
+    .select('post deliveredAt deliveryCount')
+    .lean()
+    .catch(() => []);
+
+  const deliveryMap = new Map();
+  rows.forEach((row) => {
+    const postId = normalizeId(row.post);
+    if (!postId) return;
+    deliveryMap.set(postId, {
+      deliveredAt: new Date(row.deliveredAt || Date.now()).getTime(),
+      deliveryCount: Math.max(1, Number(row.deliveryCount) || 1)
+    });
+  });
+  return deliveryMap;
+}
+
+function buildImpressionOps(posts, { userId, mode, sessionSeed }) {
+  const now = new Date();
+  return posts.map((post, index) => ({
+    updateOne: {
+      filter: { user: userId, post: post._id, eventType: 'impression', context: mode },
+      update: {
+        $setOnInsert: {
+          author: post.author?._id || post.author,
+          source: 'organic',
+          durationMs: 0,
+          completionRate: 0,
+          metadata: {}
+        },
+        $set: {
+          updatedAt: now,
+          positionShown: index,
+          sessionId: sessionSeed || null
+        },
+        $inc: { impressionCount: 1 }
+      },
+      upsert: true
+    }
+  }));
+}
+
+async function recordFeedImpressions(posts, { userId, mode, sessionSeed }) {
+  if (!userId || !Array.isArray(posts) || posts.length === 0) return;
+  const ops = buildImpressionOps(posts, { userId, mode, sessionSeed });
+  try {
+    await PostEngagement.bulkWrite(ops, { ordered: false });
+  } catch (error) {
+    // Duplicate-key races between concurrent first impressions are benign.
+    if (error?.code !== 11000 && !/E11000/.test(String(error))) {
+      log.warn('Failed to record feed impressions', { error: String(error), mode });
+    }
+  }
 }
 
 async function getInterestProfile(userId, relationship) {
@@ -286,7 +465,12 @@ async function getInterestProfile(userId, relationship) {
     };
   }
 
-  const recentEvents = await PostEngagement.find({ user: userId })
+  const recentEvents = await PostEngagement.find({
+    user: userId,
+    // Server-side delivery impressions are exposure records, not intent
+    // signals, and must not inflate author affinity.
+    eventType: { $ne: 'impression' }
+  })
     .sort({ createdAt: -1 })
     .limit(160)
     .select('post author eventType')
@@ -351,7 +535,32 @@ async function getInterestProfile(userId, relationship) {
   };
 }
 
-function scorePost(post, { mode, relationship, interestProfile, seed }) {
+function getSeenPenalty(seenEntry, now) {
+  if (!seenEntry?.lastShownAt) return 0;
+  const hoursSinceShown = Math.max(0, (now - seenEntry.lastShownAt) / 36e5);
+  if (hoursSinceShown >= SEEN_COOLDOWN_HOURS) return 0;
+  // Repeat exposures decay slower so a post shown many times sinks harder,
+  // but the penalty always reaches zero — content is never permanently hidden.
+  const repeatFactor = Math.min(2.2, 1 + (Math.max(0, (seenEntry.impressionCount || 1) - 1) * 0.35));
+  return SEEN_PENALTY_BASE * Math.exp(-hoursSinceShown / SEEN_PENALTY_HALF_LIFE_HOURS) * repeatFactor;
+}
+
+function getDampedBoostScore(post, { mode, now, boostDeliveryMap }) {
+  const rawBoost = getBoostScore(post, { mode, now });
+  if (rawBoost <= 0) return 0;
+  const delivery = boostDeliveryMap?.get(normalizeId(post._id));
+  if (!delivery) return rawBoost;
+  const hoursSinceDelivery = Math.max(0, (now - delivery.deliveredAt) / 36e5);
+  const frequencyCapped = delivery.deliveryCount >= BOOST_FREQUENCY_CAP;
+  if (hoursSinceDelivery < BOOST_USER_COOLDOWN_HOURS || frequencyCapped) {
+    // The campaign already reached this viewer recently (or hit its per-user
+    // cap): the post stays eligible but competes on organic merit only.
+    return 0;
+  }
+  return rawBoost;
+}
+
+function scorePost(post, { mode, relationship, interestProfile, seed, seenMap, boostDeliveryMap }) {
   const now = Date.now();
   const createdAt = new Date(post.createdAt).getTime();
   const hoursOld = Math.max(0, (now - createdAt) / 36e5);
@@ -373,10 +582,16 @@ function scorePost(post, { mode, relationship, interestProfile, seed }) {
     return sum + (interestProfile.tagWeights.get(String(tag).toLowerCase()) || 0);
   }, 0);
   const mediaBoost = postHasVideo(post) ? (mode === 'clips' ? 18 : 4) : 2;
-  const boostScore = getBoostScore(post, { mode, now });
+  const boostScore = getDampedBoostScore(post, { mode, now, boostDeliveryMap });
   const qualityPenalty = reports * 25;
   const exploration = stableNoise(seed, post._id) * (mode === 'clips' ? 16 : 10);
   const viralVelocity = engagementRate > 0 ? Math.min(35, engagementRate * 28) : 0;
+  // Temporary head start for newly created eligible posts so fresh content
+  // reaches the top before engagement accumulates.
+  const newPostKicker = hoursOld < NEW_POST_KICKER_HOURS
+    ? (mode === 'clips' ? 20 : 26) * Math.exp(-hoursOld / 2.5)
+    : 0;
+  const seenPenalty = getSeenPenalty(seenMap?.get(normalizeId(post._id)), now);
 
   const score =
     freshness * (mode === 'clips' ? 85 : 70)
@@ -390,6 +605,8 @@ function scorePost(post, { mode, relationship, interestProfile, seed }) {
     + boostScore
     + exploration
     + ownPostPenalty
+    + newPostKicker
+    - seenPenalty
     - qualityPenalty;
 
   return Math.round(score * 100) / 100;
@@ -429,6 +646,47 @@ function selectDiversePosts(scoredPosts, limit, mode) {
   }
 
   return selected;
+}
+
+// Boosted posts keep paid distribution but never own a fixed slot:
+// - at most one boosted post inside the first `topWindow` items;
+// - a boosted post only holds position 1 when it earned it organically,
+//   otherwise its slot rotates deterministically with the session seed.
+function applyBoostPlacement(selected, { seed, topWindow = BOOST_TOP_WINDOW, now = Date.now() } = {}) {
+  if (!Array.isArray(selected) || selected.length < 3) return selected;
+
+  const items = [...selected];
+  const window = Math.min(topWindow, items.length);
+  const isBoosted = (item) => isActiveBoost(item.post, now);
+  const organicExists = items.some((item) => !isBoosted(item));
+  if (!organicExists) return items;
+
+  // Keep only the strongest boosted item inside the top window; defer the
+  // rest just below the window (their relative order is preserved).
+  const boostedInWindow = items.slice(0, window).filter(isBoosted);
+  if (boostedInWindow.length > 1) {
+    const overflow = boostedInWindow.slice(1);
+    overflow.reverse().forEach((item) => {
+      const fromIndex = items.indexOf(item);
+      items.splice(fromIndex, 1);
+      items.splice(Math.min(window, items.length), 0, item);
+    });
+  }
+
+  const first = items[0];
+  if (first && isBoosted(first)) {
+    const organicScore = first.score - getBoostScore(first.post, { now });
+    const bestOrganic = items.find((item) => !isBoosted(item));
+    if (bestOrganic && organicScore < bestOrganic.score) {
+      // Paid weight alone put it first: rotate it into a seed-derived slot
+      // inside the window so the same viewer does not always see it on top.
+      const slot = 1 + Math.floor(stableNoise(`${seed}:boost-slot`, normalizeId(first.post._id)) * (window - 1));
+      items.splice(0, 1);
+      items.splice(Math.min(slot, items.length), 0, first);
+    }
+  }
+
+  return items;
 }
 
 async function findWatchedClipIds(userId) {
@@ -475,8 +733,13 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   const limit = clampLimit(query.limit, mode === 'clips' ? 10 : DEFAULT_LIMIT);
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const excludedIds = parseExcludedIds(query.exclude || query.excludedIds);
+  const sessionSeed = normalizeSessionSeed(query.sessionSeed);
   const relationship = await getRelationshipContext(user);
-  const interestProfile = await getInterestProfile(relationship.currentUserId, relationship);
+  const [interestProfile, seenMap, boostDeliveryMap] = await Promise.all([
+    getInterestProfile(relationship.currentUserId, relationship),
+    getRecentlySeenMap(relationship.currentUserId, mode),
+    getBoostDeliveryMap(relationship.currentUserId, mode)
+  ]);
   const baseFilter = buildAudienceFilter({ user, mode, relationship, query });
   const watchedClipIds = mode === 'clips' && query.includeViewed !== 'true'
     ? await findWatchedClipIds(relationship.currentUserId)
@@ -507,23 +770,35 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     candidates = [...freshCandidates, ...fallbackCandidates];
   }
 
-  const todaySeed = new Date().toISOString().slice(0, 10);
-  const seed = `${relationship.currentUserId || 'guest'}:${mode}:${todaySeed}`;
+  // The seed is stable within a feed session (client-provided) so pagination
+  // and silent revalidation stay deterministic, and rotates between sessions
+  // so consecutive refreshes explore a different ordering.
+  const seed = `${relationship.currentUserId || 'guest'}:${mode}:${sessionSeed}`;
   const scored = candidates
-    .map((post) => ({ post, score: scorePost(post, { mode, relationship, interestProfile, seed }) }))
+    .map((post) => ({ post, score: scorePost(post, { mode, relationship, interestProfile, seed, seenMap, boostDeliveryMap }) }))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return new Date(b.post.createdAt).getTime() - new Date(a.post.createdAt).getTime();
     });
 
-  const selected = selectDiversePosts(scored, limit, mode);
+  const selected = applyBoostPlacement(selectDiversePosts(scored, limit, mode), { seed });
   const selectedPosts = selected.map((item) => item.post);
   const attributedBoostPostIds = await recordBoostDelivery(selectedPosts, mode, relationship.currentUserId).catch((error) => {
     log.warn('Failed to record boost delivery', { error: String(error), mode });
     return new Set();
   });
-  const lastCandidate = candidates[candidates.length - 1] || selectedPosts[selectedPosts.length - 1] || null;
-  const nextCursor = candidates.length >= limit ? encodeCursor(lastCandidate) : null;
+  await recordFeedImpressions(selectedPosts, {
+    userId: relationship.currentUserId,
+    mode,
+    sessionSeed
+  });
+  const nextCursorPost = pickNextCursorPost({
+    selectedPosts,
+    candidates,
+    incomingCursor: query.cursor,
+    excludedCount: effectiveExcludedIds.length
+  });
+  const nextCursor = candidates.length >= limit ? encodeCursor(nextCursorPost) : null;
   const total = !query.cursor
     ? await Post.countDocuments(baseFilter).catch(() => null)
     : null;
@@ -534,7 +809,8 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
       const dto = formatPostDTO(
         post,
         isGuest,
-        Boolean(relationship.currentUserId && normalizeId(post.author) === relationship.currentUserId)
+        Boolean(relationship.currentUserId && normalizeId(post.author) === relationship.currentUserId),
+        relationship.currentUserId
       );
       if (dto) {
         const postId = normalizeId(post._id);
@@ -554,19 +830,24 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
       cursor: query.cursor || null
     },
     recommendation: {
-      algorithm: 'weighted-v1',
+      algorithm: 'weighted-v2',
       mode,
+      sessionSeed,
       signals: [
         'visibility',
         'follow_graph',
         'engagement',
         'freshness_decay',
+        'new_post_kicker',
         'tag_affinity',
         'author_affinity',
         'quality_penalty',
         'diversity',
-        'exploration',
+        'session_exploration',
+        'seen_post_cooldown',
         'boost_campaign_score',
+        'boost_frequency_cap',
+        'boost_slot_rotation',
         mode === 'clips' ? 'watched_exclusion' : 'fresh_content'
       ],
       exhaustedFreshClips
@@ -630,6 +911,14 @@ module.exports = {
   recordEngagementEvent,
   scorePost,
   selectDiversePosts,
+  applyBoostPlacement,
+  applyCursorAndExclusions,
+  pickNextCursorPost,
+  buildImpressionOps,
+  getSeenPenalty,
+  getDampedBoostScore,
+  normalizeSessionSeed,
+  stableNoise,
   encodeCursor,
   decodeCursor,
   parseExcludedIds,
@@ -638,5 +927,9 @@ module.exports = {
   normalizeEngagementContext,
   normalizeEngagementDuration,
   normalizeCompletionRate,
-  MAX_ENGAGEMENT_DURATION_MS
+  MAX_ENGAGEMENT_DURATION_MS,
+  SEEN_COOLDOWN_HOURS,
+  BOOST_USER_COOLDOWN_HOURS,
+  BOOST_FREQUENCY_CAP,
+  BOOST_TOP_WINDOW
 };

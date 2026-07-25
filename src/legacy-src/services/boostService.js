@@ -366,7 +366,10 @@ async function recordBoostDelivery(posts, context = 'feed', viewerId = null) {
         const expiresAt = new Date(Math.min(campaignEnd.getTime(), deliveredAt.getTime() + (48 * 60 * 60 * 1000)));
         await BoostDeliveryAttribution.findOneAndUpdate(
           { user: viewerId, post: post._id, campaign: campaignId, context },
-          { $set: { deliveredAt, expiresAt } },
+          {
+            $set: { deliveredAt, expiresAt },
+            $inc: { deliveryCount: 1 }
+          },
           { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
         );
       }

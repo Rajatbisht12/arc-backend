@@ -50,7 +50,7 @@ const createCommentNotification = async (recipientId, senderId, postId, commentT
   try {
     const sender = await require('../models/User').findById(senderId).select('username profile.displayName profile.avatar');
     const post = await require('../models/Post').findById(postId).select('content.text');
-    
+
     const notificationData = {
       recipient: recipientId,
       sender: senderId,
@@ -65,6 +65,32 @@ const createCommentNotification = async (recipientId, senderId, postId, commentT
     return await createAndEmitNotification(notificationData);
   } catch (error) {
     log.error('Notification error', { error: String(error) });
+    throw error;
+  }
+};
+
+// Notify the author of a comment that someone replied to it. Reuses the
+// 'comment' notification type (same channel policy) but deep-links to the exact
+// thread so opening the notification lands on the reply.
+const createReplyNotification = async (recipientId, senderId, postId, { rootCommentId, replyId, text } = {}) => {
+  try {
+    const sender = await require('../models/User').findById(senderId).select('username');
+    const preview = text ? `: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"` : '';
+    const notificationData = {
+      recipient: recipientId,
+      sender: senderId,
+      type: 'comment',
+      title: 'New Reply',
+      message: `${sender?.username || 'Someone'} replied to your comment${preview}`,
+      data: {
+        postId,
+        deepLink: `/post/${postId}?comment=${rootCommentId || ''}${replyId ? `&reply=${replyId}` : ''}`,
+        customData: { kind: 'reply', rootCommentId: String(rootCommentId || ''), replyId: replyId ? String(replyId) : '' }
+      }
+    };
+    return await createAndEmitNotification(notificationData);
+  } catch (error) {
+    log.error('Reply notification error', { error: String(error) });
     throw error;
   }
 };
@@ -311,6 +337,7 @@ const createSystemNotification = async (recipientId, title, message, data = {}, 
 module.exports = {
   createLikeNotification,
   createCommentNotification,
+  createReplyNotification,
   createFollowNotification,
   createMessageNotification,
   createTournamentNotification,
