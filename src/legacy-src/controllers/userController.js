@@ -11,6 +11,7 @@ const StaffInvite = require('../models/StaffInvite');
 const LeaveRequest = require('../models/LeaveRequest');
 const { createAndEmitNotification } = require('../utils/notificationEmitter');
 const { formatUserDTO, formatPostDTO } = require('../utils/dto');
+const { attachIsSavedFlags } = require('../utils/savedFlags');
 const { getJson, setJson } = require('../utils/redisCache');
 const { profileCacheKey, invalidateProfileCache } = require('../utils/profileCache');
 const { publishPrivacySettingsUpdate, evictPresenceAudience, removePresenceSubscription } = require('../utils/presencePrivacy');
@@ -800,12 +801,14 @@ const getUser = async (req, res) => {
     const allowedPostVisibilities = isSelf
       ? ['public', 'followers', 'private']
       : privacyRelationship.isFollower ? ['public', 'followers'] : ['public'];
+    const recentPostsViewerId = !isGuest && req.user && req.user._id ? req.user._id : null;
     const recentPosts = privacyRelationship.access.canViewPosts
       ? await Post.find({
           author: user._id,
           isActive: true,
           hiddenByAdmin: { $ne: true },
-          visibility: { $in: allowedPostVisibilities }
+          visibility: { $in: allowedPostVisibilities },
+          ...(recentPostsViewerId ? { 'reports.user': { $ne: recentPostsViewerId } } : {})
         })
         .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType')
         .sort({ createdAt: -1 })
@@ -850,7 +853,7 @@ const getUser = async (req, res) => {
       data: {
         user: profileDto,
         isBlockedByMe,
-        recentPosts: recentPosts.map(p => formatPostDTO(p, isGuest, isSelf)),
+        recentPosts: await attachIsSavedFlags(recentPosts.map(p => formatPostDTO(p, isGuest, isSelf)), req.user),
         relationship: {
           isFollowing,
           isFollowedBy,
@@ -1322,11 +1325,14 @@ const getUserPosts = async (req, res) => {
       : relationship.isFollower ? ['public', 'followers'] : ['public'];
 
     if (process.env.NODE_ENV === 'development') { console.log('Visibility filter:', visibilityFilter);}
+    const viewerId = req.user && req.user._id && !isGuestViewer ? req.user._id : null;
+    const reportExclusion = viewerId ? { 'reports.user': { $ne: viewerId } } : {};
     const posts = await Post.find({
       author: user._id,
       isActive: true,
       hiddenByAdmin: { $ne: true },
-      visibility: { $in: visibilityFilter }
+      visibility: { $in: visibilityFilter },
+      ...reportExclusion
     })
     .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType')
     .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
@@ -1340,15 +1346,20 @@ const getUserPosts = async (req, res) => {
       author: user._id,
       isActive: true,
       hiddenByAdmin: { $ne: true },
-      visibility: { $in: visibilityFilter }
+      visibility: { $in: visibilityFilter },
+      ...reportExclusion
     });
 
     const isGuest = isGuestViewer;
+    const postDtos = await attachIsSavedFlags(
+      posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString())),
+      req.user
+    );
 
     res.status(200).json({
       success: true,
       data: {
-        posts: posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString())),
+        posts: postDtos,
         privacyAccess: relationship.access,
         pagination: {
           current: page,
@@ -1423,11 +1434,15 @@ const getUserClips = async (req, res) => {
     const total = await Post.countDocuments(filter);
 
     const isGuest = isGuestViewer;
+    const postDtos = await attachIsSavedFlags(
+      posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString())),
+      req.user
+    );
 
     res.status(200).json({
       success: true,
       data: {
-        posts: posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString())),
+        posts: postDtos,
         privacyAccess: relationship.access,
         pagination: {
           current: page,

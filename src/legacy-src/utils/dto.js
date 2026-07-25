@@ -144,11 +144,11 @@ const uniqueLikeCount = (likes) => {
   return ids.length > 0 ? new Set(ids).size : likes.length;
 };
 
-const formatPostDTO = (post, isGuest = false, isAuthor = false) => {
+const formatPostDTO = (post, isGuest = false, isAuthor = false, viewerId = null) => {
   if (!post) return null;
-  
-  const dto = typeof post.toObject === 'function' 
-    ? post.toObject({ virtuals: true }) 
+
+  const dto = typeof post.toObject === 'function'
+    ? post.toObject({ virtuals: true })
     : JSON.parse(JSON.stringify(post));
 
   const rawViewCount = Number(dto.viewCount) || 0;
@@ -158,6 +158,13 @@ const formatPostDTO = (post, isGuest = false, isAuthor = false) => {
   dto.commentCount = Array.isArray(dto.comments) ? dto.comments.length : Number(dto.commentCount) || 0;
   dto.shareCount = Array.isArray(dto.shares) ? dto.shares.length : Number(dto.shareCount) || 0;
   dto.viewCount = Math.max(rawViewCount, storedViewCount, uniqueViewCount);
+
+  // Whether THIS viewer has already reported the post. Computed before the
+  // reports array is stripped so clients can reflect the already-reported
+  // state (disable resubmission) without ever exposing other users' reports.
+  dto.viewerHasReported = Boolean(viewerId)
+    && Array.isArray(dto.reports)
+    && dto.reports.some((entry) => entry && String(entry.user) === String(viewerId));
 
   // ALWAYS remove reports and precise viewing history unless author/admin
   delete dto.reports;

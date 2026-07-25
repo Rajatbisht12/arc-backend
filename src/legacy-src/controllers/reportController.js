@@ -41,34 +41,53 @@ const createReport = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Report target not found' });
     }
 
+    // A user may report a given piece of content only once, regardless of the
+    // prior report's status (pending/dismissed/action_taken). This check short
+    // -circuits the common case; the unique index on the Report model is what
+    // actually guarantees it under concurrent/duplicate/retry/offline requests.
     const existing = await Report.findOne({
       reporter: reporterId,
       targetType,
-      targetId,
-      status: 'pending'
+      targetId
     });
     if (existing) {
       return res.status(409).json({ success: false, message: 'You have already reported this content' });
     }
 
-    const report = await Report.create({
-      reporter: reporterId,
-      targetType,
-      targetId,
-      reason: finalReason,
-      details: typeof details === 'string' ? details.slice(0, 500) : ''
-    });
+    let report;
+    try {
+      report = await Report.create({
+        reporter: reporterId,
+        targetType,
+        targetId,
+        reason: finalReason,
+        details: typeof details === 'string' ? details.slice(0, 500) : ''
+      });
+    } catch (err) {
+      // Duplicate key => a concurrent request already created this report.
+      // Treat as the already-reported case rather than a server error so the
+      // outcome is identical to the sequential path (idempotent per user).
+      if (err && err.code === 11000) {
+        return res.status(409).json({ success: false, message: 'You have already reported this content' });
+      }
+      throw err;
+    }
 
     if (targetType === 'post') {
-      await Post.findByIdAndUpdate(targetId, {
-        $push: {
-          reports: {
-            user: reporterId,
-            reason: finalReason,
-            reportedAt: new Date()
+      // Guard the embedded reports array against duplicate pushes on retry so
+      // a post never accumulates two report entries from the same reporter.
+      await Post.findOneAndUpdate(
+        { _id: targetId, 'reports.user': { $ne: reporterId } },
+        {
+          $push: {
+            reports: {
+              user: reporterId,
+              reason: finalReason,
+              reportedAt: new Date()
+            }
           }
         }
-      });
+      );
     }
 
     const populated = await Report.findById(report._id).populate('reporter', 'username profile.displayName');

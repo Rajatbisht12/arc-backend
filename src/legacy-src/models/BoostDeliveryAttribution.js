@@ -8,12 +8,16 @@ const boostDeliveryAttributionSchema = new mongoose.Schema({
   campaign: { type: mongoose.Schema.Types.ObjectId, ref: 'BoostCampaign', required: true, index: true },
   context: { type: String, enum: ['feed', 'clips', 'profile', 'search', 'post', 'unknown'], required: true },
   deliveredAt: { type: Date, default: Date.now },
-  expiresAt: { type: Date, required: true }
+  expiresAt: { type: Date, required: true },
+  // How many times this campaign delivered this post to this viewer in this
+  // surface within the attribution window. Drives per-user frequency caps.
+  deliveryCount: { type: Number, default: 0, min: 0 }
 }, { timestamps: true });
 
 boostDeliveryAttributionSchema.index({ user: 1, post: 1, campaign: 1, context: 1 }, { unique: true });
 boostDeliveryAttributionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 boostDeliveryAttributionSchema.index({ user: 1, post: 1, campaign: 1, expiresAt: -1 });
 boostDeliveryAttributionSchema.index({ user: 1, post: 1, context: 1, expiresAt: -1 });
+boostDeliveryAttributionSchema.index({ user: 1, context: 1, expiresAt: -1 });
 
 module.exports = mongoose.model('BoostDeliveryAttribution', boostDeliveryAttributionSchema);

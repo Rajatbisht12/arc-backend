@@ -1351,30 +1351,15 @@ const verifyOtpAndLogin = async (req, res) => {
 };
 
 // Generate Guest Token
-const generateGuestToken = async (req, res) => {
-  try {
-    const { v4: uuidv4 } = require('uuid');
-    const guestId = `guest_${uuidv4()}`;
-    
-    // Generate token with role guest (userType: 'guest')
-    // The id is also pseudo-random to track specific guest sessions if needed
-    const token = generateToken({ id: guestId, username: 'Guest', userType: 'guest' });
-
-    res.status(200).json({
-      success: true,
-      message: 'Guest token generated successfully',
-      data: {
-        token,
-        guestId
-      }
-    });
-  } catch (error) {
-    log.error('Guest token generation error:', { error: String(error) });
-    res.status(500).json({
-      success: false,
-      message: 'Failed to generate guest token'
-    });
-  }
+// Guest Mode has been removed from Web and Mobile. The endpoint no longer
+// mints anonymous tokens; it returns 410 Gone so any old client that still
+// calls it fails cleanly and routes the user to Login instead of receiving a
+// guest session. (Route + limiter are kept so the response stays well-formed.)
+const generateGuestToken = async (_req, res) => {
+  res.status(410).json({
+    success: false,
+    message: 'Guest access is no longer available. Please log in or sign up.',
+  });
 };
 
 const googleTokenLogin = async (req, res) => {

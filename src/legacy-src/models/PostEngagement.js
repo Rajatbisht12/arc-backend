@@ -30,7 +30,10 @@ const postEngagementSchema = new mongoose.Schema({
       'save',
       'unsave',
       'skip',
-      'dwell'
+      'dwell',
+      // Server-recorded delivery: the post was served in a ranked surface.
+      // Used for seen-post cooldown ranking; never treated as intent.
+      'impression'
     ],
     required: true,
     index: true
@@ -66,6 +69,21 @@ const postEngagementSchema = new mongoose.Schema({
   metadata: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
+  },
+  // Delivery tracking for seen-post cooldown ranking. createdAt doubles as
+  // firstShownAt and updatedAt as lastShownAt for impression rows.
+  impressionCount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  positionShown: {
+    type: Number,
+    default: null
+  },
+  sessionId: {
+    type: String,
+    default: null
   }
 }, {
   timestamps: true
@@ -83,5 +101,16 @@ postEngagementSchema.index(
     partialFilterExpression: { eventType: 'view' }
   }
 );
+// Impression rows are upserted once per (user, post, surface); a distinct key
+// order keeps this from colliding with the existing partial view index.
+postEngagementSchema.index(
+  { user: 1, context: 1, post: 1, eventType: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { eventType: 'impression' }
+  }
+);
+// Seen-post lookup: recent deliveries for one user in one surface.
+postEngagementSchema.index({ user: 1, context: 1, eventType: 1, updatedAt: -1 });
 
 module.exports = mongoose.model('PostEngagement', postEngagementSchema);

@@ -4,8 +4,10 @@ const Notification = require('../models/Notification');
 const BoostCampaign = require('../models/BoostCampaign');
 const BoostDeliveryAttribution = require('../models/BoostDeliveryAttribution');
 const { uploadMultipleFiles } = require('../utils/cloudinary');
-const { createLikeNotification, createCommentNotification, createMentionNotification } = require('../utils/notificationService');
+const { createLikeNotification, createCommentNotification, createReplyNotification, createMentionNotification } = require('../utils/notificationService');
+const { resolveCommentRelation } = require('../utils/commentThreading');
 const { formatPostDTO } = require('../utils/dto');
+const { extractHashtags, mergeTags } = require('../utils/hashtags');
 const {
   getRecommendedPosts,
   recordEngagementEvent,
@@ -216,7 +218,9 @@ const createPost = async (req, res) => {
         media: mediaData
       },
       postType: postType || 'general',
-      tags: parsedTags,
+      // Index hashtags from the caption (source of truth) unioned with any
+      // explicit tags, all normalized + deduped for case-insensitive search.
+      tags: mergeTags(parsedTags, typeof text === 'string' ? text : ''),
       mentions: mentionedUserIds,
       visibility: visibility || 'public'
     };
@@ -327,6 +331,12 @@ const getPosts = async (req, res) => {
       query: req.query,
       mode: 'feed'
     });
+
+    // Personalized, session-rotated ranking: never let ETag/304 or any shared
+    // cache replay a stale first page.
+    res.set('Cache-Control', 'no-store');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
 
     res.status(200).json({
       success: true,
@@ -501,7 +511,7 @@ const getPost = async (req, res) => {
     }
 
     const isAuthor = Boolean(req.user && req.user._id && !isGuest && post.author && post.author._id && post.author._id.toString() === req.user._id.toString());
-    const postDto = formatPostDTO(post, isGuest, isAuthor);
+    const postDto = formatPostDTO(post, isGuest, isAuthor, viewerId);
     if (postDto) {
       postDto.isSaved = Boolean(
         viewerId
@@ -626,7 +636,7 @@ const toggleLike = async (req, res) => {
 const addComment = async (req, res) => {
   try {
     const postId = req.params.id;
-    const { text } = req.body;
+    const { text, parentCommentId } = req.body;
     const userId = req.user._id;
 
     if (!text || text.trim().length === 0) {
@@ -636,16 +646,25 @@ const addComment = async (req, res) => {
       });
     }
 
+    // Load existing comments so a reply can resolve its parent/root thread.
     const visiblePost = await Post.findById(postId)
-      .select('author visibility isActive hiddenByAdmin');
+      .select('author visibility isActive hiddenByAdmin comments._id comments.user comments.parentComment comments.rootComment');
     if (!visiblePost) return res.status(404).json({ success: false, message: 'Post not found' });
     if (!await requireVisiblePost(req, res, visiblePost)) return;
 
-    // Add comment
+    const relation = resolveCommentRelation(visiblePost.comments, parentCommentId);
+    if (!relation.ok) {
+      return res.status(404).json({ success: false, message: 'The comment you are replying to no longer exists.' });
+    }
+    const isReply = Boolean(relation.rootComment);
+
     const comment = {
       user: userId,
       text: text.trim(),
       likes: [],
+      parentComment: relation.parentComment,
+      rootComment: relation.rootComment,
+      replyCount: 0,
       createdAt: new Date()
     };
 
@@ -664,11 +683,31 @@ const addComment = async (req, res) => {
       });
     }
 
+    // Keep the root thread's replyCount accurate for the "View replies (N)" UI.
+    if (isReply) {
+      await Post.updateOne(
+        { _id: postId, 'comments._id': relation.rootComment },
+        { $inc: { 'comments.$.replyCount': 1 } }
+      );
+    }
+
     const { source, campaignId } = await getRequestAttribution(req, post);
     await incrementAttributionMetric({ postId, source, campaignId, metric: 'Comments' });
 
-    // Create notification for post author (if not commenting on own post)
-    if (post.author.toString() !== userId.toString()) {
+    const newComment = post.comments[post.comments.length - 1];
+
+    // Notifications: a top-level comment notifies the post author; a reply
+    // notifies the answered commenter and deep-links to the exact thread.
+    // Never notify yourself.
+    if (isReply) {
+      if (relation.replyTargetUserId && relation.replyTargetUserId !== userId.toString()) {
+        await createReplyNotification(relation.replyTargetUserId, userId, post._id, {
+          rootCommentId: relation.rootComment,
+          replyId: newComment?._id,
+          text: text.trim(),
+        }).catch(() => {});
+      }
+    } else if (post.author.toString() !== userId.toString()) {
       await createCommentNotification(post.author, userId, post._id, text.trim());
     }
 
@@ -680,14 +719,12 @@ const addComment = async (req, res) => {
       context: req.body?.context || 'feed',
       source,
       boostCampaign: campaignId,
-      metadata: { length: text.trim().length }
+      metadata: { length: text.trim().length, reply: isReply }
     });
-
-    const newComment = post.comments[post.comments.length - 1];
 
     res.status(201).json({
       success: true,
-      message: 'Comment added successfully',
+      message: isReply ? 'Reply added successfully' : 'Comment added successfully',
       data: {
         post,
         comment: newComment,
@@ -777,25 +814,31 @@ const toggleSave = async (req, res) => {
     }
     if (!await requireVisiblePost(req, res, post)) return;
 
-    const user = await User.findById(userId).select('savedPosts');
-    if (!user) {
+    // Atomic toggle: a $pull that matches means we unsaved; otherwise push
+    // guarded by 'savedPosts.post is absent' so concurrent rapid taps can
+    // never insert duplicate save records.
+    const pullResult = await User.updateOne(
+      { _id: userId },
+      { $pull: { savedPosts: { post: postId } } }
+    );
+    if (!pullResult.matchedCount) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const savedIndex = (user.savedPosts || []).findIndex((item) => {
-      const savedPostId = item?.post?._id || item?.post;
-      return savedPostId && savedPostId.toString() === postId.toString();
-    });
-
     let isSaved;
-    if (savedIndex > -1) {
-      user.savedPosts.splice(savedIndex, 1);
+    if (pullResult.modifiedCount > 0) {
       isSaved = false;
     } else {
-      user.savedPosts.push({ post: postId, savedAt: new Date() });
+      await User.updateOne(
+        { _id: userId, 'savedPosts.post': { $ne: postId } },
+        { $push: { savedPosts: { post: postId, savedAt: new Date() } } }
+      );
+      // Either this request inserted the entry or a concurrent one already
+      // did — both resolve to the same saved state.
       isSaved = true;
     }
-    await user.save();
+    const savedOwner = await User.findById(userId).select('savedPosts.post').lean();
+    const savedCount = (savedOwner?.savedPosts || []).length;
     const { source, campaignId } = await getRequestAttribution(req, post);
     if (isSaved) {
       await incrementAttributionMetric({ postId, source, campaignId, metric: 'Saves' });
@@ -816,7 +859,7 @@ const toggleSave = async (req, res) => {
       message: isSaved ? 'Post saved' : 'Post unsaved',
       data: {
         isSaved,
-        savedCount: user.savedPosts.length
+        savedCount
       }
     });
   } catch (error) {
@@ -845,7 +888,7 @@ const getSavedPosts = async (req, res) => {
       .sort((a, b) => new Date(b.savedAt || 0).getTime() - new Date(a.savedAt || 0).getTime());
 
     const savedIds = savedEntries.map(item => item.post);
-    const posts = await Post.find({ _id: { $in: savedIds }, isActive: true })
+    const posts = await Post.find({ _id: { $in: savedIds }, isActive: true, 'reports.user': { $ne: userId } })
       .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType privacySettings blockedUsers isActive')
       .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
       .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar');
@@ -895,7 +938,7 @@ const getLikedPosts = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const [candidatePosts, user] = await Promise.all([
-      Post.find({ isActive: true, 'likes.user': userId })
+      Post.find({ isActive: true, 'likes.user': userId, 'reports.user': { $ne: userId } })
         .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType privacySettings blockedUsers isActive')
         .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
         .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar')
@@ -958,14 +1001,36 @@ const updatePost = async (req, res) => {
       });
     }
 
-    // Update fields
-    if (text !== undefined) post.content.text = text;
-    if (tags !== undefined) {
-      post.tags = (Array.isArray(tags) ? tags : String(tags).split(','))
-        .map(tag => String(tag).trim())
-        .filter(Boolean);
+    // Track whether a user-visible editable field actually changed, so the
+    // "Edited" flag reflects real content edits — not a no-op save.
+    let contentChanged = false;
+
+    const oldText = post.content.text;
+    if (text !== undefined && text !== post.content.text) {
+      post.content.text = text;
+      contentChanged = true;
     }
-    if (visibility !== undefined) post.visibility = visibility;
+    const textChanged = text !== undefined && text !== oldText;
+    // Re-derive the hashtag index whenever the caption or the explicit tags
+    // change. Field tags (added manually, not present in the old caption) are
+    // preserved; hashtags removed from the caption drop out automatically.
+    if (tags !== undefined || textChanged) {
+      const oldCaptionTags = new Set(extractHashtags(oldText));
+      const preservedFieldTags = (Array.isArray(post.tags) ? post.tags : [])
+        .filter((tag) => !oldCaptionTags.has(String(tag).toLowerCase()));
+      const explicit = tags !== undefined ? tags : preservedFieldTags;
+      const effectiveText = text !== undefined ? text : oldText;
+      const nextTags = mergeTags(explicit, typeof effectiveText === 'string' ? effectiveText : '');
+      const currentTags = Array.isArray(post.tags) ? post.tags : [];
+      if (nextTags.length !== currentTags.length || nextTags.some((tag, i) => tag !== currentTags[i])) {
+        post.tags = nextTags;
+        contentChanged = true;
+      }
+    }
+    if (visibility !== undefined && visibility !== post.visibility) {
+      post.visibility = visibility;
+      contentChanged = true;
+    }
 
     // Update recruitment info if provided
     if (post.postType === 'recruitment' && recruitmentInfo) {
@@ -978,6 +1043,14 @@ const updatePost = async (req, res) => {
             .filter(Boolean)
           : post.recruitmentInfo.positions
       };
+      contentChanged = true;
+    }
+
+    // Only a genuine content edit marks the post as edited. Engagement and
+    // analytics writes never reach this endpoint.
+    if (contentChanged) {
+      post.isEdited = true;
+      post.editedAt = new Date();
     }
 
     await post.save();
@@ -1111,6 +1184,10 @@ const getPersonalizedFeed = async (req, res) => {
       query: req.query,
       mode: 'feed'
     });
+
+    res.set('Cache-Control', 'no-store');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
 
     res.status(200).json({
       success: true,
