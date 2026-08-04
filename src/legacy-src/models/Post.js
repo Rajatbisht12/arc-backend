@@ -156,7 +156,23 @@ const postSchema = new mongoose.Schema({
     url: { type: String, default: '' },      // audio playback URL
     coverUrl: { type: String, default: '' }, // cover/album art
     startTime: { type: Number, default: 0 }, // start offset in seconds
-    endTime: Number                            // end offset (optional)
+    endTime: Number,                           // end offset (optional)
+    // Distinguishes licensed catalog music from a user's own upload. Legacy
+    // rows and catalog picks default to 'library'; only audio uploaded through
+    // the audio-upload endpoint is 'user_upload'. We never label a user upload
+    // as platform-licensed.
+    sourceType: {
+      type: String,
+      enum: ['library', 'user_upload'],
+      default: 'library'
+    },
+    // For 'user_upload', references the UserAudio record (ownership + metadata).
+    // Published content points at this ID rather than trusting a raw client URL.
+    audioId: { type: mongoose.Schema.Types.ObjectId, ref: 'UserAudio', default: null },
+    // Set to the confirmation time when the uploader affirmed they own/have
+    // rights to the audio. Presence is an affirmation record only — it does NOT
+    // imply the platform verified ownership.
+    copyrightConfirmedAt: { type: Date, default: null }
   },
   visibility: {
     type: String,
