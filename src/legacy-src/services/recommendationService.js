@@ -803,22 +803,71 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     ? await Post.countDocuments(baseFilter).catch(() => null)
     : null;
   const isGuest = user && user.userType === 'guest';
+  // Development-only ranking diagnostics (Phase 4 feed contract + Phase 14
+  // observability). Never emitted in production so internal scoring stays
+  // private, but locally it exposes exactly why each post holds its slot so a
+  // repeated-order/boost-pinning report can be reproduced with real evidence.
+  const includeRankingDebug = process.env.NODE_ENV !== 'production';
+  const rankingNow = Date.now();
+  const scoreById = includeRankingDebug
+    ? new Map(selected.map((item) => [normalizeId(item.post._id), item.score]))
+    : null;
+
+  const posts = selectedPosts.map((post, position) => {
+    const dto = formatPostDTO(
+      post,
+      isGuest,
+      Boolean(relationship.currentUserId && normalizeId(post.author) === relationship.currentUserId),
+      relationship.currentUserId
+    );
+    if (dto) {
+      const postId = normalizeId(post._id);
+      dto.deliverySource = attributedBoostPostIds.has(postId) ? 'boost' : 'organic';
+      dto.isSaved = Boolean(relationship.currentUserId && interestProfile.savedPostIds.has(postId));
+      if (includeRankingDebug) {
+        const hoursOld = Math.max(0, (rankingNow - new Date(post.createdAt).getTime()) / 36e5);
+        const isBoosted = isActiveBoost(post, rankingNow);
+        const isPreviouslySeen = seenMap.has(postId);
+        dto._ranking = {
+          position,
+          rankingScore: scoreById.get(postId) ?? null,
+          isBoosted,
+          boostWeight: isBoosted ? getDampedBoostScore(post, { mode, now: rankingNow, boostDeliveryMap }) : 0,
+          isPreviouslySeen,
+          seenPenalty: Math.round(getSeenPenalty(seenMap.get(postId), rankingNow) * 100) / 100,
+          freshness: Math.round(Math.exp(-hoursOld / (mode === 'clips' ? 96 : 72)) * 1000) / 1000,
+          hoursOld: Math.round(hoursOld * 10) / 10,
+          newPostKicker: hoursOld < NEW_POST_KICKER_HOURS,
+          createdAt: post.createdAt,
+          rankingReason: isBoosted
+            ? 'boost+organic'
+            : isPreviouslySeen
+              ? 'organic(seen-penalized)'
+              : hoursOld < NEW_POST_KICKER_HOURS
+                ? 'fresh'
+                : 'organic',
+        };
+      }
+    }
+    return dto;
+  });
+
+  if (includeRankingDebug) {
+    log.info('feed-ranking', {
+      mode,
+      viewer: relationship.currentUserId ? String(relationship.currentUserId) : 'guest',
+      sessionSeed,
+      cursor: query.cursor || null,
+      nextCursor,
+      count: selectedPosts.length,
+      boostedCount: selectedPosts.filter((p) => isActiveBoost(p, rankingNow)).length,
+      seenCount: selectedPosts.filter((p) => seenMap.has(normalizeId(p._id))).length,
+      returnedIds: selectedPosts.map((p) => normalizeId(p._id)),
+    });
+  }
 
   return {
-    posts: selectedPosts.map((post) => {
-      const dto = formatPostDTO(
-        post,
-        isGuest,
-        Boolean(relationship.currentUserId && normalizeId(post.author) === relationship.currentUserId),
-        relationship.currentUserId
-      );
-      if (dto) {
-        const postId = normalizeId(post._id);
-        dto.deliverySource = attributedBoostPostIds.has(postId) ? 'boost' : 'organic';
-        dto.isSaved = Boolean(relationship.currentUserId && interestProfile.savedPostIds.has(postId));
-      }
-      return dto;
-    }),
+    posts,
     pagination: {
       current: page,
       total: total !== null ? Math.ceil(total / limit) : undefined,

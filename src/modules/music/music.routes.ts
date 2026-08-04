@@ -1,6 +1,13 @@
 import { Router, Request, Response } from "express";
 import axios from "axios";
-import { optionalAuth } from "./music.legacy-adapters";
+import {
+  optionalAuth,
+  protect,
+  uploadSingle,
+  uploadUserAudio,
+  listMyAudio,
+  removeUserAudio,
+} from "./music.legacy-adapters";
 
 const router = Router();
 const JAMENDO_BASE = "https://api.jamendo.com/v3.0/tracks";
@@ -184,5 +191,21 @@ router.get("/search", optionalAuth, async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, message: "Music search failed. Try again." });
   }
 });
+
+/**
+ * User-uploaded audio (distinct from the licensed catalog above).
+ * All routes require authentication — uploads are owned by the caller.
+ *
+ *   POST   /api/music/upload        multipart field `music` = audio file
+ *   GET    /api/music/upload/mine   the caller's own uploads
+ *   DELETE /api/music/upload/:id    owner-only soft removal
+ *
+ * `uploadSingle('music')` reuses the existing multer memory-storage config
+ * (50MB hard cap + audio-only fileFilter); the controller then enforces the
+ * shared audio policy (MIME allow-list + configured size/duration limits).
+ */
+router.post("/upload", protect, uploadSingle("music"), uploadUserAudio);
+router.get("/upload/mine", protect, listMyAudio);
+router.delete("/upload/:id", protect, removeUserAudio);
 
 export default router;

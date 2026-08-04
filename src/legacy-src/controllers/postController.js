@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const BoostCampaign = require('../models/BoostCampaign');
 const BoostDeliveryAttribution = require('../models/BoostDeliveryAttribution');
+const UserAudio = require('../models/UserAudio');
 const { uploadMultipleFiles } = require('../utils/cloudinary');
 const { createLikeNotification, createCommentNotification, createReplyNotification, createMentionNotification } = require('../utils/notificationService');
 const { resolveCommentRelation } = require('../utils/commentThreading');
@@ -181,14 +182,51 @@ const createPost = async (req, res) => {
       }
     }
 
-    // Parse attached music (Instagram-style) if provided
+    // Parse attached music (Instagram-style) if provided.
+    // Two sources: 'library' (licensed catalog from search) and 'user_upload'
+    // (the caller's own upload). For a user_upload we NEVER trust the client's
+    // url/metadata — we resolve the owned UserAudio row and use its server-side
+    // values, and we only publish it if copyright was affirmed.
     let attachedMusic = null;
     if (req.body.attachedMusic) {
       try {
         const raw = typeof req.body.attachedMusic === 'string' ? req.body.attachedMusic : JSON.stringify(req.body.attachedMusic);
         const parsed = JSON.parse(raw);
-        if (parsed && (parsed.url || parsed.title)) {
+        const sourceType = parsed.sourceType === 'user_upload' ? 'user_upload' : 'library';
+
+        if (sourceType === 'user_upload') {
+          // Resolve the owned, non-removed upload; ignore the client's url/title.
+          const audioDoc = parsed.audioId
+            ? await UserAudio.findOne({ _id: parsed.audioId, owner: req.user._id, removed: { $ne: true } })
+            : null;
+          // Copyright must be affirmed (on the record already, or in this request).
+          const confirmedAt = audioDoc && audioDoc.copyrightConfirmedAt
+            ? audioDoc.copyrightConfirmedAt
+            : (parsed.copyrightConfirmed ? new Date() : null);
+          if (audioDoc && confirmedAt) {
+            attachedMusic = {
+              audioId: audioDoc._id,
+              sourceType: 'user_upload',
+              trackId: undefined,
+              title: audioDoc.title || parsed.title || '',
+              artist: audioDoc.artistName || '',
+              url: audioDoc.url,                 // trusted server URL, never the client's
+              coverUrl: '',
+              startTime: typeof parsed.startTime === 'number' ? parsed.startTime : 0,
+              endTime: typeof parsed.endTime === 'number' ? parsed.endTime : undefined,
+              copyrightConfirmedAt: confirmedAt
+            };
+            // Persist confirmation on the record if it wasn't already stored.
+            if (!audioDoc.copyrightConfirmedAt) {
+              audioDoc.copyrightConfirmedAt = confirmedAt;
+              audioDoc.save().catch(() => {});
+            }
+          }
+          // else: unresolved/unconfirmed user upload — drop the attachment
+          // rather than publish an unverified reference or fail the whole post.
+        } else if (parsed && (parsed.url || parsed.title)) {
           attachedMusic = {
+            sourceType: 'library',
             trackId: parsed.trackId || undefined,
             title: parsed.title || '',
             artist: parsed.artist || '',
