@@ -19,6 +19,16 @@ const messageSchema = new mongoose.Schema({
     enum: ['direct', 'group', 'call'],
     required: [true, 'Message type is required']
   },
+  // Explicit marker for group ACTIVITY events (name/description/member/role
+  // changes). When `eventType` is set, clients render this as a centered system
+  // message, never a normal chat bubble. Kept under messageType 'group' so
+  // existing timeline/unread queries still include it — classification is by
+  // this field, NOT by matching the content text.
+  systemEvent: {
+    eventType: { type: String },
+    actorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    actorName: { type: String }
+  },
   content: {
     text: {
       type: String,
@@ -235,6 +245,20 @@ const chatRoomSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
+  // Per-user "Delete Chat": the room is hidden from THIS user's chat list
+  // (mirrors direct-chat deletion) without leaving the group or affecting
+  // anyone else. A later message (createdAt > clearedAt) makes it reappear,
+  // matching direct-chat semantics.
+  deletedFor: [{
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    clearedAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   isActive: {
     type: Boolean,
     default: true
