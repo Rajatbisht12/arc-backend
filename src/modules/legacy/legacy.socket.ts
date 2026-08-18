@@ -301,6 +301,44 @@ const isAuthorizedLegacyChatMember = async (chatRoomId: string, userId: string):
   }));
 };
 
+// Resolve display info for group-call participants so clients render real names
+// instead of raw ObjectIds. Returns a map keyed by string userId.
+const resolveGroupCallUsers = async (
+  ids: string[],
+): Promise<Map<string, { username: string; displayName: string; avatar: string }>> => {
+  const map = new Map<string, { username: string; displayName: string; avatar: string }>();
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return map;
+  const User = safeRequire<any>(path.join(backendModelPath, "User.js"));
+  if (!User) return map;
+  const users = await User.find({ _id: { $in: unique } })
+    .select("username profile.displayName profile.avatar")
+    .lean();
+  (users || []).forEach((u: any) => {
+    map.set(String(u._id), {
+      username: u.username || "user",
+      displayName: u.profile?.displayName || u.username || "Participant",
+      avatar: u.profile?.avatar || "",
+    });
+  });
+  return map;
+};
+
+// Group name + member ids for routing the invite to every member's personal
+// room (so it rings app-wide, not only when the chat is open).
+const getGroupCallRoomInfo = async (
+  chatRoomId: string,
+): Promise<{ name: string; memberIds: string[] }> => {
+  const messageModels = safeRequire<any>(path.join(backendModelPath, "Message.js"));
+  const room = messageModels?.ChatRoom
+    ? await messageModels.ChatRoom.findById(chatRoomId).select("name members.user").lean()
+    : null;
+  return {
+    name: room?.name || "Group",
+    memberIds: ((room?.members || []) as any[]).map((m) => String(m.user)),
+  };
+};
+
 const findAuthorizedRandomSession = async (
   roomId: string,
   userId: string,
@@ -837,12 +875,23 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       chatRoomId,
       participants: []
     });
-    io.to(`chat-${chatRoomId}`).emit("group-call-incoming", {
+    // Ring every group member on their personal room — like 1-to-1 calls — so
+    // the invite arrives on any screen, not only when the chat is open. Include
+    // the initiator's resolved name and the group name for the incoming UI.
+    const roomInfo = await getGroupCallRoomInfo(chatRoomId);
+    const initiator = (await resolveGroupCallUsers([userIdStr])).get(userIdStr);
+    const incomingPayload = {
       callId,
       callType: data.callType,
+      chatRoomId,
       initiatorId: userIdStr,
-      chatRoomId
-    });
+      fromUserId: userIdStr,
+      fromUsername: initiator?.displayName || initiator?.username || "Someone",
+      groupName: roomInfo.name,
+    };
+    roomInfo.memberIds
+      .filter((id) => id !== userIdStr)
+      .forEach((id) => io.to(`user-${id}`).emit("group-call-incoming", incomingPayload));
   });
 
   socket.on("group-call-join", async (data: { callId?: string }) => {
@@ -873,16 +922,31 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       [data.callId]: session.chatRoomId
     };
     await socket.join(`call-${data.callId}`);
-    const existingParticipants = Array.from(session.participants)
-      .filter((id) => id !== userIdStr)
-      .map((id) => ({ userId: id, username: id }));
+    const existingIds = Array.from(session.participants).filter((id) => id !== userIdStr);
+    const userInfo = await resolveGroupCallUsers([...existingIds, userIdStr]);
+    const existingParticipants = existingIds.map((id) => {
+      const info = userInfo.get(id);
+      return {
+        userId: id,
+        username: info?.username || "user",
+        displayName: info?.displayName || "Participant",
+        avatar: info?.avatar || "",
+      };
+    });
     socket.emit("group-call-joined", {
       callId: data.callId,
       callType: session.callType,
       chatRoomId: session.chatRoomId,
       participants: existingParticipants,
     });
-    socket.to(`call-${data.callId}`).emit("group-call-participant-joined", { callId: data.callId, userId: userIdStr });
+    const joiner = userInfo.get(userIdStr);
+    socket.to(`call-${data.callId}`).emit("group-call-participant-joined", {
+      callId: data.callId,
+      userId: userIdStr,
+      username: joiner?.username || "user",
+      displayName: joiner?.displayName || "Participant",
+      avatar: joiner?.avatar || "",
+    });
   });
 
   socket.on("group-call-signal", async (data: { callId?: string; targetUserId?: string; signal?: unknown }) => {
