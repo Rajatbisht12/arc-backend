@@ -852,27 +852,31 @@ const toggleSave = async (req, res) => {
     }
     if (!await requireVisiblePost(req, res, post)) return;
 
-    // Atomic toggle: a $pull that matches means we unsaved; otherwise push
-    // guarded by 'savedPosts.post is absent' so concurrent rapid taps can
-    // never insert duplicate save records.
-    const pullResult = await User.updateOne(
-      { _id: userId },
-      { $pull: { savedPosts: { post: postId } } }
-    );
-    if (!pullResult.matchedCount) {
+    // Decide save-vs-unsave by EXISTENCE, never by updateOne.modifiedCount.
+    // The User schema has `timestamps: true`, so every updateOne also $sets
+    // `updatedAt` and reports modifiedCount >= 1 even when the $pull removed
+    // nothing. The previous modifiedCount check therefore always concluded it
+    // had just unsaved, so the guarded $push never ran and saves NEVER
+    // persisted (bookmark reverted, Saved list stayed empty).
+    const alreadySaved = await User.exists({ _id: userId, 'savedPosts.post': postId });
+    if (!alreadySaved && !(await User.exists({ _id: userId }))) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
     let isSaved;
-    if (pullResult.modifiedCount > 0) {
+    if (alreadySaved) {
+      await User.updateOne(
+        { _id: userId },
+        { $pull: { savedPosts: { post: postId } } }
+      );
       isSaved = false;
     } else {
+      // Guarded by 'savedPosts.post is absent' so concurrent rapid taps can
+      // never insert duplicate save records.
       await User.updateOne(
         { _id: userId, 'savedPosts.post': { $ne: postId } },
         { $push: { savedPosts: { post: postId, savedAt: new Date() } } }
       );
-      // Either this request inserted the entry or a concurrent one already
-      // did — both resolve to the same saved state.
       isSaved = true;
     }
     const savedOwner = await User.findById(userId).select('savedPosts.post').lean();
