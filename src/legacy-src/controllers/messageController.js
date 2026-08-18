@@ -619,7 +619,7 @@ const getChatRooms = async (req, res) => {
     .limit(limit);
 
     // Transform chat rooms to match frontend expectations
-    const transformedChatRooms = await Promise.all(chatRooms.map(async (room) => {
+    const transformedChatRoomsRaw = await Promise.all(chatRooms.map(async (room) => {
       const currentMember = isCurrentGroupMember(room, userId);
       const membershipWindow = getGroupMembershipWindow(room, userId);
       const historyBoundary = groupHistoryBoundary(membershipWindow);
@@ -675,6 +675,19 @@ const getChatRooms = async (req, res) => {
         ]
       });
       
+      // Per-user "Delete Chat": hide this room from the current user's list when
+      // they cleared it and nothing newer has arrived since. A later message
+      // revives it, matching direct-chat semantics.
+      const clearedEntry = (room.deletedFor || []).find(
+        entry => entry.user && entry.user.toString() === userId.toString()
+      );
+      if (clearedEntry?.clearedAt) {
+        const newestVisibleAt = lastVisibleMessage?.createdAt ? new Date(lastVisibleMessage.createdAt) : null;
+        if (!newestVisibleAt || newestVisibleAt <= new Date(clearedEntry.clearedAt)) {
+          return null;
+        }
+      }
+
       return {
         _id: room._id,
         name: room.name,
@@ -710,6 +723,9 @@ const getChatRooms = async (req, res) => {
           : { editGroupSettings: false, sendMessages: false, addMembers: false }
       };
     }));
+
+    // Drop rooms the user deleted from their own list (null entries from above).
+    const transformedChatRooms = transformedChatRoomsRaw.filter(Boolean);
 
     // Sort by unread count first, then by last activity
     transformedChatRooms.sort((a, b) => {
@@ -1618,7 +1634,8 @@ const updateChatRoom = async (req, res) => {
         sender: userId,
         chatRoom: chatRoom._id,
         messageType: 'group',
-        content: { text: `${actorName} changed the group name from "${oldName}" to "${name}"` }
+        content: { text: `${actorName} changed the group name from "${oldName}" to "${name}"` },
+        systemEvent: { eventType: 'group_name_changed', actorId: userId, actorName }
       });
       systemMessages.push(msg);
     }
@@ -1631,7 +1648,12 @@ const updateChatRoom = async (req, res) => {
         sender: userId,
         chatRoom: chatRoom._id,
         messageType: 'group',
-        content: { text: descText }
+        content: { text: descText },
+        systemEvent: {
+          eventType: description ? 'group_description_updated' : 'group_description_removed',
+          actorId: userId,
+          actorName
+        }
       });
       systemMessages.push(msg);
     }
@@ -1776,7 +1798,8 @@ const addMemberToChatRoom = async (req, res) => {
       sender: userId,
       chatRoom: chatRoom._id,
       messageType: 'group',
-      content: { text: `${addedName} has been added to the group` }
+      content: { text: `${addedName} has been added to the group` },
+      systemEvent: { eventType: 'group_member_added', actorId: userId, actorName: addedName }
     });
     await systemMessage.save();
     await systemMessage.populate('sender', 'username profile.displayName profile.avatar');
@@ -1891,7 +1914,8 @@ const removeMemberFromChatRoom = async (req, res) => {
       sender: userId,
       chatRoom: chatRoom._id,
       messageType: 'group',
-      content: { text: `${removedName} has been removed from the group` }
+      content: { text: `${removedName} has been removed from the group` },
+      systemEvent: { eventType: 'group_member_removed', actorId: userId, actorName: removedName }
     });
     await systemMessage.save();
     await systemMessage.populate('sender', 'username profile.displayName profile.avatar');
@@ -1993,10 +2017,80 @@ const updateMemberRole = async (req, res) => {
       });
     }
 
-    // Update member role
+    // Protect the last admin: never allow a demotion that would leave the group
+    // with zero admins. This also closes the "demote yourself, then leave"
+    // loophole around the sole-admin leave rule.
+    const targetMember = chatRoom.members[memberIndex];
+    if (targetMember.role === 'admin' && role !== 'admin') {
+      const otherAdmins = chatRoom.members.filter(
+        m => m.user.toString() !== memberId && m.role === 'admin'
+      );
+      if (otherAdmins.length === 0) {
+        return res.status(400).json({
+          success: false,
+          code: 'ADMIN_MUST_ASSIGN',
+          message: "You're the only admin. Make another member an admin before stepping down."
+        });
+      }
+    }
+
+    // Update the role atomically. The positional update targets THIS member by
+    // id; for a demotion it additionally requires that another admin still
+    // exists at write time, so concurrent role changes can't race the group
+    // down to zero admins. `$elemMatch` on the second condition filters the
+    // document without moving the positional (`$`) target off `members.user`.
+    const roleFilter = { _id: chatRoomId, 'members.user': memberId };
+    if (targetMember.role === 'admin' && role !== 'admin') {
+      roleFilter.$and = [{ members: { $elemMatch: { user: { $ne: memberId }, role: 'admin' } } }];
+    }
+    const roleUpdated = await ChatRoom.findOneAndUpdate(
+      roleFilter,
+      { $set: { 'members.$.role': role } },
+      { new: true }
+    );
+    if (!roleUpdated) {
+      return res.status(400).json({
+        success: false,
+        code: 'ADMIN_MUST_ASSIGN',
+        message: "You're the only admin. Make another member an admin before stepping down."
+      });
+    }
+    // Keep the in-memory doc in sync for the system message + response below
+    // (the const `chatRoom` cannot be reassigned).
     chatRoom.members[memberIndex].role = role;
 
-    await chatRoom.save();
+    // System activity event for the admin promote/demote so it appears in the
+    // timeline as a centered system message (never a normal chat bubble).
+    try {
+      const [actingUser, targetUser] = await Promise.all([
+        User.findById(userId).select('username profile.displayName').lean(),
+        User.findById(memberId).select('username profile.displayName').lean()
+      ]);
+      const actorName = actingUser?.profile?.displayName || actingUser?.username || 'An admin';
+      const targetName = targetUser?.profile?.displayName || targetUser?.username || 'A member';
+      const roleText = role === 'admin'
+        ? `${actorName} made ${targetName} an admin`
+        : `${actorName} removed ${targetName} as an admin`;
+      const roleMsg = await Message.create({
+        sender: userId,
+        chatRoom: chatRoom._id,
+        messageType: 'group',
+        content: { text: roleText },
+        systemEvent: { eventType: 'group_admin_changed', actorId: userId, actorName }
+      });
+      chatRoom.lastMessage = roleMsg._id;
+      chatRoom.lastActivity = new Date();
+      await chatRoom.save();
+      if (io) {
+        await roleMsg.populate('sender', 'username profile.displayName profile.avatar');
+        io.to(`chat-${chatRoom._id}`).emit('newMessage', {
+          chatId: chatRoom._id.toString(),
+          message: roleMsg
+        });
+      }
+    } catch (sysErr) {
+      log.error('Failed to record admin-change system message:', { error: String(sysErr) });
+    }
 
     // Populate and transform for frontend
     await chatRoom.populate([
@@ -2426,8 +2520,8 @@ const leaveGroup = async (req, res) => {
       if (otherAdmins.length === 0 && chatRoom.members.length > 1) {
         return res.status(400).json({
           success: false,
-          message: 'You must assign another admin before leaving',
-          code: 'ADMIN_MUST_ASSIGN'
+          code: 'ADMIN_MUST_ASSIGN',
+          message: "You're the only admin. Make another member an admin before leaving the group."
         });
       }
     }
@@ -2435,22 +2529,44 @@ const leaveGroup = async (req, res) => {
     // Get display name for system message
     const displayName = leavingMember.user.profile?.displayName || leavingMember.user.username || 'Someone';
 
-    // Remove member
-    chatRoom.members.splice(memberIndex, 1);
-    if (!chatRoom.removedMembers) chatRoom.removedMembers = [];
-    chatRoom.removedMembers.push({
-      user: userId,
-      joinedAt: leavingMember.joinedAt || chatRoom.createdAt || new Date(),
-      removedAt: new Date()
-    });
-    await chatRoom.save();
+    // Remove the member atomically. When an admin leaves a group that still has
+    // other members, the write only applies while ANOTHER admin exists — so two
+    // admins leaving concurrently can never both succeed and strand the group
+    // with zero admins (the loser matches nothing and is rejected below).
+    const leaveFilter = { _id: chatRoomId, 'members.user': userId };
+    if (isAdmin && chatRoom.members.length > 1) {
+      leaveFilter.members = { $elemMatch: { user: { $ne: userId }, role: 'admin' } };
+    }
+    const leftRoom = await ChatRoom.findOneAndUpdate(
+      leaveFilter,
+      {
+        $pull: { members: { user: userId } },
+        $push: {
+          removedMembers: {
+            user: userId,
+            joinedAt: leavingMember.joinedAt || chatRoom.createdAt || new Date(),
+            removedAt: new Date()
+          }
+        }
+      },
+      { new: true }
+    );
+    if (!leftRoom) {
+      // Lost the race: by write time no other admin remained.
+      return res.status(400).json({
+        success: false,
+        code: 'ADMIN_MUST_ASSIGN',
+        message: "You're the only admin. Make another member an admin before leaving the group."
+      });
+    }
 
     // Send system message: "xyz left the group"
     const systemMessage = new Message({
       sender: userId,
       chatRoom: chatRoomId,
       messageType: 'group',
-      content: { text: `${displayName} left the group` }
+      content: { text: `${displayName} left the group` },
+      systemEvent: { eventType: 'group_member_left', actorId: userId, actorName: displayName }
     });
     await systemMessage.save();
     await systemMessage.populate('sender', 'username profile.displayName profile.avatar');
@@ -2771,7 +2887,8 @@ const updateGroupPermissions = async (req, res) => {
         sender: userId,
         chatRoom: chatRoom._id,
         messageType: 'group',
-        content: { text: systemText }
+        content: { text: systemText },
+        systemEvent: { eventType: 'group_permissions_changed', actorId: userId, actorName: adminName }
       });
       chatRoom.lastMessage = systemMsg._id;
       chatRoom.lastActivity = new Date();
@@ -2918,7 +3035,8 @@ const joinGroupViaInvite = async (req, res) => {
       sender: userId,
       chatRoom: chatRoom._id,
       messageType: 'group',
-      content: { text: `${joinName} joined via invite link` }
+      content: { text: `${joinName} joined via invite link` },
+      systemEvent: { eventType: 'group_member_joined', actorId: userId, actorName: joinName }
     });
     chatRoom.lastMessage = systemMsg._id;
     chatRoom.lastActivity = new Date();
@@ -3088,6 +3206,52 @@ const reportMessage = async (req, res) => {
   }
 };
 
+// DELETE /api/messages/rooms/:chatRoomId/conversation
+// Per-user "Delete Chat" for a group: removes the conversation from THIS user's
+// chat list (mirrors direct-chat deletion) WITHOUT leaving the group, deleting
+// it, or affecting any other member. A later message revives it for this user.
+const clearGroupConversation = async (req, res) => {
+  try {
+    const { chatRoomId } = req.params;
+    const userId = req.user._id;
+
+    const chatRoom = await ChatRoom.findOne({ _id: chatRoomId, isActive: true });
+    if (!chatRoom) {
+      return res.status(404).json({ success: false, message: 'Chat room not found' });
+    }
+    // Any personal member (current or removed-but-still-listed) may clear their
+    // own copy — no admin/owner permission required (it is not a group deletion).
+    const isMember = chatRoom.members.some(m => m.user.toString() === userId.toString())
+      || (chatRoom.removedMembers || []).some(m => m.user.toString() === userId.toString());
+    if (!isMember) {
+      return res.status(403).json({ success: false, message: 'You are not a member of this chat room' });
+    }
+
+    const clearedAt = new Date();
+
+    // Hide existing history for this user only (mirrors direct-chat deletion),
+    // never deletedForEveryone — other members are unaffected.
+    await Message.updateMany(
+      {
+        chatRoom: chatRoomId,
+        messageType: 'group',
+        deletedForEveryone: false,
+        'deletedForUsers.user': { $ne: userId }
+      },
+      { $addToSet: { deletedForUsers: { user: userId, deletedAt: clearedAt } } }
+    );
+
+    // Room-level per-user marker so getChatRooms hides it from this user's list.
+    await ChatRoom.updateOne({ _id: chatRoomId }, { $pull: { deletedFor: { user: userId } } });
+    await ChatRoom.updateOne({ _id: chatRoomId }, { $push: { deletedFor: { user: userId, clearedAt } } });
+
+    return res.status(200).json({ success: true, message: 'Conversation removed from your list' });
+  } catch (error) {
+    log.error('Error clearing group conversation:', { error: String(error) });
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
 module.exports = {
   sendDirectMessage,
   getDirectMessages,
@@ -3105,6 +3269,7 @@ module.exports = {
   markMessagesAsRead,
   deleteDirectMessage,
   deleteGroupMessage,
+  clearGroupConversation,
   leaveGroup,
   createCallSummary,
   toggleMuteChat,
