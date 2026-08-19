@@ -2962,7 +2962,10 @@ const getGroupInviteLink = async (req, res) => {
       await chatRoom.save();
     }
 
-    const baseUrl = process.env.CLIENT_URL || 'https://squadhunt.in';
+    // Use www (its /.well-known/assetlinks.json is served directly with 200);
+    // the apex squadhunt.in 307-redirects to www, which breaks Android App Link
+    // verification, so invite links must point at www to open the app.
+    const baseUrl = process.env.CLIENT_URL || 'https://www.squadhunt.in';
     const inviteLink = `${baseUrl}/join/${chatRoom.inviteToken}`;
 
     res.json({ success: true, inviteLink, token: chatRoom.inviteToken });
@@ -2991,7 +2994,10 @@ const resetGroupInviteLink = async (req, res) => {
     chatRoom.inviteToken = crypto.randomBytes(16).toString('hex');
     await chatRoom.save();
 
-    const baseUrl = process.env.CLIENT_URL || 'https://squadhunt.in';
+    // Use www (its /.well-known/assetlinks.json is served directly with 200);
+    // the apex squadhunt.in 307-redirects to www, which breaks Android App Link
+    // verification, so invite links must point at www to open the app.
+    const baseUrl = process.env.CLIENT_URL || 'https://www.squadhunt.in';
     const inviteLink = `${baseUrl}/join/${chatRoom.inviteToken}`;
 
     res.json({ success: true, inviteLink, token: chatRoom.inviteToken });
