@@ -9,6 +9,7 @@ const {
   getPosts,
   getClips,
   getPost,
+  getPostComments,
   recordClipView,
   toggleLike,
   addComment,
@@ -94,6 +95,7 @@ router.post('/', protect, uploadFields([{ name: 'media', maxCount: 5 }, { name: 
 router.get('/', optionalAuth, getPosts);
 router.get('/clips', optionalAuth, getClips);
 router.get('/:id', optionalAuth, getPost);
+router.get('/:id/comments', optionalAuth, getPostComments);
 router.post('/:id/view', protect, engagementMetricValidation, handleValidationErrors, recordClipView);
 router.post('/:id/like', protect, toggleLike);
 router.post('/:id/comment', protect, addCommentValidation, handleValidationErrors, addComment);

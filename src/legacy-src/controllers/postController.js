@@ -670,6 +670,82 @@ const toggleLike = async (req, res) => {
   }
 };
 
+// Paginated TOP-LEVEL comments for the Instagram-style comment drawer. Returns
+// at most `limit` (default 10) top-level comments after `cursor`, each with its
+// precomputed replyCount — never the full reply tree, and never the entire
+// comments array in one shot. Ordering is stable (chronological, _id tiebreak)
+// so pages never duplicate or skip within a session.
+const getPostComments = async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 30);
+    const cursor = typeof req.query.cursor === 'string' && req.query.cursor.trim() ? req.query.cursor.trim() : null;
+
+    const post = await Post.findOne({ _id: postId, isActive: true })
+      .select('author visibility isActive hiddenByAdmin boostMeta boostExpiresAt comments')
+      .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar');
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+    if (!await requireVisiblePost(req, res, post)) return;
+
+    const all = Array.isArray(post.comments) ? post.comments : [];
+    // Top-level only (a reply has parentComment set); newest first (latest →
+    // oldest), stable _id tiebreak so pages never duplicate or skip.
+    const topLevel = all
+      .filter((c) => !c.parentComment)
+      .sort((a, b) => {
+        const delta = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return delta !== 0 ? delta : String(b._id).localeCompare(String(a._id));
+      });
+
+    let start = 0;
+    if (cursor) {
+      const idx = topLevel.findIndex((c) => String(c._id) === cursor);
+      // Unknown cursor (e.g. the anchor comment was deleted) restarts from the
+      // top rather than silently returning nothing.
+      start = idx >= 0 ? idx + 1 : 0;
+    }
+    const pageItems = topLevel.slice(start, start + limit);
+    const hasMore = start + limit < topLevel.length;
+    const nextCursor = hasMore && pageItems.length ? String(pageItems[pageItems.length - 1]._id) : null;
+
+    const viewerId = req.user?._id ? String(req.user._id) : null;
+    const comments = pageItems.map((c) => {
+      const likes = Array.isArray(c.likes) ? c.likes : [];
+      return {
+        _id: c._id,
+        user: c.user,
+        text: c.text,
+        createdAt: c.createdAt,
+        parentComment: null,
+        rootComment: null,
+        replyCount: Math.max(0, Number(c.replyCount) || 0),
+        likeCount: likes.length,
+        isLiked: Boolean(viewerId && likes.some((u) => String(u?._id || u) === viewerId)),
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        comments,
+        nextCursor,
+        hasMore,
+        // Total drives the drawer header; loaded length must NOT be used for it.
+        totalTopLevel: topLevel.length,
+        totalComments: all.length,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load comments',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+};
+
 // Add comment to post
 const addComment = async (req, res) => {
   try {
@@ -852,27 +928,31 @@ const toggleSave = async (req, res) => {
     }
     if (!await requireVisiblePost(req, res, post)) return;
 
-    // Atomic toggle: a $pull that matches means we unsaved; otherwise push
-    // guarded by 'savedPosts.post is absent' so concurrent rapid taps can
-    // never insert duplicate save records.
-    const pullResult = await User.updateOne(
-      { _id: userId },
-      { $pull: { savedPosts: { post: postId } } }
-    );
-    if (!pullResult.matchedCount) {
+    // Decide save-vs-unsave by EXISTENCE, never by updateOne.modifiedCount.
+    // The User schema has `timestamps: true`, so every updateOne also $sets
+    // `updatedAt` and reports modifiedCount >= 1 even when the $pull removed
+    // nothing. The previous modifiedCount check therefore always concluded it
+    // had just unsaved, so the guarded $push never ran and saves NEVER
+    // persisted (bookmark reverted, Saved list stayed empty).
+    const alreadySaved = await User.exists({ _id: userId, 'savedPosts.post': postId });
+    if (!alreadySaved && !(await User.exists({ _id: userId }))) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
     let isSaved;
-    if (pullResult.modifiedCount > 0) {
+    if (alreadySaved) {
+      await User.updateOne(
+        { _id: userId },
+        { $pull: { savedPosts: { post: postId } } }
+      );
       isSaved = false;
     } else {
+      // Guarded by 'savedPosts.post is absent' so concurrent rapid taps can
+      // never insert duplicate save records.
       await User.updateOne(
         { _id: userId, 'savedPosts.post': { $ne: postId } },
         { $push: { savedPosts: { post: postId, savedAt: new Date() } } }
       );
-      // Either this request inserted the entry or a concurrent one already
-      // did — both resolve to the same saved state.
       isSaved = true;
     }
     const savedOwner = await User.findById(userId).select('savedPosts.post').lean();
@@ -1409,6 +1489,7 @@ module.exports = {
   getPosts,
   getClips,
   getPost,
+  getPostComments,
   recordClipView,
   getPersonalizedFeed,
   toggleLike,

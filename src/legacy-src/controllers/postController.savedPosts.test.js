@@ -45,6 +45,7 @@ function chainable(doc) {
 
 async function run() {
   const originalUserUpdateOne = User.updateOne.bind(User);
+  const originalUserExists = User.exists.bind(User);
   const originalUserFindById = User.findById.bind(User);
   const originalPostFindOne = Post.findOne.bind(Post);
   const originalPostUpdateOne = Post.updateOne.bind(Post);
@@ -61,23 +62,33 @@ async function run() {
   };
 
   const updateOneCalls = [];
-  let pullResult = { matchedCount: 1, modifiedCount: 0 };
-  let pushResult = { matchedCount: 1, modifiedCount: 1 };
+  // Toggle decision is driven by EXISTENCE, never by updateOne.modifiedCount
+  // (the User schema's timestamps:true inflates modifiedCount on every write,
+  // which is exactly what broke the old modifiedCount-based logic). These flags
+  // model the real User.exists() answers.
+  let currentlySaved = false; // does 'savedPosts.post: postId' exist?
+  let userPresent = true;     // does the user doc exist at all?
   let savedPostsAfter = [{ post: POST_ID }];
 
   Post.findOne = () => chainable(postDoc);
   Post.updateOne = () => Promise.resolve({ matchedCount: 1, modifiedCount: 1 });
   PostEngagement.create = () => Promise.resolve({});
   User.findById = () => chainable({ _id: USER_ID, isActive: true, privacySettings: {}, savedPosts: savedPostsAfter });
+  User.exists = (filter) => {
+    if (Object.prototype.hasOwnProperty.call(filter, 'savedPosts.post')) {
+      return Promise.resolve(currentlySaved ? { _id: USER_ID } : null);
+    }
+    return Promise.resolve(userPresent ? { _id: USER_ID } : null);
+  };
   User.updateOne = (filter, update) => {
     updateOneCalls.push({ filter, update });
-    if (update.$pull) return Promise.resolve(pullResult);
-    return Promise.resolve(pushResult);
+    return Promise.resolve({ matchedCount: 1, modifiedCount: 1 });
   };
 
   try {
-    // 1. First tap saves: $pull misses, guarded $push inserts exactly once.
+    // 1. First tap saves: not-yet-saved -> guarded $push, isSaved true.
     let res = makeRes();
+    currentlySaved = false; userPresent = true; savedPostsAfter = [{ post: POST_ID }];
     await toggleSave(makeReq(), res);
     assert.strictEqual(res.statusCode, 200);
     assert.strictEqual(res.body.data.isSaved, true);
@@ -87,24 +98,24 @@ async function run() {
     assert.deepStrictEqual(pushCall.filter['savedPosts.post'], { $ne: POST_ID },
       'the push must be guarded against duplicate save records');
     assert(pushCall.update.$push.savedPosts.savedAt instanceof Date, 'saves carry a timestamp');
+    assert(!updateOneCalls.some(call => call.update.$pull), 'a fresh save must not $pull');
 
-    // 2. Second tap unsaves: $pull matches, no push happens.
+    // 2. Second tap unsaves: already-saved -> $pull, no push.
     updateOneCalls.length = 0;
-    pullResult = { matchedCount: 1, modifiedCount: 1 };
-    savedPostsAfter = [];
+    currentlySaved = true; savedPostsAfter = [];
     res = makeRes();
     await toggleSave(makeReq(), res);
     assert.strictEqual(res.statusCode, 200);
     assert.strictEqual(res.body.data.isSaved, false);
     assert.strictEqual(res.body.data.savedCount, 0);
+    assert(updateOneCalls.some(call => call.update.$pull), 'unsave must $pull');
     assert(!updateOneCalls.some(call => call.update.$push), 'unsave must not push');
 
-    // 3. Concurrent duplicate save: push guard misses because a parallel
-    //    request already inserted — still a calm 200 "saved", never a 500/409.
+    // 3. Concurrent duplicate save: not-yet-saved by our read, guarded $push may
+    //    no-op because a parallel request already inserted — still a calm 200
+    //    "saved" with no duplicate counted, never a 500/409.
     updateOneCalls.length = 0;
-    pullResult = { matchedCount: 1, modifiedCount: 0 };
-    pushResult = { matchedCount: 0, modifiedCount: 0 };
-    savedPostsAfter = [{ post: POST_ID }];
+    currentlySaved = false; savedPostsAfter = [{ post: POST_ID }];
     res = makeRes();
     await toggleSave(makeReq(), res);
     assert.strictEqual(res.statusCode, 200);
@@ -112,10 +123,11 @@ async function run() {
     assert.strictEqual(res.body.data.savedCount, 1, 'no duplicate record is counted');
 
     // 4. Missing user: proper 404, not a 500.
-    pullResult = { matchedCount: 0, modifiedCount: 0 };
+    currentlySaved = false; userPresent = false;
     res = makeRes();
     await toggleSave(makeReq(), res);
     assert.strictEqual(res.statusCode, 404);
+    userPresent = true;
 
     // 5. Engagement contexts from every save surface normalize to canonical values.
     assert.strictEqual(normalizeEngagementContext('post-card'), 'feed');
@@ -135,6 +147,7 @@ async function run() {
     assert.strictEqual(guestDtos[0].isSaved, false, 'guests never receive personal saved flags');
   } finally {
     User.updateOne = originalUserUpdateOne;
+    User.exists = originalUserExists;
     User.findById = originalUserFindById;
     Post.findOne = originalPostFindOne;
     Post.updateOne = originalPostUpdateOne;
@@ -152,6 +165,11 @@ async function run() {
     'saved list must run privacy filtering');
   assert.match(postControllerSource, /savedPosts\.post['"]?\]?: \{ \$ne: postId \}|'savedPosts\.post': \{ \$ne: postId \}/,
     'save insert must stay duplicate-guarded');
+  // Regression guard: the toggle decision MUST be existence-based. Gating on
+  // updateOne().modifiedCount is broken because User has timestamps:true, so
+  // every write reports modifiedCount>=1 and saves never persist.
+  assert.match(postControllerSource, /const alreadySaved = await User\.exists\(\{ _id: userId, 'savedPosts\.post': postId \}\)/,
+    'toggleSave must decide save-vs-unsave via User.exists, not modifiedCount');
 
   console.log('saved posts backend contract tests passed');
 }
