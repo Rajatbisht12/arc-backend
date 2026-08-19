@@ -571,7 +571,14 @@ function scorePost(post, { mode, relationship, interestProfile, seed, seenMap, b
   const shares = getCount(post.shares);
   const reports = getCount(post.reports);
   const views = Math.max(getCount(post.viewedBy), post.views || 0);
-  const engagement = (likes * 3) + (comments * 7) + (shares * 9) + (views * 0.35);
+  // Compress engagement to a bounded log scale (~0–90). Raw counts were
+  // unbounded, so one very popular post (e.g. 25k views → ~8750) dwarfed
+  // freshness/seen-penalty/exploration and stayed pinned at #1 forever, freezing
+  // the feed. Log keeps "more engaged ranks higher" but at a magnitude
+  // comparable to the other signals, so the seen-penalty and session-seed
+  // exploration can actually rotate the order.
+  const engagementRaw = (likes * 3) + (comments * 7) + (shares * 9) + (views * 0.35);
+  const engagement = Math.log10(1 + engagementRaw) * 22;
   const engagementRate = views > 0 ? ((likes + comments + shares) / views) : (likes + comments + shares);
   const authorId = normalizeId(post.author);
   const ownPostPenalty = relationship.currentUserId && authorId === relationship.currentUserId ? -12 : 0;
