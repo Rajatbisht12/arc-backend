@@ -2,9 +2,11 @@ const mongoose = require('mongoose');
 const Post = require('../models/Post');
 const User = require('../models/User');
 const Follow = require('../models/Follow');
+const FollowRequest = require('../models/FollowRequest');
 const PostEngagement = require('../models/PostEngagement');
 const BoostDeliveryAttribution = require('../models/BoostDeliveryAttribution');
 const { formatPostDTO } = require('../utils/dto');
+const { buildPrivacyAccess } = require('../utils/privacyPolicy');
 const { normalizeTag } = require('../utils/hashtags');
 const log = require('../utils/logger');
 const { getBoostScore, isActiveBoost, getDeliverySource, recordBoostDelivery } = require('./boostService');
@@ -820,6 +822,27 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     ? new Map(selected.map((item) => [normalizeId(item.post._id), item.score]))
     : null;
 
+  // Viewer-specific follow-state for each author, so Feed/Clips render the same
+  // Follow / Requested / Unfollow / Requests-off CTA as the Profile and user-list
+  // endpoints. Uses the one shared follow-eligibility model (buildPrivacyAccess)
+  // instead of the client guessing from stripped/absent privacy fields — which is
+  // what made every non-followed author wrongly read as "Requests Off".
+  const viewerId = relationship.currentUserId;
+  let pendingFollowTargetIds = new Set();
+  if (viewerId) {
+    const authorIds = [...new Set(selectedPosts
+      .map((post) => normalizeId(post.author))
+      .filter((id) => id && id !== viewerId))];
+    if (authorIds.length > 0) {
+      const pending = await FollowRequest.find({
+        requester: viewerId,
+        target: { $in: authorIds },
+        status: 'pending'
+      }).select('target').lean();
+      pendingFollowTargetIds = new Set(pending.map((r) => normalizeId(r.target)).filter(Boolean));
+    }
+  }
+
   const posts = selectedPosts.map((post, position) => {
     const dto = formatPostDTO(
       post,
@@ -831,6 +854,27 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
       const postId = normalizeId(post._id);
       dto.deliverySource = attributedBoostPostIds.has(postId) ? 'boost' : 'organic';
       dto.isSaved = Boolean(relationship.currentUserId && interestProfile.savedPostIds.has(postId));
+      // Attach follow-state to the author (skip self — the client hides follow UI
+      // for own content anyway).
+      if (dto.author && typeof dto.author === 'object' && post.author && typeof post.author === 'object') {
+        const authorId = normalizeId(post.author);
+        const isSelfAuthor = Boolean(viewerId && authorId === viewerId);
+        if (!isSelfAuthor) {
+          const isFollowing = Boolean(viewerId && relationship.followingIds.has(authorId));
+          const followRequestPending = pendingFollowTargetIds.has(authorId);
+          const access = buildPrivacyAccess({
+            settings: post.author.privacySettings,
+            isSelf: false,
+            isFollower: isFollowing
+          });
+          const canFollow = access.canFollow && !followRequestPending && !isFollowing;
+          dto.author.isFollowing = isFollowing;
+          dto.author.followStatus = isFollowing ? 'accepted' : followRequestPending ? 'pending' : 'none';
+          dto.author.followRequestPending = followRequestPending;
+          dto.author.canFollow = canFollow;
+          dto.author.privacyAccess = { canFollow, followRequestPending };
+        }
+      }
       if (includeRankingDebug) {
         const hoursOld = Math.max(0, (rankingNow - new Date(post.createdAt).getTime()) / 36e5);
         const isBoosted = isActiveBoost(post, rankingNow);
