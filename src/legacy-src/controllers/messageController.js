@@ -2248,16 +2248,28 @@ const handleInviteResponse = async (req, res) => {
     message.inviteData.status = outcome.status;
     let responseMsg = null;
     try {
-      const accepted = response === 'accept';
+      const accepted = outcome.status === 'accepted';
+      const responseDescription = accepted
+        ? 'I\'ve accepted your invitation to join the team. Looking forward to working with you!'
+        : 'I\'ve decided to decline the invitation. Thank you for considering me.';
       responseMsg = await Message.create({
         sender: userId,
         recipient: outcome.invite.team,
         messageType: 'direct',
         content: {
-          text: accepted
-            ? '✅ Invitation Accepted\n\nI\'ve accepted your invitation to join the team. Looking forward to working with you!'
-            : '❌ Invitation Declined\n\nI\'ve decided to decline the invitation. Thank you for considering me.',
+          text: `${accepted ? '✅ Invitation Accepted' : '❌ Invitation Declined'}\n\n${responseDescription}`,
           media: []
+        },
+        inviteResponse: {
+          invitationType: inviteType,
+          invitationMessageId: message._id,
+          inviteId: outcome.invite._id,
+          teamId: outcome.invite.team,
+          game: message.inviteData.game,
+          role: message.inviteData.role,
+          inGameName: message.inviteData.inGameName,
+          status: outcome.status,
+          message: responseDescription
         }
       });
       await responseMsg.populate([
@@ -2282,11 +2294,35 @@ const handleInviteResponse = async (req, res) => {
           error: String(notificationError)
         });
       }
+      if (io) {
+        io.to(`user-${outcome.invite.team}`).emit('newMessage', {
+          chatId: `direct_${userId}`,
+          message: responseMsg.toObject ? responseMsg.toObject() : responseMsg
+        });
+      }
     } catch (acknowledgementError) {
       log.warn('Invite response committed but acknowledgement DM failed', {
         inviteId: String(outcome.invite._id),
         status: outcome.status,
         error: String(acknowledgementError)
+      });
+    }
+
+    // The original invitation is a durable message whose status changed. Push
+    // that presentation update to both participants so another open Mobile
+    // session updates the same card instead of waiting for a history refetch.
+    if (io) {
+      const statusUpdate = {
+        messageId: String(message._id),
+        status: outcome.status
+      };
+      io.to(`user-${userId}`).emit('invite_status_updated', {
+        ...statusUpdate,
+        chatId: `direct_${outcome.invite.team}`
+      });
+      io.to(`user-${outcome.invite.team}`).emit('invite_status_updated', {
+        ...statusUpdate,
+        chatId: `direct_${userId}`
       });
     }
 

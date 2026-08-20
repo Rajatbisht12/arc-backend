@@ -36,7 +36,7 @@
     "migrate:scrim-indexes": "node scripts/migrate-scrim-indexes.js --apply",
     "cleanup:scrim-integrity": "node scripts/migrate-scrim-indexes.js --apply-cleanup",
     "verify:scrim-indexes": "node scripts/migrate-scrim-indexes.js --strict-integrity",
-    "test:team-invitations": "node src/legacy-src/services/teamInvitationService.test.js && node scripts/migrate-team-invites.test.js && node --import tsx src/modules/users/users.routes.test.ts && node --import tsx src/modules/api-validation.routes.test.ts && node --check scripts/migrate-team-invites.js",
+    "test:team-invitations": "node src/legacy-src/services/teamInvitationService.test.js && node src/legacy-src/controllers/messageInvitePresentation.contract.test.js && node scripts/migrate-team-invites.test.js && node --import tsx src/modules/users/users.routes.test.ts && node --import tsx src/modules/api-validation.routes.test.ts && node --check scripts/migrate-team-invites.js",
     "audit:team-invitations": "node scripts/migrate-team-invites.js",
     "migrate:team-invitations": "node scripts/migrate-team-invites.js --apply",
     "verify:team-invitations": "node scripts/migrate-team-invites.js --verify",
