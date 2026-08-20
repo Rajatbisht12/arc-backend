@@ -228,6 +228,71 @@ const dedupeNotificationDeliveryKeys = async () => {
   }
 };
 
+const reconcileLikeNotificationIdentities = async () => {
+  const duplicates = await Notification.aggregate([
+    {
+      $match: {
+        type: 'like',
+        sender: { $type: 'objectId' },
+        'data.postId': { $type: 'objectId' }
+      }
+    },
+    { $sort: { createdAt: -1, _id: -1 } },
+    {
+      $group: {
+        _id: {
+          recipient: '$recipient',
+          sender: '$sender',
+          postId: '$data.postId'
+        },
+        ids: { $push: '$_id' },
+        count: { $sum: 1 }
+      }
+    },
+    { $match: { count: { $gt: 1 } } }
+  ]).allowDiskUse(true);
+
+  let removed = 0;
+  for (const duplicate of duplicates) {
+    const [winnerId, ...losingIds] = duplicate.ids;
+    const notificationDedupeKey = `like:${String(duplicate._id.sender)}:${String(duplicate._id.postId)}`;
+    // Duplicate like rows represent the same durable business event. This is
+    // the same winner policy used by repairNotificationHistory: retain the
+    // newest row and remove only its older redundant copies.
+    await Notification.deleteMany({ _id: { $in: losingIds } });
+    await Notification.updateOne(
+      { _id: winnerId },
+      {
+        $set: {
+          'data.customData.notificationDedupeKey': notificationDedupeKey,
+          'data.customData.pushRequestId': notificationDedupeKey
+        }
+      }
+    );
+    removed += losingIds.length;
+  }
+  console.log(`reconciled ${removed} duplicate like notification row(s)`);
+};
+
+const createNotificationIndexes = async () => {
+  try {
+    await Notification.createIndexes();
+  } catch (error) {
+    // DocumentDB does not consistently return MongoDB's 11000 code for a
+    // duplicate encountered during createIndex, but it does identify the
+    // failed declared index in the error message.
+    const duplicateLikeIndex = String(error?.message || '')
+      .includes('unique_like_notification_per_actor_target');
+    if (!duplicateLikeIndex) throw error;
+    // Existing tasks can write while this additive migration runs. Reconcile
+    // once more if a like landed between the first pass and index creation.
+    console.warn('like notification identity changed during index creation; reconciling once more');
+    await reconcileLikeNotificationIdentities();
+    await dedupeNotificationDeliveryKeys();
+    await Notification.createIndexes();
+  }
+};
+
 const reconcileMessageNotificationCoalesceKeys = async () => {
   const duplicates = await Notification.aggregate([
     {
@@ -471,6 +536,7 @@ const main = async () => {
     await dedupeCanonicalDevices();
     await backfillDevices();
     await dedupeCanonicalDevices();
+    await reconcileLikeNotificationIdentities();
     await dedupeNotificationDeliveryKeys();
     await reconcileMessageNotificationCoalesceKeys();
     await reconcileCallParticipantLeases();
@@ -481,7 +547,7 @@ const main = async () => {
     await PushDeliveryRequest.createIndexes();
     await CallSession.createIndexes();
     await CallVoipPushAttempt.createIndexes();
-    await Notification.createIndexes();
+    await createNotificationIndexes();
     // Remove the accidental `data.cta` text index left behind by the old schema,
     // when the cta subdocument collapsed to a String. A collection may hold only
     // one text index, so this orphan would block any future legitimate one.
