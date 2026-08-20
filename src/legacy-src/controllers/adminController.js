@@ -50,6 +50,7 @@ const {
 } = require('../utils/tournamentDateTime');
 const { getTournamentCapacity } = require('../utils/tournamentCapacity');
 const { deleteTournamentAndCleanup } = require('../services/tournamentDeletionService');
+const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
 const {
   approve: approveHostVerificationReview,
   reject: rejectHostVerificationReview,
@@ -144,6 +145,20 @@ const normalizeLimit = (value, fallback = 20, max = 100) => Math.min(max, Math.m
 const normalizePage = (value) => Math.min(10000, Math.max(1, parseInt(value, 10) || 1));
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const normalizeSearchPattern = (value, maxLength = 100) => escapeRegex(String(value || '').trim().slice(0, maxLength));
+const cleanupTargetNotifications = async (targetType, targetId) => {
+  try {
+    return await deleteNotificationsForTarget({ targetType, targetId });
+  } catch (error) {
+    // The list endpoint independently repairs orphaned rows. Never report an
+    // irreversible content deletion as failed solely because cleanup must retry.
+    log.error('Admin notification-history cleanup failed', {
+      targetType,
+      targetId: String(targetId || ''),
+      error: String(error)
+    });
+    return { acknowledged: false, deletedCount: 0 };
+  }
+};
 
 const hostVerificationResultObject = (value) => (
   value && typeof value.toObject === 'function' ? value.toObject() : value
@@ -749,12 +764,15 @@ const deleteUser = async (req, res) => {
     // Resolve owned recruitment IDs before deleting the account so dependent
     // applications cannot survive as broken references.
     let ownedRecruitmentIds = [];
+    let ownedProfileIds = [];
+    const ownedPostIds = await Post.distinct('_id', { author: userId });
 
     let deletionSession;
     try {
       deletionSession = await startFinancialSession();
       await deletionSession.withTransaction(async () => {
         ownedRecruitmentIds = await TeamRecruitment.distinct('_id', { team: userId }).session(deletionSession);
+        ownedProfileIds = await PlayerProfile.distinct('_id', { player: userId }).session(deletionSession);
         const hasPayoutHistory = await CreatorPayout.exists({ user: userId }).session(deletionSession);
         const hasWithdrawalHistory = await WithdrawalRequest.exists({ user: userId }).session(deletionSession);
         if (hasPayoutHistory || hasWithdrawalHistory) {
@@ -838,6 +856,11 @@ const deleteUser = async (req, res) => {
       Notification.deleteMany({ $or: [{ recipient: userId }, { sender: userId }] }),
       Follow.deleteMany({ $or: [{ follower: userId }, { following: userId }] }),
       FollowRequest.deleteMany({ $or: [{ requester: userId }, { target: userId }] })
+    ]);
+    await Promise.all([
+      ...ownedPostIds.map((targetId) => cleanupTargetNotifications('post', targetId)),
+      ...ownedRecruitmentIds.map((targetId) => cleanupTargetNotifications('recruitment', targetId)),
+      ...ownedProfileIds.map((targetId) => cleanupTargetNotifications('profile', targetId))
     ]);
     await Promise.all([
       invalidateUserCache(userId),
@@ -930,6 +953,8 @@ const deletePost = async (req, res) => {
       });
     }
 
+    await cleanupTargetNotifications('post', post._id);
+
     res.json({
       success: true,
       message: 'Post deleted successfully'
@@ -958,7 +983,7 @@ const getTournaments = async (req, res) => {
     if (status !== undefined && (typeof status !== 'string' || !allowedStatuses.has(status))) {
       return res.status(400).json({ success: false, message: 'Invalid tournament status filter' });
     }
-    
+
     let query = {};
     
     // Search filter
@@ -1139,6 +1164,8 @@ const deleteScrim = async (req, res) => {
       return res.status(409).json({ success: false, message: 'Scrim changed while it was being moderated. Refresh and try again.' });
     }
 
+    await cleanupTargetNotifications('scrim', scrim._id);
+
     res.locals.auditBefore = scrim;
     res.locals.auditAfter = null;
     return res.json({ success: true, message: 'Scrim deleted successfully' });
@@ -1207,6 +1234,7 @@ const updateReport = async (req, res) => {
     else report.status = 'action_taken';
     if (adminAction === 'hide_content' && report.targetType === 'post') {
       await Post.findByIdAndUpdate(report.targetId, { hiddenByAdmin: true, isActive: false });
+      await cleanupTargetNotifications('post', report.targetId);
     } else if (adminAction === 'hide_content' && report.targetType === 'recruitment') {
       const hidden = await TeamRecruitment.findByIdAndUpdate(
         report.targetId,
@@ -1215,6 +1243,7 @@ const updateReport = async (req, res) => {
       if (!hidden) return res.status(404).json({ success: false, message: 'Recruitment report target not found' });
     } else if (adminAction === 'delete_content' && report.targetType === 'post') {
       await Post.findByIdAndDelete(report.targetId);
+      await cleanupTargetNotifications('post', report.targetId);
     } else if (adminAction === 'delete_content' && report.targetType === 'recruitment') {
       const session = await mongoose.startSession();
       let deleted = null;
@@ -1228,6 +1257,7 @@ const updateReport = async (req, res) => {
         await session.endSession().catch(() => null);
       }
       if (!deleted) return res.status(404).json({ success: false, message: 'Recruitment report target not found' });
+      await cleanupTargetNotifications('recruitment', report.targetId);
     } else if (adminAction === 'warn_user') {
       const target = report.targetType === 'recruitment'
         ? await TeamRecruitment.findById(report.targetId).select('team').lean()

@@ -15,7 +15,7 @@ const queryResult = (value) => ({
       isActive: true,
       blockedUsers: ['507f191e810c19729de860ea']
     }]);
-    const [notification] = await sanitizeNotificationsForViewer([{
+    const notifications = await sanitizeNotificationsForViewer([{
       _id: 'notification-1',
       type: 'message',
       sender: { _id: '507f1f77bcf86cd799439011', username: 'blocked-sender' },
@@ -30,12 +30,7 @@ const queryResult = (value) => ({
       _id: '507f191e810c19729de860ea',
       blockedUsers: []
     });
-    assert.strictEqual(notification.sender, null);
-    assert.strictEqual(notification.data.messageId, undefined);
-    assert.strictEqual(notification.data.deepLink, undefined);
-    assert.strictEqual(notification.data.customData.conversationId, undefined);
-    assert.strictEqual(notification.data.customData.contentUnavailable, true);
-    assert(!notification.message.includes('private preview'));
+    assert.deepStrictEqual(notifications, []);
   } finally {
     User.find = originalFind;
   }

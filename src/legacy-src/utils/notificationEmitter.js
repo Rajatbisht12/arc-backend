@@ -68,8 +68,13 @@ const NOTIFICATION_SETTING_DEFAULTS = {
 // drops them and the resulting push cannot deep-link or hydrate its event.
 const PERSISTED_NOTIFICATION_DATA_KEYS = new Set([
   'postId',
+  'commentId',
   'messageId',
   'tournamentId',
+  'recruitmentId',
+  'profileId',
+  'scrimId',
+  'storyId',
   'broadcastId',
   'deliveryLogId',
   'deepLink',
@@ -191,6 +196,41 @@ const createAndEmitNotification = async (notificationData) => {
           'data.customData.notificationDedupeKey': dedupeKey
         });
       }
+      const existingBeforeCreate = Boolean(notification);
+      if (existingBeforeCreate && normalizedNotificationData.dedupeBehavior === 'refresh') {
+        const now = new Date();
+        notification = await Notification.findOneAndUpdate(
+          { _id: notification._id },
+          {
+            $set: {
+              sender: normalizedNotificationData.sender,
+              type: normalizedNotificationData.type,
+              title: normalizedNotificationData.title,
+              message: normalizedNotificationData.message,
+              data: normalizedNotificationData.data,
+              isRead: false,
+              readAt: null,
+              archivedAt: null,
+              deletedAt: null,
+              createdAt: now,
+              updatedAt: now,
+              pushDeliveryState: channels.push ? 'pending' : 'not_requested',
+              pushDeliveryAttempts: 0,
+              pushDeliveryNextAttemptAt: channels.push ? now : null,
+              pushDeliveryLastError: ''
+            },
+            $unset: {
+              pushDeliveryLeaseAt: 1,
+              pushDeliveryLeaseKey: 1,
+              pushDeliveryCompletedAt: 1
+            }
+          },
+          { new: true }
+        );
+        if (notification && normalizedNotificationData.sender) {
+          await notification.populate('sender', 'username profile.displayName profile.avatar').catch(() => undefined);
+        }
+      }
       let created = false;
       if (!notification) {
         try {
@@ -218,12 +258,14 @@ const createAndEmitNotification = async (notificationData) => {
           }
         }
       }
-      if (created && notification && channels.inApp) emitNotification(notification.recipient, notification);
+      const refreshed = existingBeforeCreate && normalizedNotificationData.dedupeBehavior === 'refresh';
+      if ((created || refreshed) && notification && channels.inApp) emitNotification(notification.recipient, notification);
       log.debug('Notification durable row prepared', {
         userId: String(normalizedNotificationData.recipient || ''),
         notificationId: String(notification?._id || ''),
         type: normalizedNotificationData.type || 'system',
         created,
+        refreshed,
         inApp: channels.inApp,
         push: channels.push
       });

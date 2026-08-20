@@ -49,6 +49,11 @@ const notificationSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Post'
     },
+    // Comments are embedded in Post. Keeping the stable subdocument ID makes
+    // comment-specific notification cleanup possible without a separate model.
+    commentId: {
+      type: mongoose.Schema.Types.ObjectId
+    },
     messageId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Message'
@@ -56,6 +61,22 @@ const notificationSchema = new mongoose.Schema({
     tournamentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Tournament'
+    },
+    recruitmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TeamRecruitment'
+    },
+    profileId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PlayerProfile'
+    },
+    scrimId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Scrim'
+    },
+    storyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Story'
     },
     broadcastId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -121,6 +142,36 @@ notificationSchema.index({ recipient: 1, createdAt: -1 });
 notificationSchema.index({ recipient: 1, isRead: 1 });
 notificationSchema.index({ recipient: 1, deletedAt: 1, archivedAt: 1, createdAt: -1 });
 notificationSchema.index({ type: 1, createdAt: -1 });
+notificationSchema.index({ 'data.postId': 1 });
+notificationSchema.index({ 'data.commentId': 1 });
+notificationSchema.index({ 'data.tournamentId': 1 });
+notificationSchema.index({ 'data.recruitmentId': 1 });
+notificationSchema.index({ 'data.profileId': 1 });
+notificationSchema.index({ 'data.scrimId': 1 });
+notificationSchema.index({ 'data.storyId': 1 });
+notificationSchema.index({ 'data.customData.postId': 1 });
+notificationSchema.index({ 'data.customData.clipId': 1 });
+notificationSchema.index({ 'data.customData.commentId': 1 });
+notificationSchema.index({ 'data.customData.rootCommentId': 1 });
+notificationSchema.index({ 'data.customData.replyId': 1 });
+notificationSchema.index({ 'data.customData.tournamentId': 1 });
+notificationSchema.index({ 'data.customData.recruitmentId': 1 });
+notificationSchema.index({ 'data.customData.profileId': 1 });
+notificationSchema.index({ 'data.customData.scrimId': 1 });
+notificationSchema.index({ 'data.customData.storyId': 1 });
+notificationSchema.index({ 'data.customData.targetType': 1, 'data.customData.targetId': 1 });
+notificationSchema.index(
+  { recipient: 1, sender: 1, type: 1, 'data.postId': 1 },
+  {
+    name: 'unique_like_notification_per_actor_target',
+    unique: true,
+    partialFilterExpression: {
+      type: 'like',
+      sender: { $type: 'objectId' },
+      'data.postId': { $type: 'objectId' }
+    }
+  }
+);
 notificationSchema.index(
   { broadcastRecipient: 1 },
   { unique: true, partialFilterExpression: { broadcastRecipient: { $type: 'objectId' } } }
@@ -226,7 +277,9 @@ notificationSchema.statics.createNotification = async function(data) {
     
     return notification;
   } catch (error) {
-    console.error('Error in createNotification:', error);
+    // Duplicate-key losers are an expected part of idempotent producer races;
+    // the canonical emitter refetches the winner. Log only unexpected writes.
+    if (error?.code !== 11000) console.error('Error in createNotification:', error);
     const wrapped = new Error(`Failed to create notification: ${error.message}`);
     wrapped.code = error.code;
     wrapped.cause = error;

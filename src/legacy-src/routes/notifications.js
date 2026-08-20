@@ -2,7 +2,11 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 const Notification = require('../models/Notification');
-const { sanitizeNotificationsForViewer } = require('../utils/notificationPrivacy');
+const {
+  getRestrictedNotificationIdsForViewer,
+  sanitizeNotificationsForViewer
+} = require('../utils/notificationPrivacy');
+const { repairNotificationHistory } = require('../services/notificationHistoryService');
 const { normalizePagination } = require('../utils/pagination');
 
 const router = express.Router();
@@ -11,6 +15,7 @@ const router = express.Router();
 const getNotifications = async (req, res) => {
   try {
     const userId = req.user._id;
+    await repairNotificationHistory({ recipientId: userId });
     const { page, limit, skip } = normalizePagination(req.query, {
       defaultLimit: 20,
       maxLimit: 100
@@ -24,10 +29,21 @@ const getNotifications = async (req, res) => {
       });
     }
 
-    const filter = { recipient: userId };
+    const filter = {
+      recipient: userId,
+      deletedAt: null,
+      archivedAt: null,
+      type: { $ne: 'message' }
+    };
     if (isRead !== undefined) {
       filter.isRead = isRead === 'true';
     }
+
+    const visibilityCandidates = await Notification.find(filter)
+      .select('_id sender type data.postId')
+      .lean();
+    const restrictedIds = await getRestrictedNotificationIdsForViewer(visibilityCandidates, req.user);
+    if (restrictedIds.length) filter._id = { $nin: restrictedIds };
 
     const notificationDocuments = await Notification.find(filter)
       .populate('sender', 'username profile.displayName profile.avatar')
@@ -38,7 +54,14 @@ const getNotifications = async (req, res) => {
     const notifications = await sanitizeNotificationsForViewer(notificationDocuments, req.user);
 
     const total = await Notification.countDocuments(filter);
-    const unreadCount = await Notification.countDocuments({ recipient: userId, isRead: false });
+    const unreadCount = await Notification.countDocuments({
+      recipient: userId,
+      isRead: false,
+      deletedAt: null,
+      archivedAt: null,
+      type: { $ne: 'message' },
+      ...(restrictedIds.length ? { _id: { $nin: restrictedIds } } : {})
+    });
 
     res.status(200).json({
       success: true,

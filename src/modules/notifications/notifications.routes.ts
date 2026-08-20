@@ -83,15 +83,25 @@ const withClientVisibility = (
   return constraints.length ? { ...base, $and: constraints } : base;
 };
 
+// Notification types that must never appear in the Notifications history/list.
+// "message" = a new direct/group message was received; those live entirely in
+// the Messaging surfaces (chat list, unread badges, realtime banner, push) — the
+// Notifications screen is not their history. Calls (type "call") are NOT excluded
+// even though they originate from Messages. This is the single canonical list.
+const NOTIFICATION_LIST_EXCLUDED_TYPES = ["message"] as const;
+
 const countVisibleUnreadNotifications = (
   userId: unknown,
   platform: string,
-  appVersion: string
+  appVersion: string,
+  restrictedIds: string[] = []
 ) => Notification.countDocuments(withClientVisibility({
   recipient: userId,
   isRead: false,
   deletedAt: null,
-  archivedAt: null
+  archivedAt: null,
+  type: { $nin: NOTIFICATION_LIST_EXCLUDED_TYPES },
+  ...(restrictedIds.length ? { _id: { $nin: restrictedIds } } : {})
 }, platform, appVersion));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -111,7 +121,12 @@ const {
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { trackDelivery, trackEvent } = require(path.join(backendRootPath, "services", "broadcastService.js"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { sanitizeNotificationsForViewer } = require(path.join(backendRootPath, "utils", "notificationPrivacy.js"));
+const {
+  getRestrictedNotificationIdsForViewer,
+  sanitizeNotificationsForViewer
+} = require(path.join(backendRootPath, "utils", "notificationPrivacy.js"));
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { repairNotificationHistory } = require(path.join(backendRootPath, "services", "notificationHistoryService.js"));
 
 const serializePushToken = (entry: Record<string, unknown>) => {
   const token = typeof entry.token === "string" ? entry.token : "";
@@ -923,6 +938,8 @@ router.get("/", protect, async (req, res) => {
   try {
     const userId = getUserId(req as { user?: { _id?: string } });
     if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
+    // Remove historical orphans and duplicate likes before skip/limit/count.
+    await repairNotificationHistory({ recipientId: userId });
     const page = Math.max(1, Number.parseInt(String(req.query.page ?? "1"), 10) || 1);
     const limit = Math.max(1, Math.min(100, Number.parseInt(String(req.query.limit ?? "20"), 10) || 20));
     const skip = (page - 1) * limit;
@@ -938,11 +955,15 @@ router.get("/", protect, async (req, res) => {
       return res.status(400).json({ success: false, message: "archived filter must be true or false" });
     }
     const archived = archivedValue === "true";
-    let filter: Record<string, unknown> = withClientVisibility({
+    const baseFilter: Record<string, unknown> = withClientVisibility({
       recipient: userId,
       deletedAt: null,
-      archivedAt: archived ? { $ne: null } : null
+      archivedAt: archived ? { $ne: null } : null,
+      // Exclude message-received notifications from the Notifications history —
+      // paginating AFTER this exclusion keeps page counts / hasMore correct.
+      type: { $nin: NOTIFICATION_LIST_EXCLUDED_TYPES }
     }, platform, appVersion);
+    let filter: Record<string, unknown> = baseFilter;
     if (isRead !== undefined) {
       const readValue = String(isRead).toLowerCase();
       if (!["true", "false"].includes(readValue)) {
@@ -967,6 +988,12 @@ router.get("/", protect, async (req, res) => {
       };
     }
 
+    const visibilityCandidates = await Notification.find(baseFilter)
+      .select("_id sender type data.postId")
+      .lean();
+    const restrictedIds = await getRestrictedNotificationIdsForViewer(visibilityCandidates, req.user);
+    if (restrictedIds.length) filter = { ...filter, _id: { $nin: restrictedIds } };
+
     const notificationDocuments = await Notification.find(filter)
       .populate("sender", "username profile.displayName profile.avatar")
       .sort({ createdAt: -1 })
@@ -976,7 +1003,7 @@ router.get("/", protect, async (req, res) => {
     const notifications = await sanitizeNotificationsForViewer(notificationDocuments, req.user);
 
     const total = await Notification.countDocuments(filter);
-    const unreadCount = await countVisibleUnreadNotifications(userId, platform, appVersion);
+    const unreadCount = await countVisibleUnreadNotifications(userId, platform, appVersion, restrictedIds);
 
     return res.status(200).json({
       success: true,

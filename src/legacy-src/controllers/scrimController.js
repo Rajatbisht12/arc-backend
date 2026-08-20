@@ -8,6 +8,7 @@ const { sanitizePublicScrim } = require('../utils/tournamentPublicDto');
 const { normalizePagination } = require('../utils/pagination');
 const { normalizeQuerySearch, escapeRegex } = require('../utils/searchQuery');
 const { getTimezoneDayBounds } = require('../utils/timezoneDayBounds');
+const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
 
 const uniqueRecipientIds = (values = []) =>
   Array.from(new Set((Array.isArray(values) ? values : [])
@@ -1476,6 +1477,9 @@ const deleteScrim = async (req, res) => {
     }
 
     await scrim.deleteOne();
+    await deleteNotificationsForTarget({ targetType: 'scrim', targetId: scrim._id }).catch((cleanupError) => {
+      log.error('Scrim notification cleanup failed', { error: String(cleanupError), scrimId: String(scrim._id) });
+    });
 
     res.status(200).json({
       success: true,
