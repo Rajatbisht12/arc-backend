@@ -174,6 +174,39 @@ const messageSchema = new mongoose.Schema({
     groupName: { type: String },
     groupAvatar: { type: String },
     inviteToken: { type: String }
+  },
+
+  // Presentation metadata for the non-actionable acknowledgement message
+  // created after a roster/staff invitation is accepted or declined. This is
+  // intentionally separate from inviteData so clients never mistake the
+  // acknowledgement for a second actionable invitation.
+  inviteResponse: {
+    invitationType: {
+      type: String,
+      enum: ['roster', 'staff']
+    },
+    invitationMessageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Message'
+    },
+    inviteId: {
+      type: mongoose.Schema.Types.ObjectId
+    },
+    teamId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    game: String,
+    role: String,
+    inGameName: String,
+    status: {
+      type: String,
+      enum: ['accepted', 'declined']
+    },
+    message: {
+      type: String,
+      maxlength: [500, 'Invite response message cannot exceed 500 characters']
+    }
   }
 }, {
   timestamps: true
