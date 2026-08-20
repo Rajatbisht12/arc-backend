@@ -90,7 +90,7 @@ const expandTournamentRecipientIds = async (values = []) => {
   }
 };
 
-const notifyTournamentRecipients = async ({ tournament, recipients, sender, title, message, eventType, revision, extraData = {} }) => {
+const notifyTournamentRecipients = async ({ tournament, recipients, sender, title, message, eventType, revision, extraData = {}, targetDeleted = false }) => {
   const recipientIds = await expandTournamentRecipientIds(recipients);
   if (recipientIds.length === 0) return [];
   const dedupeKey = `tournament:${tournament._id}:${eventType}:${String(revision || tournament.updatedAt || '').slice(0, 80)}`;
@@ -101,8 +101,10 @@ const notifyTournamentRecipients = async ({ tournament, recipients, sender, titl
     title,
     message,
     data: {
-      tournamentId: tournament._id,
-      deepLink: `/tournament/${tournament._id}`,
+      ...(!targetDeleted ? {
+        tournamentId: tournament._id,
+        deepLink: `/tournament/${tournament._id}`
+      } : {}),
       customData: {
         eventType,
         notificationDedupeKey: dedupeKey,
@@ -3807,7 +3809,10 @@ const deleteTournament = async (req, res) => {
       title: `Tournament Deleted: ${deletedTournament.name}`,
       message: 'This tournament has been deleted by the host.',
       eventType: 'tournament_deleted',
-      revision: 'deleted'
+      revision: 'deleted',
+      // Keep the deletion notice informational. It must not recreate a row
+      // pointing at the tournament that the cleanup service just removed.
+      targetDeleted: true
     });
 
     res.status(200).json({

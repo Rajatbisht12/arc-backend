@@ -33,6 +33,9 @@ assert.deepEqual(
 );
 const serviceNotificationCreators = fs.readdirSync(path.join(legacyRoot, 'services'))
   .filter((name) => name.endsWith('.js'))
+  // This maintenance service only deletes or repairs canonical rows; it is not
+  // a notification producer and therefore is outside the producer bypass rule.
+  .filter((name) => name !== 'notificationHistoryService.js')
   .filter((name) => /Notification\.(?:create|createNotification|insertMany|bulkWrite)\s*\(/.test(readLegacy(`services/${name}`)));
 assert.deepEqual(serviceNotificationCreators, []);
 
@@ -75,8 +78,9 @@ assert.deepEqual(normalizeNotificationPayload({
   type: 'recruitment',
   data: { recruitmentId: 'recruitment-1', applicationId: 'application-1', deepLink: '/recruitment/1' }
 }).data, {
+  recruitmentId: 'recruitment-1',
   deepLink: '/recruitment/1',
-  customData: { recruitmentId: 'recruitment-1', applicationId: 'application-1' }
+  customData: { applicationId: 'application-1' }
 });
 assert.deepEqual(resolveNotificationChannels({ type: 'message' }, {
   inAppEnabled: true,

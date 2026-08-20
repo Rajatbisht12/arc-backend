@@ -2,10 +2,6 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { sanitizePublicTournament, sanitizePublicScrim } = require('./tournamentPublicDto');
-const {
-  redactRestrictedNotification,
-  redactRestrictedPostNotification
-} = require('./notificationPrivacy');
 
 const privateTeam = {
   _id: 'team-1',
@@ -86,55 +82,6 @@ assert.strictEqual(publicScrim.broadcasts, undefined);
 assert.strictEqual(publicScrim.registeredTeams[0].teamInfo, undefined);
 assert.strictEqual(publicScrim.registeredTeams[0].privacySettings, undefined);
 
-const redactedNotification = redactRestrictedPostNotification({
-  _id: 'notification-1',
-  sender: { _id: 'blocked-sender', username: 'blocked-sender' },
-  title: 'You were mentioned',
-  message: 'Private post excerpt that must not survive',
-  data: {
-    postId: 'private-post',
-    deepLink: '/posts/private-post',
-    customData: {
-      postId: 'private-post',
-      sharedPostId: 'private-post',
-      url: '/post/private-post'
-    }
-  }
-});
-assert.strictEqual(redactedNotification.sender, null);
-assert.strictEqual(redactedNotification.data.postId, undefined);
-assert.strictEqual(redactedNotification.data.deepLink, undefined);
-assert.strictEqual(redactedNotification.data.customData.postId, undefined);
-assert.strictEqual(redactedNotification.data.customData.sharedPostId, undefined);
-assert.strictEqual(redactedNotification.data.customData.url, undefined);
-assert.strictEqual(redactedNotification.data.customData.contentUnavailable, true);
-assert(!redactedNotification.message.includes('Private post excerpt'));
-
-const redactedBlockedSender = redactRestrictedNotification({
-  type: 'message',
-  sender: { _id: 'blocked-user' },
-  message: 'private message preview',
-  data: {
-    messageId: 'message-1',
-    storyId: 'story-1',
-    recruitmentId: 'recruitment-1',
-    profileId: 'user-1',
-    scrimId: 'scrim-1',
-    deepLink: '/conversation/private-chat',
-    customData: { conversationId: 'private-chat', storyId: 'story-1', profileId: 'user-1' }
-  }
-});
-assert.strictEqual(redactedBlockedSender.sender, null);
-assert.strictEqual(redactedBlockedSender.data.messageId, undefined);
-assert.strictEqual(redactedBlockedSender.data.storyId, undefined);
-assert.strictEqual(redactedBlockedSender.data.recruitmentId, undefined);
-assert.strictEqual(redactedBlockedSender.data.profileId, undefined);
-assert.strictEqual(redactedBlockedSender.data.scrimId, undefined);
-assert.strictEqual(redactedBlockedSender.data.deepLink, undefined);
-assert.strictEqual(redactedBlockedSender.data.customData.conversationId, undefined);
-assert.strictEqual(redactedBlockedSender.data.customData.storyId, undefined);
-assert.strictEqual(redactedBlockedSender.data.customData.profileId, undefined);
-
 const backendRoot = path.resolve(__dirname, '../..');
 const tournamentController = fs.readFileSync(
   path.join(backendRoot, 'legacy-src/controllers/tournamentController.js'),
@@ -150,6 +97,10 @@ const legacyNotificationRoutes = fs.readFileSync(
 );
 const notificationService = fs.readFileSync(
   path.join(backendRoot, 'legacy-src/utils/notificationService.js'),
+  'utf8'
+);
+const notificationPrivacy = fs.readFileSync(
+  path.join(backendRoot, 'legacy-src/utils/notificationPrivacy.js'),
   'utf8'
 );
 const scrimController = fs.readFileSync(
@@ -193,8 +144,11 @@ assert(tournamentController.includes("io.emit('broadcast_message', payload)"));
 assert(tournamentController.includes("io.to(`user-${recipientId}`).emit('broadcast_message', payload)"));
 assert(!notificationRoutes.includes('.populate("data.postId", "content.text")'));
 assert(notificationRoutes.includes('sanitizeNotificationsForViewer(notificationDocuments, req.user)'));
+assert(notificationRoutes.includes('getRestrictedNotificationIdsForViewer(visibilityCandidates, req.user)'));
 assert(!legacyNotificationRoutes.includes(".populate('data.postId', 'content.text')"));
 assert(legacyNotificationRoutes.includes('sanitizeNotificationsForViewer(notificationDocuments, req.user)'));
+assert(!notificationPrivacy.includes('Activity unavailable'));
+assert(notificationPrivacy.includes('return visibleRows.flatMap'));
 assert(notificationService.includes('resolvePostAccess({ post, viewer: recipient })'));
 assert(notificationService.includes('Mention notification suppressed by current post privacy'));
 assert(scrimController.includes('scrims: scrims.map(sanitizePublicScrim)'));

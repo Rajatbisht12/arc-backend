@@ -18,6 +18,7 @@ const {
 } = require('../services/recommendationService');
 const { isActiveBoost } = require('../services/boostService');
 const log = require('../utils/logger');
+const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
 const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const { resolvePostAccess, filterPostsForViewer } = require('../utils/privacyPolicy');
 const {
@@ -595,6 +596,7 @@ const toggleLike = async (req, res) => {
       return likeUser.toString() === userId.toString();
     }) > -1;
     const { source, campaignId } = await getRequestAttribution(req, existingPost);
+    let likeRelationshipCreated = false;
 
     if (alreadyLiked) {
       await Post.updateOne(
@@ -602,7 +604,7 @@ const toggleLike = async (req, res) => {
         { $pull: { likes: { user: userId } } }
       );
     } else {
-      await Post.updateOne(
+      const likeResult = await Post.updateOne(
         {
           _id: postId,
           isActive: true,
@@ -610,7 +612,10 @@ const toggleLike = async (req, res) => {
         },
         { $push: { likes: { user: userId, likedAt: new Date() } } }
       );
-      await incrementAttributionMetric({ postId, source, campaignId, metric: 'Likes' });
+      likeRelationshipCreated = Number(likeResult?.modifiedCount || 0) === 1;
+      if (likeRelationshipCreated) {
+        await incrementAttributionMetric({ postId, source, campaignId, metric: 'Likes' });
+      }
     }
 
     const finalPost = await Post.findById(postId)
@@ -647,7 +652,7 @@ const toggleLike = async (req, res) => {
     });
 
     // Create notification for post author (if not liking own post)
-    if (isLiked && authorId && authorId.toString() !== userId.toString()) {
+    if (isLiked && likeRelationshipCreated && authorId && authorId.toString() !== userId.toString()) {
       await createLikeNotification(authorId, userId, finalPost._id);
     }
 
@@ -822,7 +827,7 @@ const addComment = async (req, res) => {
         }).catch(() => {});
       }
     } else if (post.author.toString() !== userId.toString()) {
-      await createCommentNotification(post.author, userId, post._id, text.trim());
+      await createCommentNotification(post.author, userId, post._id, text.trim(), newComment?._id);
     }
 
     await recordEngagementEvent({
@@ -1217,6 +1222,10 @@ const deletePost = async (req, res) => {
     // Mark as inactive instead of actually deleting
     post.isActive = false;
     await post.save();
+
+    await deleteNotificationsForTarget({ targetType: 'post', targetId: postId }).catch((cleanupError) => {
+      log.error('Post notification cleanup failed', { error: String(cleanupError), postId: String(postId) });
+    });
 
     // Remove from user's posts array
     await User.findByIdAndUpdate(userId, {

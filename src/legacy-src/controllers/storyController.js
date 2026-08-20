@@ -4,6 +4,7 @@ const User = require('../models/User');
 const { uploadMultipleFiles } = require('../utils/cloudinary');
 const { STORY_MAX_SECONDS, processStoryVideo } = require('../utils/videoProcessing');
 const log = require('../utils/logger');
+const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
 const mongoose = require('mongoose');
 const Follow = require('../models/Follow');
 const { resolvePrivacyAccess, minimalProfile } = require('../utils/privacyPolicy');
@@ -533,6 +534,9 @@ const deleteStory = async (req, res) => {
       Story.findByIdAndDelete(req.params.storyId),
       StoryView.deleteMany({ story: req.params.storyId })
     ]);
+    await deleteNotificationsForTarget({ targetType: 'story', targetId: req.params.storyId }).catch((cleanupError) => {
+      log.error('Story notification cleanup failed', { error: String(cleanupError), storyId: String(req.params.storyId) });
+    });
     return res.json({ success: true, message: 'Story deleted' });
   } catch (err) {
     return res.status(500).json({

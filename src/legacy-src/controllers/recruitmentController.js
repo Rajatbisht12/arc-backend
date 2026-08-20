@@ -8,6 +8,7 @@ const log = require('../utils/logger');
 const { isSocialPreviewRequest } = require('../utils/socialPreviewRequest');
 const { createAndEmitNotification } = require('../utils/notificationEmitter');
 const { resolvePrivacyAccess } = require('../utils/privacyPolicy');
+const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
 const {
   generateRecruitmentCode,
   generatePlayerProfileCode,
@@ -532,6 +533,11 @@ const deleteTeamRecruitment = safeAsyncHandler(async (req, res) => {
       error: String(cleanupError), recruitmentId: String(recruitment._id)
     });
   }
+  await deleteNotificationsForTarget({ targetType: 'recruitment', targetId: recruitment._id }).catch((cleanupError) => {
+    log.error('Recruitment notification cleanup failed', {
+      error: String(cleanupError), recruitmentId: String(recruitment._id)
+    });
+  });
   const notificationResults = await Promise.allSettled(recipients.map((recipient) => notifyRecruitmentEvent({
     recipient,
     sender: teamId,
@@ -539,7 +545,8 @@ const deleteTeamRecruitment = safeAsyncHandler(async (req, res) => {
     message: 'A recruitment post you applied to has been removed by the team.',
     eventType: 'recruitment_post_deleted',
     deliveryKey: `recruitment-post-deleted:${recruitment._id}`,
-    data: { recruitmentId: recruitment._id }
+    // Informational deletion notice only: no dead target ID or deep link.
+    data: {}
   })));
   notificationResults.forEach((result, index) => {
     if (result.status === 'rejected') {
@@ -891,6 +898,11 @@ const deletePlayerProfile = safeAsyncHandler(async (req, res) => {
   }
 
   await PlayerProfile.findByIdAndDelete(profile._id);
+  await deleteNotificationsForTarget({ targetType: 'profile', targetId: profile._id }).catch((cleanupError) => {
+    log.error('Player-profile notification cleanup failed', {
+      error: String(cleanupError), profileId: String(profile._id)
+    });
+  });
 
   res.json({
     success: true,

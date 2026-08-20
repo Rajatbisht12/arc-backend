@@ -5,6 +5,7 @@ const PaymentTransaction = require('../models/PaymentTransaction');
 const { deleteFile } = require('../utils/cloudinary');
 const log = require('../utils/logger');
 const { cleanupGeneratedDuoTeams } = require('./generatedDuoTeamService');
+const { deleteNotificationsForTarget } = require('./notificationHistoryService');
 
 /**
  * Atomically claim deletion of a tournament, then perform idempotent reference
@@ -65,6 +66,10 @@ const deleteTournamentAndCleanup = async ({ tournamentId, expectedHostId = null 
     {
       name: 'generated-duo-teams',
       run: () => cleanupGeneratedDuoTeams(tournament.teams || [])
+    },
+    {
+      name: 'notification-history',
+      run: () => deleteNotificationsForTarget({ targetType: 'tournament', targetId: tournament._id })
     },
     ...(tournament.bannerPublicId ? [{
       name: 'banner',

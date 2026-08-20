@@ -5,6 +5,7 @@ const {
 } = require('./notificationEmitter');
 const { createHash, randomUUID } = require('crypto');
 const log = require('./logger');
+const { buildLikeNotificationDedupeKey } = require('../services/notificationHistoryService');
 
 const buildMessageNotificationBody = (senderName, messageKind = 'text', primaryMediaType = '') => {
   const sender = String(senderName || 'Someone');
@@ -26,6 +27,8 @@ const createLikeNotification = async (recipientId, senderId, postId) => {
   try {
     const sender = await require('../models/User').findById(senderId).select('username profile.displayName profile.avatar');
     const post = await require('../models/Post').findById(postId).select('content.text');
+    if (!sender || !post) return null;
+    const notificationDedupeKey = buildLikeNotificationDedupeKey({ sender: senderId, postId });
     
     const notificationData = {
       recipient: recipientId,
@@ -34,8 +37,15 @@ const createLikeNotification = async (recipientId, senderId, postId) => {
       title: 'New Like',
       message: `${sender.username} liked your post${post?.content?.text ? `: "${post.content.text.substring(0, 50)}${post.content.text.length > 50 ? '...' : ''}"` : ''}`,
       data: {
-        postId: postId
-      }
+        postId,
+        customData: {
+          notificationDedupeKey,
+          pushRequestId: notificationDedupeKey
+        }
+      },
+      // A genuine unlike -> re-like transition reuses the same durable row,
+      // restores it to the active inbox, and emits the same authoritative ID.
+      dedupeBehavior: 'refresh'
     };
 
     return await createAndEmitNotification(notificationData);
@@ -46,7 +56,7 @@ const createLikeNotification = async (recipientId, senderId, postId) => {
 };
 
 // Create comment notification
-const createCommentNotification = async (recipientId, senderId, postId, commentText) => {
+const createCommentNotification = async (recipientId, senderId, postId, commentText, commentId) => {
   try {
     const sender = await require('../models/User').findById(senderId).select('username profile.displayName profile.avatar');
     const post = await require('../models/Post').findById(postId).select('content.text');
@@ -58,7 +68,9 @@ const createCommentNotification = async (recipientId, senderId, postId, commentT
       title: 'New Comment',
       message: `${sender.username} commented on your post${post?.content?.text ? `: "${post.content.text.substring(0, 50)}${post.content.text.length > 50 ? '...' : ''}"` : ''}`,
       data: {
-        postId: postId
+        postId,
+        ...(commentId ? { commentId } : {}),
+        ...(commentId ? { customData: { commentId: String(commentId) } } : {})
       }
     };
 
@@ -84,6 +96,7 @@ const createReplyNotification = async (recipientId, senderId, postId, { rootComm
       message: `${sender?.username || 'Someone'} replied to your comment${preview}`,
       data: {
         postId,
+        ...(replyId ? { commentId: replyId } : {}),
         deepLink: `/post/${postId}?comment=${rootCommentId || ''}${replyId ? `&reply=${replyId}` : ''}`,
         customData: { kind: 'reply', rootCommentId: String(rootCommentId || ''), replyId: replyId ? String(replyId) : '' }
       }
