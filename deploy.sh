@@ -282,15 +282,18 @@ run_preflight() {
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js']}]}))" "$CONTAINER_NAME")
   fi
   local task
-  task=$(aws ecs run-task \
+  local run_result
+  run_result=$(aws ecs run-task \
     --cluster "$CLUSTER" \
     --task-definition "$TASK_FAMILY:$NEW_REV" \
     --launch-type FARGATE \
     --network-configuration "$NETWORK_CONFIGURATION" \
     --overrides "$overrides" \
-    --query 'tasks[0].taskArn' --output text)
+    --output json)
+  task=$(node -e "const r=JSON.parse(process.argv[1]); process.stdout.write(r.tasks?.[0]?.taskArn || '')" "$run_result")
   if [[ -z "$task" || "$task" == "None" ]]; then
     echo "$mode preflight task could not be started" >&2
+    node -e "const r=JSON.parse(process.argv[1]); for (const f of r.failures || []) console.error([f.arn,f.reason,f.detail].filter(Boolean).join(': '))" "$run_result" >&2
     return 1
   fi
   aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task"
@@ -299,11 +302,40 @@ run_preflight() {
     --cluster "$CLUSTER" --tasks "$task" \
     --query 'tasks[0].containers[0].exitCode' --output text)
   if [[ "$task_exit" != "0" ]]; then
-    local reason
-    reason=$(aws ecs describe-tasks \
-      --cluster "$CLUSTER" --tasks "$task" \
-      --query 'tasks[0].containers[0].reason' --output text)
-    echo "$mode preflight failed (exit=$task_exit): $reason" >&2
+    local task_details log_config reason stopped_reason task_id log_group log_prefix log_stream
+    task_details=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task" --output json)
+    reason=$(node -e "const t=JSON.parse(process.argv[1]).tasks?.[0]; process.stdout.write(t?.containers?.[0]?.reason || '')" "$task_details")
+    stopped_reason=$(node -e "const t=JSON.parse(process.argv[1]).tasks?.[0]; process.stdout.write(t?.stoppedReason || '')" "$task_details")
+    echo "$mode preflight failed (exit=$task_exit)${reason:+: $reason}${stopped_reason:+; $stopped_reason}" >&2
+
+    # Application failures generally have no ECS container reason. The child
+    # verifier's actual stderr/stdout is in the task's awslogs stream.
+    # Parse JSON instead of using AWS CLI's text formatter. When aws.exe is
+    # invoked from Bash on Windows, text output can contain invisible terminal
+    # formatting characters that CloudWatch rejects in identifier arguments.
+    log_config=$(aws ecs describe-task-definition \
+      --task-definition "$NEW_TASK_DEF" \
+      --output json)
+    log_group=$(node -e "const r=JSON.parse(process.argv[1]); const c=r.taskDefinition?.containerDefinitions?.find(x=>x.name===process.argv[2]); process.stdout.write(c?.logConfiguration?.options?.['awslogs-group'] || '')" "$log_config" "$CONTAINER_NAME")
+    log_prefix=$(node -e "const r=JSON.parse(process.argv[1]); const c=r.taskDefinition?.containerDefinitions?.find(x=>x.name===process.argv[2]); process.stdout.write(c?.logConfiguration?.options?.['awslogs-stream-prefix'] || '')" "$log_config" "$CONTAINER_NAME")
+    task_id="${task##*/}"
+    if [[ -n "$log_group" && "$log_group" != "None" && -n "$log_prefix" && "$log_prefix" != "None" ]]; then
+      log_stream="$log_prefix/$CONTAINER_NAME/$task_id"
+      echo "==> CloudWatch log: $log_group / $log_stream" >&2
+      # Git Bash otherwise treats the leading slash in /ecs/... as a POSIX
+      # path and rewrites it to a Windows path before invoking aws.exe.
+      if ! MSYS_NO_PATHCONV=1 aws logs get-log-events \
+        --region "$REGION" \
+        --log-group-name "$log_group" \
+        --log-stream-name "$log_stream" \
+        --limit 200 \
+        --query 'events[].message' \
+        --output text >&2; then
+        echo "Unable to read the preflight log stream; inspect task $task in ECS." >&2
+      fi
+    else
+      echo "No awslogs configuration found; inspect task $task in ECS." >&2
+    fi
     return 1
   fi
 }
