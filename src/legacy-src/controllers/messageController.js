@@ -25,6 +25,10 @@ const {
   groupHistoryBoundary,
   canReadGroupMessageAt
 } = require('../utils/groupMembershipPrivacy');
+const {
+  createMongooseMessageHistoryRepository,
+  resolveMessageHistoryWindow
+} = require('../services/messageHistoryWindowService');
 
 // Get io instance from server
 let io;
@@ -34,6 +38,27 @@ const setIoInstance = (ioInstance) => {
 
 const sharedPostSelect = 'content.text content.media author likes comments shares createdAt postType visibility isActive hiddenByAdmin';
 const sharedPostAuthorSelect = 'username profile.displayName profile.avatar profilePicture avatar profileImage avatarUrl userType role';
+
+const loadHydratedMessageWindow = async (messageIds, { direct = false, group = false } = {}) => {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) return [];
+  let query = Message.find({ _id: { $in: messageIds } })
+    .populate('sender', 'username profile.displayName profile.avatar')
+    .populate({ path: 'replyTo', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } })
+    .populate('forwardedFrom', 'content.text content.media sender')
+    .populate('forwardedFrom.sender', 'username profile.displayName profile.avatar')
+    .populate('sharedPost', sharedPostSelect)
+    .populate('sharedPost.author', sharedPostAuthorSelect)
+    .populate('reactions.user', 'username profile.displayName');
+  if (direct) {
+    query = query
+      .populate('recipient', 'username profile.displayName profile.avatar')
+      .populate('sharedProfile', 'username profile.displayName profile.avatar');
+  }
+  if (group) query = query.populate('mentions', 'username profile.displayName profile.avatar');
+  const hydrated = await query.lean();
+  const byId = new Map(hydrated.map((message) => [idString(message), message]));
+  return messageIds.map((messageId) => byId.get(String(messageId))).filter(Boolean);
+};
 
 const getMessageKind = ({ media = [], sharedPost, sharedProfile, replyTo, forwardedFrom, invite }) => {
   if (invite) return 'invite';
@@ -392,16 +417,7 @@ const getDirectMessages = async (req, res) => {
   try {
     const { userId } = req.params;
     const currentUserId = req.user._id;
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    // Return deep history by default so old messages remain visible in chat.
-    // A hard cap is kept to prevent unbounded payloads.
-    const requestedLimit = parseInt(req.query.limit, 10);
-    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
-      ? Math.min(requestedLimit, 1000)
-      : 1000;
-    const skip = (page - 1) * limit;
-
-    const messages = await Message.find({
+    const directFilter = {
       messageType: 'direct',
       deletedForEveryone: { $ne: true },
       $or: [
@@ -417,7 +433,50 @@ const getDirectMessages = async (req, res) => {
           ]
         }
       ]
-    })
+    };
+    const wantsWindow = req.query.initial === 'true' || Boolean(req.query.before || req.query.after);
+
+    if (wantsWindow) {
+      const window = await resolveMessageHistoryWindow({
+        repository: createMongooseMessageHistoryRepository({
+          Message,
+          baseFilter: directFilter,
+          viewerId: currentUserId
+        }),
+        limit: req.query.limit,
+        before: req.query.before,
+        after: req.query.after
+      });
+      const messages = await loadHydratedMessageWindow(window.messageIds, { direct: true });
+      for (const message of messages) {
+        if (!message.sharedPost) continue;
+        const access = await resolvePostAccess({ post: message.sharedPost, viewer: req.user });
+        const deletedOrHidden = message.sharedPost.isActive === false || message.sharedPost.hiddenByAdmin === true;
+        if (!access.allowed || deletedOrHidden) {
+          message.sharedPost = null;
+          message.sharedPostCaption = '';
+          message.sharedPostUnavailable = true;
+        }
+      }
+      await redactMessageReadReceipts(messages, req.user);
+      return res.status(200).json({
+        success: true,
+        messages,
+        initialPosition: window.initialPosition,
+        pagination: window.pagination
+      });
+    }
+
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    // Return deep history by default so old messages remain visible in chat.
+    // A hard cap is kept to prevent unbounded payloads.
+    const requestedLimit = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, 1000)
+      : 1000;
+    const skip = (page - 1) * limit;
+
+    const messages = await Message.find(directFilter)
     
     .populate('sender', 'username profile.displayName profile.avatar')
     .populate('recipient', 'username profile.displayName profile.avatar')
@@ -433,23 +492,7 @@ const getDirectMessages = async (req, res) => {
     .limit(limit)
     .lean();
 
-    const total = await Message.countDocuments({
-      messageType: 'direct',
-      deletedForEveryone: { $ne: true },
-      $or: [
-        { sender: currentUserId, recipient: userId },
-        { sender: userId, recipient: currentUserId }
-      ],
-      $and: [
-        {
-          $or: [
-            { deletedForUsers: { $exists: false } },
-            { deletedForUsers: { $size: 0 } },
-            { deletedForUsers: { $not: { $elemMatch: { user: currentUserId } } } }
-          ]
-        }
-      ]
-    });
+    const total = await Message.countDocuments(directFilter);
 
     for (const message of messages) {
       if (message.sharedPost) {
@@ -480,7 +523,7 @@ const getDirectMessages = async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Failed to fetch messages',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -1294,8 +1337,7 @@ const getGroupMessages = async (req, res) => {
     }
     const membershipWindow = getGroupMembershipWindow(chatRoom, userId);
     const historyBoundary = groupHistoryBoundary(membershipWindow);
-
-    const messages = await Message.find({
+    const groupFilter = {
       chatRoom: chatRoomId,
       messageType: 'group',
       deletedForEveryone: { $ne: true },
@@ -1309,7 +1351,40 @@ const getGroupMessages = async (req, res) => {
           ]
         }
       ]
-    })
+    };
+    const wantsWindow = req.query.initial === 'true' || Boolean(req.query.before || req.query.after);
+
+    if (wantsWindow) {
+      const window = await resolveMessageHistoryWindow({
+        repository: createMongooseMessageHistoryRepository({
+          Message,
+          baseFilter: groupFilter,
+          viewerId: userId
+        }),
+        limit: req.query.limit,
+        before: req.query.before,
+        after: req.query.after
+      });
+      const messages = await loadHydratedMessageWindow(window.messageIds, { group: true });
+      const sharedPosts = messages.map((message) => message.sharedPost).filter(Boolean);
+      const visibleSharedPosts = await filterPostsForViewer(sharedPosts, req.user);
+      const visibleSharedPostIds = new Set(visibleSharedPosts.map((post) => idString(post)));
+      for (const message of messages) {
+        if (message.sharedPost && !visibleSharedPostIds.has(idString(message.sharedPost))) {
+          message.sharedPost = null;
+          message.sharedPostCaption = '';
+        }
+      }
+      await redactMessageReadReceipts(messages, req.user);
+      return res.status(200).json({
+        success: true,
+        messages,
+        initialPosition: window.initialPosition,
+        pagination: window.pagination
+      });
+    }
+
+    const messages = await Message.find(groupFilter)
     .populate('sender', 'username profile.displayName profile.avatar')
     .populate({ path: 'replyTo', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } })
     .populate('forwardedFrom', 'content.text content.media sender')
@@ -1323,21 +1398,7 @@ const getGroupMessages = async (req, res) => {
     .limit(limit)
     .lean();
 
-    const total = await Message.countDocuments({
-      chatRoom: chatRoomId,
-      messageType: 'group',
-      deletedForEveryone: { $ne: true },
-      ...historyBoundary,
-      $and: [
-        {
-          $or: [
-            { deletedForUsers: { $exists: false } },
-            { deletedForUsers: { $size: 0 } },
-            { deletedForUsers: { $not: { $elemMatch: { user: userId } } } }
-          ]
-        }
-      ]
-    });
+    const total = await Message.countDocuments(groupFilter);
 
     const sharedPosts = messages.map((message) => message.sharedPost).filter(Boolean);
     const visibleSharedPosts = await filterPostsForViewer(sharedPosts, req.user);
@@ -1362,7 +1423,7 @@ const getGroupMessages = async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: 'Failed to fetch group messages',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined

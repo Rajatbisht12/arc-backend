@@ -305,6 +305,17 @@ messageSchema.index({ sender: 1, createdAt: -1 });
 messageSchema.index({ recipient: 1, createdAt: -1 });
 messageSchema.index({ chatRoom: 1, createdAt: -1 });
 messageSchema.index({ messageType: 1, createdAt: -1 });
+// Bounded chat-history windows walk a stable (createdAt, _id) cursor. Keep
+// direct and group timelines covered so finding the first unread boundary and
+// paging around it never requires loading the full conversation.
+messageSchema.index(
+  { messageType: 1, recipient: 1, sender: 1, createdAt: 1, _id: 1 },
+  { name: 'message_history_direct_cursor' }
+);
+messageSchema.index(
+  { messageType: 1, chatRoom: 1, createdAt: 1, _id: 1 },
+  { name: 'message_history_group_cursor' }
+);
 messageSchema.index(
   { 'callSummary.callId': 1 },
   {
