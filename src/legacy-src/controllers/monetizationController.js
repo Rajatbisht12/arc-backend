@@ -44,9 +44,13 @@ const BANK_OWNER_SENSITIVE_SELECT = '+taxIdHash +upiId +upiIdEncrypted +paypalEm
 // status/message. Database/driver errors sometimes expose `code`, `statusCode`,
 // or sensitive infrastructure text, so never reflect their message directly.
 const PUBLIC_MONETIZATION_ERRORS = Object.freeze({
+  CREATOR_NOT_ELIGIBLE: Object.freeze({
+    status: 403,
+    message: 'Complete the Creator Monetization eligibility requirements first.'
+  }),
   CREATOR_NOT_APPROVED: Object.freeze({
     status: 403,
-    message: 'Only approved creators can submit withdrawal requests.'
+    message: 'Creator Monetization approval is required for this feature.'
   }),
   VERIFIED_BANK_DETAILS_REQUIRED: Object.freeze({
     status: 409,
@@ -227,6 +231,35 @@ async function assertPlayer(req, res, next) {
 }
 
 /**
+ * Creator payout and Studio-backed endpoints are approval-only. Recompute the
+ * canonical requirements for non-approved accounts so a forged client cannot
+ * turn a rounded progress value into financial access.
+ */
+async function assertApprovedCreator(req, res, next) {
+  try {
+    const userId = req.user?._id;
+    const user = await User.findById(userId).select('isCreator creatorMonetizationStatus').lean();
+    if (user?.isCreator === true && user.creatorMonetizationStatus === 'approved') {
+      return next();
+    }
+
+    const eligibility = await getOrComputeEligibility(userId, true);
+    if (!eligibility?.isEligible) {
+      return sendPublicMonetizationError(res, 'CREATOR_NOT_ELIGIBLE');
+    }
+    return sendPublicMonetizationError(res, 'CREATOR_NOT_APPROVED');
+  } catch (err) {
+    return sendInternalError({
+      res,
+      log,
+      operation: 'Creator monetization access check failed',
+      publicMessage: 'Creator access could not be verified',
+      error: err
+    });
+  }
+}
+
+/**
  * GET /api/monetization/eligibility
  * Returns eligibility for current user (on profile load).
  */
@@ -311,8 +344,9 @@ async function applyForMonetization(req, res) {
 
     const eligibility = await getOrComputeEligibility(userId, true);
     if (!eligibility.isEligible) {
-      return res.status(400).json({
+      return res.status(403).json({
         success: false,
+        code: 'CREATOR_NOT_ELIGIBLE',
         message: 'You are not eligible for monetization yet.',
         failedConditions: eligibility.failedConditions
       });
@@ -323,8 +357,9 @@ async function applyForMonetization(req, res) {
       status: 'pending'
     });
     if (existingPending) {
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
+        code: 'CREATOR_APPLICATION_PENDING',
         message: 'You already have an application under review.'
       });
     }
@@ -342,17 +377,29 @@ async function applyForMonetization(req, res) {
       });
     }
 
-    const application = await MonetizationApplication.create({
-      user: userId,
-      status: 'pending',
-          eligibilitySnapshot: {
-            isEligible: eligibility.isEligible,
-            progressPercent: eligibility.progressPercent,
-            failedConditions: eligibility.failedConditions,
-            requirements: eligibility.requirements || [],
-            metrics: eligibility.metrics
-          }
-    });
+    let application;
+    try {
+      application = await MonetizationApplication.create({
+        user: userId,
+        status: 'pending',
+        eligibilitySnapshot: {
+          isEligible: eligibility.isEligible,
+          progressPercent: eligibility.progressPercent,
+          failedConditions: eligibility.failedConditions,
+          requirements: eligibility.requirements || [],
+          metrics: eligibility.metrics
+        }
+      });
+    } catch (error) {
+      if (error?.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          code: 'CREATOR_APPLICATION_PENDING',
+          message: 'You already have an application under review.'
+        });
+      }
+      throw error;
+    }
 
     await User.findByIdAndUpdate(userId, { creatorMonetizationStatus: 'pending' });
     await recordTimeline({
@@ -934,6 +981,21 @@ async function getMonetizationStatus(req, res) {
     const applicationStatus = application?.status || null;
     const reapplyAfter = application?.reapplyAfter || null;
     const rejectionReason = application?.rejectionReason || '';
+    const requirements = eligibility?.requirements ?? [];
+    const allRequirementsCompleted = Boolean(
+      eligibility?.isEligible &&
+      requirements.every((requirement) => (
+        requirement.isMet ?? Number(requirement.progressPercent || 0) >= 100
+      ))
+    );
+    const reapplyBlocked = Boolean(reapplyAfter && new Date(reapplyAfter) > new Date());
+    const canApply = Boolean(
+      allRequirementsCompleted &&
+      !isApproved &&
+      applicationStatus !== 'pending' &&
+      !['suspended', 'disabled'].includes(creatorStatus) &&
+      !reapplyBlocked
+    );
 
     res.status(200).json({
       success: true,
@@ -947,8 +1009,14 @@ async function getMonetizationStatus(req, res) {
         failedConditions: eligibility?.failedConditions ?? [],
         progressPercent: eligibility?.progressPercent ?? 0,
         metrics: eligibility?.metrics ?? {},
-        requirements: eligibility?.requirements ?? [],
+        requirements,
         lastCalculatedAt: eligibility?.lastCalculatedAt,
+        access: {
+          allRequirementsCompleted,
+          canApply,
+          canAccessPayoutSettings: isApproved,
+          canAccessStudio: isApproved
+        },
         application: application ? {
           _id: application._id,
           status: application.status,
@@ -1160,6 +1228,7 @@ async function submitWithdrawalRequest(req, res) {
 
 module.exports = {
   assertPlayer,
+  assertApprovedCreator,
   getEligibility,
   getApplication,
   applyForMonetization,

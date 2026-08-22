@@ -424,9 +424,12 @@ async function calculateEligibility(userId) {
   }
   progressSum += activeDaysProgress;
 
-  const progressPercent = Math.round(progressSum / numConditions);
   const failedConditions = requirements.filter((requirement) => !requirement.isMet);
   const isEligible = failedConditions.length === 0;
+  // Rounded progress must never claim 100% while a canonical requirement is
+  // still incomplete. Eligibility remains requirement-based, never UI-based.
+  const roundedProgress = Math.round(progressSum / numConditions);
+  const progressPercent = isEligible ? 100 : Math.min(99, roundedProgress);
 
   return {
     isEligible,

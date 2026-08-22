@@ -122,18 +122,20 @@ const TEAM_PLANS = [
     creditsPerMonth: 0,
     description: 'For growing teams.',
     features: [
-      'Support for recruitment – better reach',
-      'Management assistance – tools & insights',
-      'Financial modeling assistance',
-      'Better visibility for recruitment posts'
+      'Premium Badge',
+      'Extended Recruitment Posting Limits',
+      'More Visibility Across All Post Types',
+      'Early Access to Exclusive Features',
+      'Unlimited Tournament Hosting'
     ],
     cta: 'Upgrade to Pro',
     highlighted: true,
     exploreDetails: [
-      { heading: 'Recruitment support', text: 'Your recruitment posts get better placement so more players see your openings. Reach a wider pool of candidates faster.' },
-      { heading: 'Management assistance', text: 'Access tools to help manage your roster, staff, and team operations more efficiently. Streamline your team management workflow.' },
-      { heading: 'Financial modeling assistance', text: 'Get guidance and tools to help model your team finances, budget planning, and sponsorship projections.' },
-      { heading: 'Visibility', text: 'Boosted recruitment posts get better placement so more players see your openings.' }
+      { heading: 'Premium Badge', text: 'Display the Premium badge on your team profile wherever Premium badges are currently supported.' },
+      { heading: 'Extended Recruitment Posting Limits', text: 'Create more recruitment posts for roster and staff openings.' },
+      { heading: 'More Visibility Across All Post Types', text: 'Get more visibility for recruitment, achievement, and normal posts.' },
+      { heading: 'Early Access to Exclusive Features', text: 'Get early access to exclusive features as they become available.' },
+      { heading: 'Unlimited Tournament Hosting', text: 'Host tournaments without the standard active-tournament limit. Prize-pool tournaments still require Verified Host status.' }
     ]
   },
   {
@@ -155,7 +157,7 @@ const TEAM_PLANS = [
     highlighted: false,
     exploreDetails: [
       { heading: 'Credits – best value', text: '60 credits every month. 1 credit = 1 post boost (₹100 value each). So for ₹499 you get 60 boosts—₹6000 value. Ideal for orgs that post and recruit frequently.' },
-      { heading: 'Everything in Pro', text: 'All Pro benefits: recruitment support, management assistance, analytics, and better visibility.' },
+      { heading: 'Everything in Pro', text: 'All Pro benefits: Premium Badge, Extended Recruitment Posting Limits, More Visibility Across All Post Types, Early Access to Exclusive Features, and Unlimited Tournament Hosting.' },
       { heading: 'Custom branding & verified badge', text: 'Org badge and verified status on your team profile. Optional custom branding so your org stands out.' },
       { heading: 'Priority support', text: 'Your support requests are prioritised so you get faster help for billing, features and issues.' },
       { heading: 'Advanced analytics & export', text: 'Deeper analytics and ability to export data (e.g. recruitment reports, tournament stats) for internal use or sponsors.' }
@@ -207,7 +209,10 @@ async function getMembership(req, res) {
       credits: 0
     };
     const premiumService = require('../services/premiumMembershipService');
-    const { resolvePremiumEntitlement } = require('../services/entitlementService');
+    const {
+      resolvePremiumEntitlement,
+      buildTeamPremiumEntitlement
+    } = require('../services/entitlementService');
     const canonical = await premiumService.currentForUser(req.user._id).lean();
     const premiumEntitlement = await resolvePremiumEntitlement({
       userId: req.user._id,
@@ -251,6 +256,9 @@ async function getMembership(req, res) {
         currentPeriodEnd: canonical?.currentPeriodEnd || validUntil,
         providerSubscriptionId: canonical?.razorpay?.subscriptionId || null,
         providerControlsAvailable: Boolean(canonical?.razorpay?.subscriptionId),
+        entitlements: {
+          teamPremium: buildTeamPremiumEntitlement(premiumEntitlement)
+        },
         plans: {
           player: PLAYER_PLANS,
           team: TEAM_PLANS

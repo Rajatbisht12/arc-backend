@@ -2577,25 +2577,17 @@ const deleteGroupMessage = async (req, res) => {
       });
     }
 
-    // Check if user is the sender or an admin
+    // Any current member may hide a group message from their own history.
+    // Global deletion remains an author-only action; moderator/admin status
+    // must never grant ownership of another participant's message.
     const isSender = message.sender.toString() === currentUserId.toString();
-    const isAdmin = chatRoom.members.some(member => 
-      member.user.toString() === currentUserId.toString() && member.role === 'admin'
-    );
-    
-    if (!isSender && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can only delete your own messages or be an admin'
-      });
-    }
 
     if (deleteType === 'forEveryone') {
-      // Only sender or admin can delete for everyone
-      if (!isSender && !isAdmin) {
+      // Only the canonical sender can delete for everyone.
+      if (!isSender) {
         return res.status(403).json({
           success: false,
-          message: 'Only the sender or admin can delete message for everyone'
+          message: 'Only the sender can delete message for everyone'
         });
       }
       // Mark message as deleted for everyone

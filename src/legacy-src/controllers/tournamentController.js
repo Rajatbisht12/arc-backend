@@ -43,6 +43,9 @@ const {
 } = require('../utils/tournamentCapacity');
 const { buildTournamentEntrantRemovalUpdate } = require('../utils/tournamentCompetitionState');
 const { getTimezoneDayBounds } = require('../utils/timezoneDayBounds');
+const {
+  resolveTeamPremiumEntitlement
+} = require('../services/entitlementService');
 
 const TOURNAMENT_UPLOAD_DIR = path.resolve(process.cwd(), 'uploads', 'tournaments');
 
@@ -1017,11 +1020,43 @@ const submittedRoundCoverage = (tournament, round) => {
 
 const getFreshHostPermissions = async (hostId) => {
   const host = await User.findOne({ _id: hostId, isActive: true })
-    .select('isVerifiedHost')
+    .select('isVerifiedHost userType')
     .lean();
+  if (!host) {
+    return {
+      exists: false,
+      isVerifiedHost: false,
+      isTeamAccount: false,
+      isPremiumTeam: false,
+      hasUnlimitedTournamentHosting: false
+    };
+  }
+
+  let teamPremium = { enabled: false, unlimitedTournamentHosting: false };
+  try {
+    teamPremium = await resolveTeamPremiumEntitlement({
+      userId: hostId,
+      requestSource: 'tournament_host_permissions'
+    });
+  } catch (error) {
+    // Fail closed to the standard active-tournament limit when entitlement
+    // state cannot be resolved. Verified Host access remains independent.
+    log.warn('Failed to resolve Team Premium tournament entitlement', {
+      hostId: idString(hostId),
+      error: String(error)
+    });
+  }
+
+  const isVerifiedHost = host.isVerifiedHost === true;
+  const isPremiumTeam = teamPremium.enabled === true;
   return {
-    exists: Boolean(host),
-    isVerifiedHost: host?.isVerifiedHost === true
+    exists: true,
+    isVerifiedHost,
+    isTeamAccount: String(host.userType || '').toLowerCase() === 'team',
+    isPremiumTeam,
+    hasUnlimitedTournamentHosting: Boolean(
+      isVerifiedHost || teamPremium.unlimitedTournamentHosting === true
+    )
   };
 };
 
@@ -1498,7 +1533,7 @@ const createTournament = async (req, res) => {
       });
     }
 
-    createLock = hostPermissions.isVerifiedHost
+    createLock = hostPermissions.hasUnlimitedTournamentHosting
       ? null
       : await acquireHostTournamentCreateLock(hostId);
     if (createLock === false) {
@@ -1517,8 +1552,9 @@ const createTournament = async (req, res) => {
       });
     }
 
-    // Normal users can host only one active fun tournament at a time.
-    if (!hostPermissions.isVerifiedHost) {
+    // Free/unverified hosts can host only one active fun tournament at a time.
+    // Verified Hosts and active Team Premium accounts are unlimited.
+    if (!hostPermissions.hasUnlimitedTournamentHosting) {
       const activeTournament = await getActiveTournamentForHost(hostId);
       if (activeTournament) {
         await releaseHostTournamentCreateLock(createLock);
@@ -1527,7 +1563,9 @@ const createTournament = async (req, res) => {
           message: 'You already have an active tournament. Complete or cancel it before creating another one.',
           limitType: 'active_tournament',
           activeTournamentId: activeTournament._id,
-          upgradeMessage: 'Get Verified Host status to host unlimited tournaments.'
+          upgradeMessage: hostPermissions.isTeamAccount
+            ? 'Upgrade to Team Premium or get Verified Host status to host unlimited tournaments.'
+            : 'Get Verified Host status to host unlimited tournaments.'
         });
       }
     }
@@ -1592,7 +1630,7 @@ const createTournament = async (req, res) => {
 
     const tournament = new Tournament(tournamentData);
     let activeTournamentReserved = false;
-    if (!hostPermissions.isVerifiedHost) {
+    if (!hostPermissions.hasUnlimitedTournamentHosting) {
       const reservation = await reserveHostActiveTournament(hostId, tournament._id);
       if (!reservation.ok) {
         await releaseHostTournamentCreateLock(createLock);
@@ -1605,7 +1643,9 @@ const createTournament = async (req, res) => {
           message: 'You already have an active tournament. Complete or cancel it before creating another one.',
           limitType: 'active_tournament',
           activeTournamentId: reservation.activeTournament?._id,
-          upgradeMessage: 'Get Verified Host status to host unlimited tournaments.'
+          upgradeMessage: hostPermissions.isTeamAccount
+            ? 'Upgrade to Team Premium or get Verified Host status to host unlimited tournaments.'
+            : 'Get Verified Host status to host unlimited tournaments.'
         });
       }
       activeTournamentReserved = true;
@@ -7328,7 +7368,12 @@ const assignSpecialPrize = async (req, res) => {
 const getHostingLimits = async (req, res) => {
   try {
     const hostId = req.user._id;
-    const { isVerifiedHost: isVerified } = await getFreshHostPermissions(hostId);
+    const hostPermissions = await getFreshHostPermissions(hostId);
+    const {
+      isVerifiedHost: isVerified,
+      isPremiumTeam,
+      hasUnlimitedTournamentHosting
+    } = hostPermissions;
 
     if (isVerified) {
       return res.json({
@@ -7340,9 +7385,13 @@ const getHostingLimits = async (req, res) => {
       });
     }
 
-    // Tournament: one active fun tournament at a time for unverified hosts.
-    const activeTournament = await getActiveTournamentForHost(hostId);
-    const tournamentAllowed = !activeTournament;
+    // Tournament: free/unverified hosts have one active fun tournament at a
+    // time. Team Premium bypasses only this limit; prize pools still require
+    // Verified Host status in create/update authorization.
+    const activeTournament = hasUnlimitedTournamentHosting
+      ? null
+      : await getActiveTournamentForHost(hostId);
+    const tournamentAllowed = hasUnlimitedTournamentHosting || !activeTournament;
 
     // Scrim: 5 per day
     const Scrim = require('../models/Scrim');
@@ -7360,9 +7409,11 @@ const getHostingLimits = async (req, res) => {
         tournament: {
           allowed: tournamentAllowed,
           isVerified: false,
-          used: activeTournament ? 1 : 0,
-          limit: 1,
-          period: 'active_tournament',
+          isPremiumTeam,
+          unlimited: hasUnlimitedTournamentHosting,
+          used: hasUnlimitedTournamentHosting ? null : (activeTournament ? 1 : 0),
+          limit: hasUnlimitedTournamentHosting ? null : 1,
+          period: hasUnlimitedTournamentHosting ? 'unlimited' : 'active_tournament',
           activeTournamentId: activeTournament?._id || null,
           activeTournamentName: activeTournament?.name || null,
           nextAllowedAt: null
