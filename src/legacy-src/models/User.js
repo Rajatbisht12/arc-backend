@@ -329,6 +329,7 @@ const userSchema = new mongoose.Schema({
       uid: String,
       // Free Fire Max fields
       // PUBG Mobile fields
+      matchesPlayed: Number,
       // Rocket League fields
       platform: String,
       mmr: Number,

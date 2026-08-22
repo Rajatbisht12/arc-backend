@@ -25,6 +25,7 @@
     "test:saved-posts": "node src/legacy-src/controllers/postController.savedPosts.test.js",
     "test:comments": "node src/legacy-src/utils/commentThreading.test.js",
     "test:clash-royale": "node --test src/legacy-src/utils/clashRoyaleAPI.test.js",
+    "test:gaming-stats": "node --test src/legacy-src/utils/gamingStatsPolicy.test.js && node --check src/legacy-src/controllers/userController.js && node --check src/legacy-src/models/User.js",
     "test:message-history": "node --test src/legacy-src/services/messageHistoryWindowService.test.mjs",
     "test:message-header": "node --test src/legacy-src/controllers/messageDirectHeader.contract.test.js",
     "migrate:message-history-indexes": "node scripts/migrate-message-history-indexes.js",

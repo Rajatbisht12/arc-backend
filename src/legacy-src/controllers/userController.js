@@ -47,6 +47,11 @@ const {
   minimalProfile,
   privacySettingsResponse
 } = require('../utils/privacyPolicy');
+const {
+  findGamingStatIndexes,
+  normalizeGamingStatPayload,
+  resolveGamingStatsUserId
+} = require('../utils/gamingStatsPolicy');
 
 // ── Redis Profile Cache helpers ──
 const PROFILE_CACHE_TTL = 300; // 5 minutes
@@ -2567,8 +2572,15 @@ const sendInviteMessage = async (teamId, playerId, inviteType, inviteData) => {
 // Gaming Stats CRUD operations
 const addGamingStat = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const gamingStat = req.body;
+    const userId = resolveGamingStatsUserId(req.user);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authenticated user context is invalid' });
+    }
+    const normalized = normalizeGamingStatPayload(req.body);
+    if (normalized.error) {
+      return res.status(400).json({ success: false, ...normalized.error });
+    }
+    const gamingStat = normalized.value;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -2586,15 +2598,29 @@ const addGamingStat = async (req, res) => {
       user.playerInfo.gamingStats = [];
     }
 
-    // Add the new gaming stat
-    user.playerInfo.gamingStats.push(gamingStat);
+    // POST is idempotent per user + game. This also repairs legacy duplicate
+    // subdocuments for the selected game without touching stats for other games.
+    const matchingIndexes = findGamingStatIndexes(user.playerInfo.gamingStats, gamingStat.game);
+    const existingStatIndex = matchingIndexes[0] ?? -1;
+    if (existingStatIndex >= 0) {
+      user.playerInfo.gamingStats[existingStatIndex].set(gamingStat);
+      for (const duplicateIndex of matchingIndexes.slice(1).reverse()) {
+        user.playerInfo.gamingStats.splice(duplicateIndex, 1);
+      }
+    } else {
+      user.playerInfo.gamingStats.push(gamingStat);
+    }
     await user.save();
 
-    res.status(201).json({
+    const savedStatIndex = existingStatIndex >= 0
+      ? existingStatIndex
+      : user.playerInfo.gamingStats.length - 1;
+
+    res.status(existingStatIndex >= 0 ? 200 : 201).json({
       success: true,
-      message: 'Gaming stat added successfully',
+      message: existingStatIndex >= 0 ? 'Gaming stat updated successfully' : 'Gaming stat added successfully',
       data: {
-        gamingStat: user.playerInfo.gamingStats[user.playerInfo.gamingStats.length - 1]
+        gamingStat: user.playerInfo.gamingStats[savedStatIndex]
       }
     });
   } catch (error) {
@@ -2609,7 +2635,10 @@ const addGamingStat = async (req, res) => {
 
 const updateGamingStat = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = resolveGamingStatsUserId(req.user);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authenticated user context is invalid' });
+    }
     const { statId } = req.params;
     const updateData = req.body;
 
@@ -2636,11 +2665,26 @@ const updateGamingStat = async (req, res) => {
       });
     }
 
-    // Update the gaming stat
-    user.playerInfo.gamingStats[statIndex] = {
+    const normalized = normalizeGamingStatPayload({
       ...user.playerInfo.gamingStats[statIndex].toObject(),
       ...updateData
-    };
+    });
+    if (normalized.error) {
+      return res.status(400).json({ success: false, ...normalized.error });
+    }
+
+    const duplicateGameIndex = user.playerInfo.gamingStats.findIndex((stat, index) => (
+      index !== statIndex && stat.game === normalized.value.game
+    ));
+    if (duplicateGameIndex !== -1) {
+      return res.status(409).json({
+        success: false,
+        field: 'game',
+        message: `Gaming stats for ${normalized.value.game} already exist`
+      });
+    }
+
+    user.playerInfo.gamingStats[statIndex].set(normalized.value);
 
     await user.save();
 
@@ -2663,7 +2707,10 @@ const updateGamingStat = async (req, res) => {
 
 const deleteGamingStat = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = resolveGamingStatsUserId(req.user);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authenticated user context is invalid' });
+    }
     const { statId } = req.params;
 
     const user = await User.findById(userId);
@@ -2709,7 +2756,10 @@ const deleteGamingStat = async (req, res) => {
 
 const getGamingStats = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = resolveGamingStatsUserId(req.user);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authenticated user context is invalid' });
+    }
 
     const user = await User.findById(userId).select('playerInfo.gamingStats');
     if (!user) {
@@ -2740,7 +2790,10 @@ const getGamingStats = async (req, res) => {
 // Sync Clash of Clans player data
 const syncClashOfClansData = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = resolveGamingStatsUserId(req.user);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authenticated user context is invalid' });
+    }
     const { playerTag } = req.body;
 
     if (!playerTag) {
@@ -2822,7 +2875,10 @@ const syncClashOfClansData = async (req, res) => {
 // Sync Clash Royale player data
 const syncClashRoyaleData = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = resolveGamingStatsUserId(req.user);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authenticated user context is invalid' });
+    }
     const { playerTag } = req.body;
 
     if (typeof playerTag !== 'string' || !playerTag.trim()) {
