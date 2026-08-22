@@ -36,6 +36,10 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
 
+  // Official Supercell API credential. Keep the KEY alias while deployments migrate.
+  CLASH_ROYALE_API_TOKEN: z.string().optional(),
+  CLASH_ROYALE_API_KEY: z.string().optional(),
+
   // Push notifications (Expo gateway -> FCM/APNs)
   PUSH_NOTIFICATION_PROVIDER: z.enum(["expo"]).default("expo"),
   EXPO_ACCESS_TOKEN: z.string().optional(),

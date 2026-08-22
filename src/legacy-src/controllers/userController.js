@@ -2825,27 +2825,27 @@ const syncClashRoyaleData = async (req, res) => {
     const userId = req.user.id;
     const { playerTag } = req.body;
 
-    if (!playerTag) {
+    if (typeof playerTag !== 'string' || !playerTag.trim()) {
       return res.status(400).json({
         success: false,
         message: 'Player tag is required'
       });
     }
 
-    // Validate player tag format
-    const tagRegex = /^#?[A-Z0-9]{8,9}$/i;
-    if (!tagRegex.test(playerTag)) {
+    const normalizedPlayerTag = clashRoyaleAPI.normalizePlayerTag(playerTag);
+    if (!normalizedPlayerTag) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid player tag format. Please use format like #ABC123DEF'
+        message: 'Invalid player tag. Enter the tag shown in Clash Royale, for example #ABC123DEF.',
+        code: 'INVALID_PLAYER_TAG'
       });
     }
 
     // Fetch player data from Clash Royale API
-    const apiResponse = await clashRoyaleAPI.getPlayer(playerTag);
+    const apiResponse = await clashRoyaleAPI.getPlayer(normalizedPlayerTag);
     
     if (!apiResponse.success) {
-      return res.status(400).json({
+      return res.status(apiResponse.statusCode || 502).json({
         success: false,
         message: apiResponse.error,
         code: apiResponse.code
