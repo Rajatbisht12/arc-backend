@@ -28,6 +28,7 @@
     "test:gaming-stats": "node --test src/legacy-src/utils/gamingStatsPolicy.test.js && node --check src/legacy-src/controllers/userController.js && node --check src/legacy-src/models/User.js",
     "test:message-history": "node --test src/legacy-src/services/messageHistoryWindowService.test.mjs",
     "test:message-header": "node --test src/legacy-src/controllers/messageDirectHeader.contract.test.js",
+    "test:message-media": "node src/legacy-src/config/messageMediaPolicy.test.js && node src/legacy-src/middleware/upload.security.test.js && node src/legacy-src/utils/mediaUploadError.test.js",
     "test:message-deletion": "node --test src/legacy-src/controllers/messageDeletionOwnership.contract.test.js src/legacy-src/controllers/groupConversationDeletion.test.js",
     "migrate:message-history-indexes": "node scripts/migrate-message-history-indexes.js",
     "verify:message-history-indexes": "node scripts/migrate-message-history-indexes.js --verify",

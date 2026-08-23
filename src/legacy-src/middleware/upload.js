@@ -1,5 +1,6 @@
 const multer = require('multer');
 const log = require('../utils/logger');
+const { MESSAGE_MEDIA_POLICY } = require('../config/messageMediaPolicy');
 
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
@@ -44,7 +45,7 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit
+    fileSize: MESSAGE_MEDIA_POLICY.maxFileBytes,
     files: 10 // Maximum 10 files
   }
 });
@@ -60,10 +61,11 @@ const SAFE_FILE_FILTER_MESSAGES = new Set([
 const sendUploadError = (res, err, maxCount = 10) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
+      const maxMegabytes = MESSAGE_MEDIA_POLICY.maxFileBytes / (1024 * 1024);
       return res.status(413).json({
         success: false,
         code: 'FILE_TOO_LARGE',
-        message: 'File too large. Maximum size is 50MB.'
+        message: `File too large. Maximum size is ${maxMegabytes} MB.`
       });
     }
     if (err.code === 'LIMIT_FILE_COUNT') {
