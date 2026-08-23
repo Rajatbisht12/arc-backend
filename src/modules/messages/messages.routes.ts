@@ -91,6 +91,15 @@ router.get("/recent", protect, messageController.getRecentConversations);
 router.post("/rooms", protect, createChatRoomValidation, handleValidationErrors, messageController.createChatRoom);
 router.get("/rooms", protect, messageController.getChatRooms);
 router.post("/rooms/:chatRoomId/leave", protect, chatRoomIdValidation, handleValidationErrors, messageController.leaveGroup);
+// User-scoped conversation removal. This intentionally does not leave or
+// delete the group; the legacy controller records the caller in deletedFor.
+router.delete(
+  "/rooms/:chatRoomId/conversation",
+  protect,
+  chatRoomIdValidation,
+  handleValidationErrors,
+  messageController.clearGroupConversation
+);
 router.get("/rooms/:chatRoomId/invite-link", protect, chatRoomIdValidation, handleValidationErrors, messageController.getGroupInviteLink);
 router.post("/rooms/:chatRoomId/reset-invite-link", protect, chatRoomIdValidation, handleValidationErrors, messageController.resetGroupInviteLink);
 router.post("/rooms/:chatRoomId/invite-dm", protect, chatRoomIdValidation, inviteDirectMessageValidation, handleValidationErrors, messageController.sendGroupInviteDM);

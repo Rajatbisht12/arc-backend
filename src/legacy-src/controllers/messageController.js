@@ -3367,14 +3367,22 @@ const clearGroupConversation = async (req, res) => {
 
     const chatRoom = await ChatRoom.findOne({ _id: chatRoomId, isActive: true });
     if (!chatRoom) {
-      return res.status(404).json({ success: false, message: 'Chat room not found' });
+      return res.status(404).json({
+        success: false,
+        code: 'GROUP_CONVERSATION_NOT_FOUND',
+        message: 'Chat room not found'
+      });
     }
     // Any personal member (current or removed-but-still-listed) may clear their
     // own copy — no admin/owner permission required (it is not a group deletion).
     const isMember = chatRoom.members.some(m => m.user.toString() === userId.toString())
       || (chatRoom.removedMembers || []).some(m => m.user.toString() === userId.toString());
     if (!isMember) {
-      return res.status(403).json({ success: false, message: 'You are not a member of this chat room' });
+      return res.status(403).json({
+        success: false,
+        code: 'NOT_GROUP_MEMBER',
+        message: 'You are not a member of this chat room'
+      });
     }
 
     const clearedAt = new Date();
@@ -3385,7 +3393,7 @@ const clearGroupConversation = async (req, res) => {
       {
         chatRoom: chatRoomId,
         messageType: 'group',
-        deletedForEveryone: false,
+        deletedForEveryone: { $ne: true },
         'deletedForUsers.user': { $ne: userId }
       },
       { $addToSet: { deletedForUsers: { user: userId, deletedAt: clearedAt } } }
