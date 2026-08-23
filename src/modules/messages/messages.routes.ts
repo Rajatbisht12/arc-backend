@@ -85,6 +85,7 @@ const invitePreviewLimiter = rateLimit({
   message: { success: false, message: "Too many invite preview requests. Try again later." }
 });
 
+router.get("/media-policy", protect, messageController.getMessageMediaPolicy);
 router.post("/direct", protect, uploadMultiple("media", 3), sendDirectMessageValidation, handleValidationErrors, messageController.sendDirectMessage);
 router.get("/direct/:userId", protect, userIdValidation, handleValidationErrors, messageController.getDirectMessages);
 router.get("/recent", protect, messageController.getRecentConversations);

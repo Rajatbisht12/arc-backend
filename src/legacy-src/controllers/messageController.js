@@ -9,6 +9,7 @@ const { getCallSessionForParticipant } = require('../services/callSessionService
 const { respondToInvitation } = require('../services/teamInvitationService');
 const log = require('../utils/logger');
 const { respondToMediaUploadError } = require('../utils/mediaUploadError');
+const { getPublicMessageMediaPolicy } = require('../config/messageMediaPolicy');
 const {
   idString,
   buildPrivacyAccess,
@@ -37,6 +38,11 @@ let io;
 const setIoInstance = (ioInstance) => {
   io = ioInstance;
 };
+
+const getMessageMediaPolicy = (_req, res) => res.json({
+  success: true,
+  data: getPublicMessageMediaPolicy(),
+});
 
 const sharedPostSelect = 'content.text content.media author likes comments shares createdAt postType visibility isActive hiddenByAdmin';
 const sharedPostAuthorSelect = 'username profile.displayName profile.avatar profilePicture avatar profileImage avatarUrl userType role';
@@ -3411,6 +3417,7 @@ const clearGroupConversation = async (req, res) => {
 };
 
 module.exports = {
+  getMessageMediaPolicy,
   sendDirectMessage,
   getDirectMessages,
   createChatRoom,
