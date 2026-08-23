@@ -3,8 +3,10 @@ const User = require('../models/User');
 const log = require('../utils/logger');
 
 const RANDOM_CONNECT_ENTITLEMENT_VERSION = 1;
+const TEAM_PREMIUM_ENTITLEMENT_VERSION = 1;
 const FREE_DAILY_GENDER_MATCH_LIMIT = 5;
 const PREMIUM_PLAN_KEYS = new Set(['player_pro', 'player_pro_plus', 'team_pro', 'team_org']);
+const TEAM_PREMIUM_PLAN_KEYS = new Set(['team_pro', 'team_org']);
 const ACTIVE_MEMBERSHIP_STATUSES = new Set(['active']);
 
 const asDate = (value) => {
@@ -171,6 +173,34 @@ const resolveRandomConnectEntitlement = async (options) => (
   buildRandomConnectEntitlement(await resolvePremiumEntitlement(options))
 );
 
+/**
+ * Canonical Team Premium capability contract. Some capabilities are consumed
+ * directly by existing product surfaces (badge and tournament hosting); the
+ * others provide stable server-side names for their respective feature gates.
+ */
+const buildTeamPremiumEntitlement = (premiumEntitlement) => {
+  const enabled = Boolean(
+    premiumEntitlement?.accountType === 'team'
+    && premiumEntitlement?.isPremium === true
+    && TEAM_PREMIUM_PLAN_KEYS.has(premiumEntitlement?.plan)
+  );
+
+  return {
+    version: TEAM_PREMIUM_ENTITLEMENT_VERSION,
+    enabled,
+    plan: enabled ? premiumEntitlement.plan : 'free',
+    premiumBadge: enabled,
+    extendedRecruitmentPostingLimits: enabled,
+    postVisibilityBoost: enabled,
+    earlyAccess: enabled,
+    unlimitedTournamentHosting: enabled
+  };
+};
+
+const resolveTeamPremiumEntitlement = async (options) => (
+  buildTeamPremiumEntitlement(await resolvePremiumEntitlement(options))
+);
+
 const randomConnectEntitlementEnvelope = (entitlement) => ({
   randomConnectEntitlement: entitlement,
   subjectUserId: entitlement.subjectUserId,
@@ -185,10 +215,13 @@ const randomConnectEntitlementEnvelope = (entitlement) => ({
 module.exports = {
   FREE_DAILY_GENDER_MATCH_LIMIT,
   PREMIUM_PLAN_KEYS,
+  TEAM_PREMIUM_PLAN_KEYS,
   isPremiumMembershipEntitled,
   isLegacyUserPremium,
   resolvePremiumEntitlement,
   buildRandomConnectEntitlement,
   resolveRandomConnectEntitlement,
-  randomConnectEntitlementEnvelope
+  randomConnectEntitlementEnvelope,
+  buildTeamPremiumEntitlement,
+  resolveTeamPremiumEntitlement
 };

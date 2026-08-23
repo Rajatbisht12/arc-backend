@@ -2,6 +2,7 @@ const express = require('express');
 const { protect } = require('../middleware/auth');
 const {
   assertPlayer,
+  assertApprovedCreator,
   getEligibility,
   getApplication,
   applyForMonetization,
@@ -28,14 +29,14 @@ router.get('/application', getApplication);
 router.get('/application/history', getApplicationHistory);
 router.post('/apply', applyForMonetization);
 router.post('/application/withdraw', withdrawApplication);
-router.get('/dashboard', getDashboard);
-router.get('/earnings', getEarnings);
-router.get('/payout-history', getPayoutHistory);
-router.get('/bank-details', getBankDetails);
-router.put('/bank-details', upsertBankDetails);
-router.delete('/bank-details/tax-id', deleteBankTaxId);
-router.delete('/bank-details', deleteBankDetails);
+router.get('/dashboard', assertApprovedCreator, getDashboard);
+router.get('/earnings', assertApprovedCreator, getEarnings);
+router.get('/payout-history', assertApprovedCreator, getPayoutHistory);
+router.get('/bank-details', assertApprovedCreator, getBankDetails);
+router.put('/bank-details', assertApprovedCreator, upsertBankDetails);
+router.delete('/bank-details/tax-id', assertApprovedCreator, deleteBankTaxId);
+router.delete('/bank-details', assertApprovedCreator, deleteBankDetails);
 router.get('/status', getMonetizationStatus);
-router.post('/withdrawal-request', protect, assertPlayer, submitWithdrawalRequest);
+router.post('/withdrawal-request', assertApprovedCreator, submitWithdrawalRequest);
 
 module.exports = router;

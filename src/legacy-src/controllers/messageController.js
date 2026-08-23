@@ -19,6 +19,8 @@ const {
 } = require('../utils/privacyPolicy');
 const { revokeChatRoomAccess } = require('../utils/realtimePrivacy');
 const { normalizePagination } = require('../utils/pagination');
+const { invalidateUserCache } = require('../middleware/auth');
+const { invalidateProfileCache } = require('../utils/profileCache');
 const {
   isCurrentGroupMember,
   getGroupMembershipWindow,
@@ -915,7 +917,13 @@ const getRecentConversations = async (req, res) => {
         participants: [{
           _id: otherUser._id,
           username: otherUser.username || otherUser.profile?.displayName,
+          displayName: otherUser.profile?.displayName || otherUser.username,
           profilePicture: otherUser.profile?.avatar,
+          profile: {
+            displayName: otherUser.profile?.displayName || otherUser.username,
+            avatar: otherUser.profile?.avatar
+          },
+          userType: otherUser.userType,
           role: otherUser.role || otherUser.userType,
           canSeeOnlineStatus: privacyAccess.canSeeOnlineStatus,
           activityStatus: privacyAccess.canSeeOnlineStatus
@@ -2245,6 +2253,29 @@ const handleInviteResponse = async (req, res) => {
       }
     });
 
+    if (outcome.status === 'accepted') {
+      // The membership transaction is authoritative. Auth/profile caches are
+      // only projections and must be evicted after commit so another device or
+      // a newly focused Team Profile cannot observe the pre-acceptance arrays.
+      try {
+        await Promise.all([
+          invalidateUserCache(outcome.invite.team),
+          invalidateUserCache(userId),
+          invalidateProfileCache(
+            outcome.invite.team,
+            outcome.team?.username,
+            userId,
+            outcome.player?.username
+          )
+        ]);
+      } catch (cacheError) {
+        log.warn('Team membership cache invalidation failed after invite acceptance', {
+          inviteId: String(outcome.invite._id),
+          error: String(cacheError)
+        });
+      }
+    }
+
     message.inviteData.status = outcome.status;
     let responseMsg = null;
     try {
@@ -2324,6 +2355,30 @@ const handleInviteResponse = async (req, res) => {
         ...statusUpdate,
         chatId: `direct_${userId}`
       });
+
+      if (outcome.status === 'accepted') {
+        const membershipEntry = inviteType === 'roster'
+          ? outcome.team?.teamInfo?.rosters
+            ?.find((roster) => roster.game === outcome.invite.game)
+            ?.players?.find((player) => idString(player.user) === idString(userId))
+          : outcome.team?.teamInfo?.staff
+            ?.find((staff) => idString(staff.user) === idString(userId));
+        const membershipUpdate = {
+          eventId: `team-membership:${outcome.invite._id}:accepted`,
+          teamId: String(outcome.invite.team),
+          memberId: String(userId),
+          membershipType: inviteType,
+          game: outcome.invite.game,
+          role: outcome.invite.role,
+          joinedAt: membershipEntry?.joinedAt || outcome.invite.respondedAt,
+          status: 'active'
+        };
+        // Consumers treat this as an invalidation only and refetch the
+        // populated team profile, so socket + navigation refreshes cannot
+        // duplicate membership rows or trust partial realtime data.
+        io.to(`user-${outcome.invite.team}`).emit('team_membership_updated', membershipUpdate);
+        io.to(`user-${userId}`).emit('team_membership_updated', membershipUpdate);
+      }
     }
 
     return res.status(200).json({
@@ -2522,25 +2577,17 @@ const deleteGroupMessage = async (req, res) => {
       });
     }
 
-    // Check if user is the sender or an admin
+    // Any current member may hide a group message from their own history.
+    // Global deletion remains an author-only action; moderator/admin status
+    // must never grant ownership of another participant's message.
     const isSender = message.sender.toString() === currentUserId.toString();
-    const isAdmin = chatRoom.members.some(member => 
-      member.user.toString() === currentUserId.toString() && member.role === 'admin'
-    );
-    
-    if (!isSender && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can only delete your own messages or be an admin'
-      });
-    }
 
     if (deleteType === 'forEveryone') {
-      // Only sender or admin can delete for everyone
-      if (!isSender && !isAdmin) {
+      // Only the canonical sender can delete for everyone.
+      if (!isSender) {
         return res.status(403).json({
           success: false,
-          message: 'Only the sender or admin can delete message for everyone'
+          message: 'Only the sender can delete message for everyone'
         });
       }
       // Mark message as deleted for everyone

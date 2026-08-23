@@ -27,6 +27,7 @@ const WithdrawalRequest = require(modelPath('WithdrawalRequest'));
 const PostEngagement = require(modelPath('PostEngagement'));
 const BoostDeliveryAttribution = require(modelPath('BoostDeliveryAttribution'));
 const ProfileVisitDaily = require(modelPath('ProfileVisitDaily'));
+const MonetizationApplication = require(modelPath('MonetizationApplication'));
 const User = require(modelPath('User'));
 
 const connectOptions = {
@@ -255,7 +256,7 @@ async function backfillWithdrawals() {
 }
 
 async function createRequiredIndexes() {
-  for (const Model of [CreatorPayout, CreatorPayoutHistory, CreatorDisbursementReservation, EarningsSnapshot, PayoutCycle, PostEngagement, BoostDeliveryAttribution, ProfileVisitDaily]) {
+  for (const Model of [CreatorPayout, CreatorPayoutHistory, CreatorDisbursementReservation, EarningsSnapshot, PayoutCycle, PostEngagement, BoostDeliveryAttribution, ProfileVisitDaily, MonetizationApplication]) {
     await Model.createIndexes();
   }
 }

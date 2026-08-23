@@ -18,6 +18,7 @@ const { recordSuccessfulLogin } = require('../utils/userLoginAudit');
 const { normalizeMatchmakingGender } = require('../utils/randomConnectGender');
 const { FINANCIAL_TRANSACTION_OPTIONS, startFinancialSession } = require('../utils/financialTransactions');
 const { TEAM_TYPES, normalizeTeamType } = require('../utils/teamType');
+const { normalizeProfileSocialLinksUpdate } = require('../utils/profileSocialLinks');
 
 const INVALID_LOGIN_MESSAGE = 'Invalid email or password.';
 
@@ -629,6 +630,21 @@ const updateProfile = async (req, res) => {
         // Keep the original scalar value so existing clients are not broken.
       }
     });
+
+    if (req.user.userType !== 'guest' && updates.socialLinks !== undefined) {
+      try {
+        updates.socialLinks = normalizeProfileSocialLinksUpdate(
+          updates.socialLinks,
+          req.user.profile?.socialLinks || {}
+        );
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          code: error.code || 'INVALID_PROFILE_SOCIAL_LINKS',
+          message: error.message || 'Invalid profile social links'
+        });
+      }
+    }
     
     // Normalize and validate username if provided.
     if (updates.username !== undefined) {

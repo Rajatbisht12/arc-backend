@@ -75,5 +75,13 @@ const monetizationApplicationSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 monetizationApplicationSchema.index({ user: 1, status: 1 });
+monetizationApplicationSchema.index(
+  { user: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'pending' },
+    name: 'uniq_pending_monetization_application_per_user'
+  }
+);
 monetizationApplicationSchema.index({ status: 1, appliedAt: -1 });
 module.exports = mongoose.model('MonetizationApplication', monetizationApplicationSchema);

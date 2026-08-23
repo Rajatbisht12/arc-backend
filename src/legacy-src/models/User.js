@@ -1,4 +1,19 @@
 const mongoose = require('mongoose');
+
+const socialLinkSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: 40
+  },
+  url: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: 2048
+  }
+}, { _id: false });
 const bcrypt = require('bcryptjs');
 const {
   TEAM_ROLE_MAX_LENGTH,
@@ -196,6 +211,14 @@ const userSchema = new mongoose.Schema({
       twitch: {
         type: String,
         default: ''
+      },
+      links: {
+        type: [socialLinkSchema],
+        default: undefined,
+        validate: {
+          validator: (links) => !links || links.length <= 3,
+          message: 'A profile can have at most 3 social links'
+        }
       }
     }
   },
@@ -306,6 +329,7 @@ const userSchema = new mongoose.Schema({
       uid: String,
       // Free Fire Max fields
       // PUBG Mobile fields
+      matchesPlayed: Number,
       // Rocket League fields
       platform: String,
       mmr: Number,
