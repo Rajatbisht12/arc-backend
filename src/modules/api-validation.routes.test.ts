@@ -148,6 +148,7 @@ const run = (): void => {
     ["get", "/direct/:userId"],
     ["delete", "/direct/:userId"],
     ["get", "/rooms/:chatRoomId"],
+    ["delete", "/rooms/:chatRoomId/conversation"],
     ["delete", "/rooms/:chatRoomId"],
     ["delete", "/rooms/:chatRoomId/members/:memberId"],
     ["post", "/:messageId/reaction"],
@@ -156,6 +157,10 @@ const run = (): void => {
     ["get", "/join/:inviteToken/preview"],
     ["post", "/join/:inviteToken"]
   ].forEach(([method, path]) => assertValidationTerminal(messagesRouter, method, path));
+  assert.ok(
+    routeHandlers(messagesRouter, "delete", "/rooms/:chatRoomId/conversation").includes("clearGroupConversation"),
+    "group Delete Chat must use the user-scoped clear controller"
+  );
   assertRateLimited(messagesRouter, "get", "/join/:inviteToken/preview");
 
   [
