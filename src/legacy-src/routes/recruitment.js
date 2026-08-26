@@ -10,6 +10,7 @@ const {
   deleteTeamRecruitment,
   createPlayerProfile,
   getPlayerCardLimit,
+  getRecruitmentEntitlements,
   getPlayerProfiles,
   getPlayerProfile,
   updatePlayerProfile,
@@ -46,7 +47,8 @@ router.delete('/team-recruitments/:id', auth, deleteTeamRecruitment);
 
 // Player Profile Routes
 router.post('/player-profiles', auth, ...validatePlayerProfile, createPlayerProfile);
-router.get('/player-profiles/daily-limit', auth, getPlayerCardLimit);
+router.get('/player-profiles/daily-limit', auth, getPlayerCardLimit); // Back-compat alias (now returns monthly player entitlements)
+router.get('/entitlements', auth, getRecruitmentEntitlements); // Canonical monthly usage for the active identity (player or team)
 router.get('/player-profiles', auth, getPlayerProfiles);
 router.get('/profile/:code/preview', markSocialPreviewRequest, publicOptionalAuth, getPlayerProfile);
 router.get('/player-profiles/:id', publicOptionalAuth, getPlayerProfile); // Supports both ID and profileCode (public for viewing)
