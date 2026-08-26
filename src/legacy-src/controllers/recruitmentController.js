@@ -16,10 +16,13 @@ const {
   backfillUniqueShareCode
 } = require('../utils/recruitmentShareCode');
 const {
-  getPlayerCardDailyLimit,
-  reservePlayerCardSlot,
-  releasePlayerCardSlot
-} = require('../services/recruitmentPostingQuota');
+  reservePlayerCard,
+  reserveApplication,
+  reserveTeamRecruitment,
+  releaseSlot,
+  getPlayerRecruitmentEntitlements,
+  getTeamRecruitmentEntitlements
+} = require('../services/recruitmentUsage');
 const {
   TEAM_RECRUITMENT_STATUSES,
   PLAYER_PROFILE_STATUSES,
@@ -224,6 +227,18 @@ const createTeamRecruitment = safeAsyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: progressionError });
   }
 
+  // Monthly team recruitment quota (roster + staff combined).
+  const reservation = await reserveTeamRecruitment({ teamId });
+  if (!reservation.ok) {
+    return res.status(429).json({
+      success: false,
+      message: reservation.error.tier === 'premium'
+        ? `You've used all ${reservation.error.limit} recruitment posts for this month. Your limit resets on ${reservation.error.resetAt.toISOString().slice(0, 10)}.`
+        : `You've used all ${reservation.error.limit} recruitment posts for this month. Upgrade to Team Premium to post up to 30 per month.`,
+      ...reservation.error
+    });
+  }
+
   const recruitment = new TeamRecruitment({
     team: teamId,
     recruitmentType,
@@ -234,11 +249,20 @@ const createTeamRecruitment = safeAsyncHandler(async (req, res) => {
     benefits: normalizedBenefits
   });
 
-  await saveWithUniqueShareCode({
-    document: recruitment,
-    codeField: 'recruitmentCode',
-    generateCode: () => generateRecruitmentCode(recruitment)
-  });
+  try {
+    await saveWithUniqueShareCode({
+      document: recruitment,
+      codeField: 'recruitmentCode',
+      generateCode: () => generateRecruitmentCode(recruitment)
+    });
+  } catch (error) {
+    await releaseSlot({ usageId: reservation.reservation.usageId }).catch((releaseError) => {
+      log.error('Team recruitment quota rollback failed', {
+        error: String(releaseError), teamId: String(teamId), usageId: String(reservation.reservation.usageId)
+      });
+    });
+    throw error;
+  }
 
   // Populate team information
   await recruitment.populate('team', 'username profile.displayName profile.avatar');
@@ -601,13 +625,14 @@ const createPlayerProfile = safeAsyncHandler(async (req, res) => {
     expectations: normalizedExpectations
   });
 
-  const quotaReservation = await reservePlayerCardSlot({ playerId });
-  if (!quotaReservation) {
-    const limitInfo = await getPlayerCardDailyLimit({ playerId });
+  const reservation = await reservePlayerCard({ userId: playerId });
+  if (!reservation.ok) {
     return res.status(429).json({
       success: false,
-      message: 'Daily limit reached. You can create a maximum of 2 player cards per day.',
-      limitInfo
+      message: reservation.error.tier === 'premium'
+        ? `You've used all ${reservation.error.limit} player recruitment posts for this month. Your limit resets on ${reservation.error.resetAt.toISOString().slice(0, 10)}.`
+        : `You've used your ${reservation.error.limit} player recruitment posts for this month. Upgrade to Premium to post up to 10 per month.`,
+      ...reservation.error
     });
   }
 
@@ -618,9 +643,9 @@ const createPlayerProfile = safeAsyncHandler(async (req, res) => {
       generateCode: () => generatePlayerProfileCode(profile)
     });
   } catch (error) {
-    await releasePlayerCardSlot({ quotaId: quotaReservation.quota._id }).catch((releaseError) => {
+    await releaseSlot({ usageId: reservation.reservation.usageId }).catch((releaseError) => {
       log.error('Player-card quota rollback failed', {
-        error: String(releaseError), playerId: String(playerId), quotaId: String(quotaReservation.quota._id)
+        error: String(releaseError), playerId: String(playerId), usageId: String(reservation.reservation.usageId)
       });
     });
     throw error;
@@ -868,10 +893,35 @@ const updatePlayerProfile = safeAsyncHandler(async (req, res) => {
   });
 });
 
+// Backwards-compatible player-card limit endpoint (now monthly). Returns the
+// full player entitlement shape plus legacy top-level aliases (used/limit/
+// resetsAt map to the monthly player-card bucket) so clients written against the
+// old daily endpoint keep rendering a correct number until they adopt the new
+// entitlements payload.
 const getPlayerCardLimit = safeAsyncHandler(async (req, res) => {
   if (!requireUserType(req, res, 'player', 'Only individual users have a player-card posting limit')) return;
-  const limitInfo = await getPlayerCardDailyLimit({ playerId: req.user._id });
-  res.json({ success: true, data: limitInfo });
+  const entitlements = await getPlayerRecruitmentEntitlements({ userId: req.user._id });
+  res.json({
+    success: true,
+    data: {
+      ...entitlements,
+      used: entitlements.playerCards.used,
+      limit: entitlements.playerCards.limit,
+      remaining: entitlements.playerCards.remaining,
+      resetsAt: entitlements.resetAt
+    }
+  });
+});
+
+// Canonical Recruitment entitlements/usage endpoint. Returns the monthly quota
+// state for the active identity — player (cards + applications) or team
+// (recruitments) — that both Web and Mobile render from.
+const getRecruitmentEntitlements = safeAsyncHandler(async (req, res) => {
+  const accountType = String(req.user.userType || '').toLowerCase();
+  const entitlements = accountType === 'team'
+    ? await getTeamRecruitmentEntitlements({ teamId: req.user._id })
+    : await getPlayerRecruitmentEntitlements({ userId: req.user._id });
+  res.json({ success: true, data: entitlements });
 });
 
 // Delete player profile
@@ -966,6 +1016,19 @@ const applyToRecruitment = safeAsyncHandler(async (req, res) => {
     });
   }
 
+  // Monthly application quota (shared across team + staff recruitment) is checked
+  // AFTER the duplicate guard above, so a rejected duplicate never consumes a slot.
+  const reservation = await reserveApplication({ userId: applicantId });
+  if (!reservation.ok) {
+    return res.status(429).json({
+      success: false,
+      message: reservation.error.tier === 'premium'
+        ? `You've used all ${reservation.error.limit} recruitment applications for this month. Your limit resets on ${reservation.error.resetAt.toISOString().slice(0, 10)}.`
+        : `You've used all ${reservation.error.limit} recruitment applications for this month. Premium members can apply to up to 20 recruitment posts per month.`,
+      ...reservation.error
+    });
+  }
+
   const application = new RecruitmentApplication({
     applicant: applicantId,
     recruitment: recruitment._id,
@@ -978,6 +1041,11 @@ const applyToRecruitment = safeAsyncHandler(async (req, res) => {
   try {
     await application.save();
   } catch (error) {
+    await releaseSlot({ usageId: reservation.reservation.usageId }).catch((releaseError) => {
+      log.error('Application quota rollback failed', {
+        error: String(releaseError), applicantId: String(applicantId), usageId: String(reservation.reservation.usageId)
+      });
+    });
     if (error?.code === 11000) {
       return res.status(409).json({ success: false, message: 'You have already applied to this recruitment' });
     }
@@ -1631,6 +1699,7 @@ module.exports = {
   // Player Profile
   createPlayerProfile,
   getPlayerCardLimit,
+  getRecruitmentEntitlements,
   getPlayerProfiles,
   getPlayerProfile,
   updatePlayerProfile,
