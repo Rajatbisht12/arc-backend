@@ -28,7 +28,8 @@ router.post("/team-recruitments/:id/reopen", protect, recruitmentController.reop
 router.delete("/team-recruitments/:id", protect, recruitmentController.deleteTeamRecruitment);
 
 router.post("/player-profiles", protect, ...validatePlayerProfile, recruitmentController.createPlayerProfile);
-router.get("/player-profiles/daily-limit", protect, recruitmentController.getPlayerCardLimit);
+router.get("/player-profiles/daily-limit", protect, recruitmentController.getPlayerCardLimit); // Back-compat alias (now returns monthly player entitlements)
+router.get("/entitlements", protect, recruitmentController.getRecruitmentEntitlements); // Canonical monthly usage for the active identity (player or team)
 router.get("/player-profiles", protect, recruitmentController.getPlayerProfiles);
 router.get("/profile/:code/preview", markSocialPreviewRequest, publicOptionalAuth, recruitmentController.getPlayerProfile);
 router.get("/player-profiles/:id", publicOptionalAuth, recruitmentController.getPlayerProfile);
