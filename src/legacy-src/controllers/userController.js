@@ -5,6 +5,7 @@ const Post = require('../models/Post');
 const Tournament = require('../models/Tournament');
 const Follow = require('../models/Follow');
 const FollowRequest = require('../models/FollowRequest');
+const Notification = require('../models/Notification');
 const { createFollowNotification, createMessageNotification } = require('../utils/notificationService');
 const RosterInvite = require('../models/RosterInvite');
 const StaffInvite = require('../models/StaffInvite');
@@ -942,6 +943,38 @@ const persistUnfollow = async (followerId, targetId) => {
   ]);
 };
 
+const publishFollowRequestUpdate = async ({ req, request, status }) => {
+  if (!request?._id || !request?.target) return;
+  const updatedAt = new Date();
+  const followRequestId = String(request._id);
+  await Notification.updateMany(
+    {
+      recipient: request.target,
+      type: 'follow',
+      'data.customData.followRequestId': followRequestId,
+      deletedAt: null
+    },
+    {
+      $set: {
+        isRead: true,
+        readAt: updatedAt,
+        'data.customData.followRequestStatus': status,
+        'data.customData.followRequestHandledAt': updatedAt
+      }
+    }
+  );
+  const io = req?.app?.get?.('io') || global._arcSocketIO;
+  if (io) {
+    io.to(`user-${request.target}`).emit('follow-request-updated', {
+      requestId: followRequestId,
+      requesterId: String(request.requester || ''),
+      targetUserId: String(request.target),
+      status,
+      updatedAt: updatedAt.toISOString()
+    });
+  }
+};
+
 // Follow/unfollow with explicit pending requests for non-public profiles.
 const toggleFollow = async (req, res) => {
   try {
@@ -967,6 +1000,11 @@ const toggleFollow = async (req, res) => {
 
     const isFollowing = await Follow.isFollowing(currentUserId, targetUserId);
     if (req.method === 'DELETE') {
+      const cancelledRequests = await FollowRequest.find({
+        requester: currentUserId,
+        target: targetUserId,
+        status: 'pending'
+      }).select('_id requester target').lean();
       await Promise.all([
         isFollowing ? persistUnfollow(currentUserId, targetUserId) : Promise.resolve(),
         FollowRequest.updateMany(
@@ -974,6 +1012,11 @@ const toggleFollow = async (req, res) => {
           { $set: { status: 'cancelled', resolvedAt: new Date() } }
         )
       ]);
+      await Promise.all(cancelledRequests.map((request) => (
+        publishFollowRequestUpdate({ req, request, status: 'cancelled' }).catch((syncError) => {
+          log.error('Follow request cancellation notification sync failed', { error: String(syncError) });
+        })
+      )));
       await invalidateFollowCaches(currentUserId, targetUserId);
       const postUnfollowPrivacy = await resolvePrivacyAccess({ viewer: req.user, targetUser });
       if (!postUnfollowPrivacy.access.canSeeOnlineStatus) {
@@ -4161,6 +4204,7 @@ const resolveFollowRequest = async (req, res, status) => {
       if (!requesterStillActive) {
         request.status = 'cancelled';
         await request.save();
+        await publishFollowRequestUpdate({ req, request, status: 'cancelled' }).catch(() => undefined);
         return res.status(404).json({ success: false, message: 'Follow request not found' });
       }
       try {
@@ -4174,6 +4218,9 @@ const resolveFollowRequest = async (req, res, status) => {
       }
     }
     await invalidateFollowCaches(request.requester, request.target);
+    await publishFollowRequestUpdate({ req, request, status }).catch((syncError) => {
+      log.error('Follow request resolution notification sync failed', { error: String(syncError) });
+    });
 
     if (status === 'accepted') {
       await createAndEmitNotification({

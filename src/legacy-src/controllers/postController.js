@@ -751,6 +751,67 @@ const getPostComments = async (req, res) => {
   }
 };
 
+// Paginated list of the users who liked a post OR clip (clips are video posts,
+// so this single endpoint serves both). Cursor pages over the embedded likes[]
+// newest-first, honours post visibility, and never leaks deleted/deactivated
+// likers. Powers the shared Likes Drawer on Web + Mobile.
+const getPostLikes = async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+    const cursor = typeof req.query.cursor === 'string' && req.query.cursor.trim() ? req.query.cursor.trim() : null;
+
+    const post = await Post.findOne({ _id: postId, isActive: true })
+      .select('author visibility isActive hiddenByAdmin boostMeta boostExpiresAt likes')
+      .populate('likes.user', 'username userType profile.displayName profile.avatar profilePicture avatar isActive');
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+    if (!await requireVisiblePost(req, res, post)) return;
+
+    // Drop likes whose user was deleted/deactivated so we never leak or crash.
+    const visible = (Array.isArray(post.likes) ? post.likes : [])
+      .filter((like) => like && like.user && like.user.isActive !== false);
+    // Newest first (latest → oldest), stable _id tiebreak so pages never dup/skip.
+    const sorted = visible.sort((a, b) => {
+      const delta = new Date(b.likedAt || 0).getTime() - new Date(a.likedAt || 0).getTime();
+      return delta !== 0 ? delta : String(b._id).localeCompare(String(a._id));
+    });
+
+    let start = 0;
+    if (cursor) {
+      const idx = sorted.findIndex((like) => String(like._id) === cursor);
+      // Unknown cursor (e.g. an unliked-since row) restarts from the top.
+      start = idx >= 0 ? idx + 1 : 0;
+    }
+    const pageItems = sorted.slice(start, start + limit);
+    const hasMore = start + limit < sorted.length;
+    const nextCursor = hasMore && pageItems.length ? String(pageItems[pageItems.length - 1]._id) : null;
+
+    const items = pageItems.map((like) => {
+      const u = like.user;
+      return {
+        id: String(u._id),
+        username: u.username,
+        displayName: u.profile?.displayName || u.username,
+        avatar: u.profile?.avatar || u.profilePicture || u.avatar || null,
+        accountType: u.userType === 'team' ? 'team' : 'user',
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: { items, nextCursor, hasMore, total: sorted.length },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load likes',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+};
+
 // Add comment to post
 const addComment = async (req, res) => {
   try {
@@ -1499,6 +1560,7 @@ module.exports = {
   getClips,
   getPost,
   getPostComments,
+  getPostLikes,
   recordClipView,
   getPersonalizedFeed,
   toggleLike,

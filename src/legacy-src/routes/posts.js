@@ -10,6 +10,7 @@ const {
   getClips,
   getPost,
   getPostComments,
+  getPostLikes,
   recordClipView,
   toggleLike,
   addComment,
@@ -96,6 +97,7 @@ router.get('/', optionalAuth, getPosts);
 router.get('/clips', optionalAuth, getClips);
 router.get('/:id', optionalAuth, getPost);
 router.get('/:id/comments', optionalAuth, getPostComments);
+router.get('/:id/likes', optionalAuth, getPostLikes);
 router.post('/:id/view', protect, engagementMetricValidation, handleValidationErrors, recordClipView);
 router.post('/:id/like', protect, toggleLike);
 router.post('/:id/comment', protect, addCommentValidation, handleValidationErrors, addComment);
