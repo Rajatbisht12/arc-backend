@@ -159,6 +159,7 @@ notificationSchema.index({ 'data.customData.recruitmentId': 1 });
 notificationSchema.index({ 'data.customData.profileId': 1 });
 notificationSchema.index({ 'data.customData.scrimId': 1 });
 notificationSchema.index({ 'data.customData.storyId': 1 });
+notificationSchema.index({ recipient: 1, 'data.customData.followRequestId': 1 });
 notificationSchema.index({ 'data.customData.targetType': 1, 'data.customData.targetId': 1 });
 notificationSchema.index(
   { recipient: 1, sender: 1, type: 1, 'data.postId': 1 },

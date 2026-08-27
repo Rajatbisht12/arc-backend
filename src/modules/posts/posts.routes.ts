@@ -56,6 +56,8 @@ router.get("/clips", optionalAuth, postController.getClips);
 router.get("/saved", protect, postController.getSavedPosts);
 router.get("/liked", protect, postController.getLikedPosts);
 router.get("/:id", optionalAuth, postIdValidation, handleValidationErrors, postController.getPost);
+router.get("/:id/comments", optionalAuth, postIdValidation, handleValidationErrors, postController.getPostComments);
+router.get("/:id/likes", optionalAuth, postIdValidation, handleValidationErrors, postController.getPostLikes);
 router.post("/:id/view", protect, postIdValidation, engagementMetricValidation, handleValidationErrors, postController.recordClipView);
 router.post("/:id/like", protect, postIdValidation, handleValidationErrors, postController.toggleLike);
 router.post("/:id/comment", protect, postIdValidation, addCommentValidation, handleValidationErrors, postController.addComment);
