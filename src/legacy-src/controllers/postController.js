@@ -20,6 +20,7 @@ const { isActiveBoost } = require('../services/boostService');
 const log = require('../utils/logger');
 const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
 const { respondToMediaUploadError } = require('../utils/mediaUploadError');
+const { toPostMediaItem } = require('../utils/postMediaDimensions');
 const { resolvePostAccess, filterPostsForViewer } = require('../utils/privacyPolicy');
 const {
   normalizeAchievementInfoInput,
@@ -132,11 +133,7 @@ const createPost = async (req, res) => {
         const uploadResults = mediaFiles.length > 0
           ? await uploadMultipleFiles(mediaFiles, 'gaming-social/posts')
           : [];
-        mediaData = uploadResults.map(result => ({
-          type: result.type,
-          url: result.url,
-          publicId: result.publicId
-        }));
+        mediaData = uploadResults.map(toPostMediaItem);
         if (coverFile) {
           const [coverUpload] = await uploadMultipleFiles([coverFile], 'gaming-social/post-covers');
           coverData = coverUpload ? {

@@ -1,10 +1,13 @@
 const PremiumMembership = require('../models/PremiumMembership');
 const User = require('../models/User');
 const log = require('../utils/logger');
+const { RECRUITMENT_LIMITS } = require('../config/recruitmentLimits');
 
 const RANDOM_CONNECT_ENTITLEMENT_VERSION = 1;
-const TEAM_PREMIUM_ENTITLEMENT_VERSION = 1;
+const PLAYER_PREMIUM_ENTITLEMENT_VERSION = 1;
+const TEAM_PREMIUM_ENTITLEMENT_VERSION = 2;
 const FREE_DAILY_GENDER_MATCH_LIMIT = 5;
+const FREE_RANDOM_CONNECT_SESSION_SECONDS = 3 * 60;
 const PREMIUM_PLAN_KEYS = new Set(['player_pro', 'player_pro_plus', 'team_pro', 'team_org']);
 const TEAM_PREMIUM_PLAN_KEYS = new Set(['team_pro', 'team_org']);
 const ACTIVE_MEMBERSHIP_STATUSES = new Set(['active']);
@@ -174,9 +177,46 @@ const resolveRandomConnectEntitlement = async (options) => (
 );
 
 /**
- * Canonical Team Premium capability contract. Some capabilities are consumed
- * directly by existing product surfaces (badge and tournament hosting); the
- * others provide stable server-side names for their respective feature gates.
+ * Canonical Player Premium capability contract. Quota values come from the
+ * recruitment config that the mutation paths already enforce; this response is
+ * therefore a projection of product policy, never a client-maintained limit.
+ */
+const buildPlayerPremiumEntitlement = (premiumEntitlement) => {
+  const enabled = Boolean(
+    premiumEntitlement?.accountType === 'player'
+    && premiumEntitlement?.isPremium === true
+    && ['player_pro', 'player_pro_plus'].includes(premiumEntitlement?.plan)
+  );
+  const limits = enabled
+    ? RECRUITMENT_LIMITS.player.premium
+    : RECRUITMENT_LIMITS.player.free;
+
+  return {
+    version: PLAYER_PREMIUM_ENTITLEMENT_VERSION,
+    enabled,
+    plan: enabled ? premiumEntitlement.plan : 'free',
+    proBadge: enabled,
+    creatorMonetizationPrerequisite: enabled,
+    randomConnectSessionDurationSeconds: enabled ? null : FREE_RANDOM_CONNECT_SESSION_SECONDS,
+    unlimitedRandomConnectSessionDuration: enabled,
+    genderFilterUsesPerDay: enabled ? null : FREE_DAILY_GENDER_MATCH_LIMIT,
+    unlimitedGenderFilter: enabled,
+    playerCardsPerMonth: limits.playerCardsPerMonth,
+    recruitmentApplicationsPerMonth: limits.applicationsPerMonth,
+    profileVisibilityBoost: enabled,
+    postVisibilityBoost: enabled,
+    playerCardVisibilityBoost: enabled
+  };
+};
+
+const resolvePlayerPremiumEntitlement = async (options) => (
+  buildPlayerPremiumEntitlement(await resolvePremiumEntitlement(options))
+);
+
+/**
+ * Canonical Team Premium capability contract. Quota values mirror the same
+ * recruitment config consumed by the write path. Retired Team Pro benefits are
+ * deliberately absent so callers cannot continue granting them accidentally.
  */
 const buildTeamPremiumEntitlement = (premiumEntitlement) => {
   const enabled = Boolean(
@@ -191,9 +231,13 @@ const buildTeamPremiumEntitlement = (premiumEntitlement) => {
     plan: enabled ? premiumEntitlement.plan : 'free',
     premiumBadge: enabled,
     extendedRecruitmentPostingLimits: enabled,
+    recruitmentPostsPerMonth: enabled
+      ? RECRUITMENT_LIMITS.team.premium.recruitmentsPerMonth
+      : RECRUITMENT_LIMITS.team.free.recruitmentsPerMonth,
     postVisibilityBoost: enabled,
-    earlyAccess: enabled,
-    unlimitedTournamentHosting: enabled
+    recruitmentVisibilityBoost: enabled,
+    prioritySquadTournamentNotifications: enabled,
+    enhancedTeamProfileVisibility: enabled
   };
 };
 
@@ -214,6 +258,7 @@ const randomConnectEntitlementEnvelope = (entitlement) => ({
 
 module.exports = {
   FREE_DAILY_GENDER_MATCH_LIMIT,
+  FREE_RANDOM_CONNECT_SESSION_SECONDS,
   PREMIUM_PLAN_KEYS,
   TEAM_PREMIUM_PLAN_KEYS,
   isPremiumMembershipEntitled,
@@ -222,6 +267,8 @@ module.exports = {
   buildRandomConnectEntitlement,
   resolveRandomConnectEntitlement,
   randomConnectEntitlementEnvelope,
+  buildPlayerPremiumEntitlement,
+  resolvePlayerPremiumEntitlement,
   buildTeamPremiumEntitlement,
   resolveTeamPremiumEntitlement
 };

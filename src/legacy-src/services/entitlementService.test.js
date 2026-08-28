@@ -204,7 +204,7 @@ async function run() {
       version: 7,
       planKey: 'player_pro',
       membershipStatus: 'active',
-      expiresAt: new Date('2026-08-02T00:00:00.000Z')
+      expiresAt: new Date('2026-12-02T00:00:00.000Z')
     });
     assert.equal(projectedUpdate.update.$set.isPremium, true);
     assert(deletedCacheKeys.includes(`auth:user:${userId}`));

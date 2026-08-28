@@ -140,6 +140,17 @@ const enqueueRegistrationOpenedNotifications = async (
     findActiveUsers = () => User.find({ isActive: { $ne: false } }, '_id')
       .lean()
       .cursor({ batchSize: 500 }),
+    findRelevantTeams = (candidateTournament) => User.find({
+      isActive: { $ne: false },
+      userType: 'team',
+      'teamInfo.rosters': {
+        $elemMatch: {
+          game: candidateTournament.game,
+          isActive: { $ne: false }
+        }
+      }
+    }, '_id').lean(),
+    resolveTeamEntitlement = resolveTeamPremiumEntitlement,
     enqueue = enqueueBulkNotifications
   } = {}
 ) => {
@@ -151,10 +162,61 @@ const enqueueRegistrationOpenedNotifications = async (
   const deliveryKey = `tournament-registration-open:${tournament._id}:${revision}`;
   const title = 'Registration Opened';
   const message = `Registration opened for "${tournament.name}"! Join now to participate.`;
+  const prioritizedTeamIds = new Set();
+
+  // Team Premium prioritization is intentionally narrow: only Team identities
+  // with an active roster for the same game, and only true Squad tournaments.
+  // The high-priority batch is enqueued first and excluded from normal fan-out,
+  // preventing duplicate in-app and push notifications.
+  if (tournament.format === 'Squad' && tournament.game) {
+    const relevantTeams = await findRelevantTeams(tournament);
+    for (const team of relevantTeams || []) {
+      const teamId = notificationRecipientId(team);
+      if (!teamId) continue;
+      try {
+        const entitlement = await resolveTeamEntitlement({
+          userId: teamId,
+          requestSource: 'squad_tournament_registration_notification'
+        });
+        if (entitlement?.prioritySquadTournamentNotifications === true) {
+          prioritizedTeamIds.add(teamId);
+        }
+      } catch (error) {
+        // Fail closed to normal delivery. A temporary entitlement lookup issue
+        // must not suppress the existing registration-opened notification.
+        log.warn('Failed to resolve squad tournament notification priority', {
+          teamId,
+          tournamentId: String(tournament._id),
+          error: String(error)
+        });
+      }
+    }
+
+    const priorityIds = Array.from(prioritizedTeamIds);
+    for (let offset = 0; offset < priorityIds.length; offset += 500) {
+      await enqueue(
+        priorityIds.slice(offset, offset + 500),
+        title,
+        message,
+        'tournament',
+        {
+          tournamentId: tournament._id,
+          customData: {
+            action: 'registration_opened',
+            entitlement: 'priority_squad_tournament_notifications',
+            priorityTier: 'team_premium',
+            pushOptions: { priority: 'high' }
+          }
+        },
+        `${deliveryKey}:team-premium-priority`
+      );
+    }
+  }
+
   let batch = [];
   for await (const user of findActiveUsers()) {
     const recipientId = notificationRecipientId(user);
-    if (!recipientId) continue;
+    if (!recipientId || prioritizedTeamIds.has(recipientId)) continue;
     batch.push(recipientId);
     if (batch.length >= 500) {
       await enqueue(
@@ -162,7 +224,13 @@ const enqueueRegistrationOpenedNotifications = async (
         title,
         message,
         'tournament',
-        { tournamentId: tournament._id, customData: { action: 'registration_opened' } },
+        {
+          tournamentId: tournament._id,
+          customData: {
+            action: 'registration_opened',
+            pushOptions: { priority: 'normal' }
+          }
+        },
         deliveryKey
       );
       batch = [];
@@ -174,7 +242,13 @@ const enqueueRegistrationOpenedNotifications = async (
       title,
       message,
       'tournament',
-      { tournamentId: tournament._id, customData: { action: 'registration_opened' } },
+      {
+        tournamentId: tournament._id,
+        customData: {
+          action: 'registration_opened',
+          pushOptions: { priority: 'normal' }
+        }
+      },
       deliveryKey
     );
   }
@@ -1032,7 +1106,7 @@ const getFreshHostPermissions = async (hostId) => {
     };
   }
 
-  let teamPremium = { enabled: false, unlimitedTournamentHosting: false };
+  let teamPremium = { enabled: false };
   try {
     teamPremium = await resolveTeamPremiumEntitlement({
       userId: hostId,
@@ -1054,9 +1128,7 @@ const getFreshHostPermissions = async (hostId) => {
     isVerifiedHost,
     isTeamAccount: String(host.userType || '').toLowerCase() === 'team',
     isPremiumTeam,
-    hasUnlimitedTournamentHosting: Boolean(
-      isVerifiedHost || teamPremium.unlimitedTournamentHosting === true
-    )
+    hasUnlimitedTournamentHosting: isVerifiedHost
   };
 };
 
@@ -1552,8 +1624,8 @@ const createTournament = async (req, res) => {
       });
     }
 
-    // Free/unverified hosts can host only one active fun tournament at a time.
-    // Verified Hosts and active Team Premium accounts are unlimited.
+    // Unverified hosts can host only one active fun tournament at a time.
+    // Unlimited hosting is reserved for Verified Hosts.
     if (!hostPermissions.hasUnlimitedTournamentHosting) {
       const activeTournament = await getActiveTournamentForHost(hostId);
       if (activeTournament) {
@@ -1563,9 +1635,7 @@ const createTournament = async (req, res) => {
           message: 'You already have an active tournament. Complete or cancel it before creating another one.',
           limitType: 'active_tournament',
           activeTournamentId: activeTournament._id,
-          upgradeMessage: hostPermissions.isTeamAccount
-            ? 'Upgrade to Team Premium or get Verified Host status to host unlimited tournaments.'
-            : 'Get Verified Host status to host unlimited tournaments.'
+          upgradeMessage: 'Get Verified Host status to host unlimited tournaments.'
         });
       }
     }
@@ -1643,9 +1713,7 @@ const createTournament = async (req, res) => {
           message: 'You already have an active tournament. Complete or cancel it before creating another one.',
           limitType: 'active_tournament',
           activeTournamentId: reservation.activeTournament?._id,
-          upgradeMessage: hostPermissions.isTeamAccount
-            ? 'Upgrade to Team Premium or get Verified Host status to host unlimited tournaments.'
-            : 'Get Verified Host status to host unlimited tournaments.'
+          upgradeMessage: 'Get Verified Host status to host unlimited tournaments.'
         });
       }
       activeTournamentReserved = true;
@@ -7385,9 +7453,8 @@ const getHostingLimits = async (req, res) => {
       });
     }
 
-    // Tournament: free/unverified hosts have one active fun tournament at a
-    // time. Team Premium bypasses only this limit; prize pools still require
-    // Verified Host status in create/update authorization.
+    // Tournament: unverified hosts have one active fun tournament at a time.
+    // Unlimited hosting and prize pools both require Verified Host status.
     const activeTournament = hasUnlimitedTournamentHosting
       ? null
       : await getActiveTournamentForHost(hostId);

@@ -18,14 +18,20 @@ const PLAYER_PLANS = [
     description: 'Get started with basic limits.',
     features: [
       'AI Coach – 15 messages/day',
-      'Random Connect – 5–6 connections/day',
+      'Random Connect — 3-minute call duration',
+      'Gender Filter — 5 uses/day',
+      '2 player cards/month',
+      '5 recruitment applications/month',
       'Normal visibility in suggestions',
       'Full access to posts, tournaments, messages'
     ],
     cta: 'Current plan',
     highlighted: false,
     exploreDetails: [
-      { heading: 'Random Connect', text: 'Up to 5–6 new 1-on-1 connections per day. You get matched with one other player at a time. No gender filter on Free. Each connection counts toward your daily limit.' },
+      { heading: 'Random Connect', text: 'Random Connect sessions last up to 3 minutes for free users.' },
+      { heading: 'Gender Filter', text: 'Use the gender filter up to 5 times per day.' },
+      { heading: 'Player Cards', text: 'Post up to 2 player cards per month.' },
+      { heading: 'Recruitment Applications', text: 'Apply to up to 5 recruitment posts per month, including staff recruitment posts.' },
       { heading: 'Visibility', text: 'Your profile and player card appear in suggestions and discover like everyone else—no boost. Full access to post, join tournaments and use messages.' },
       { heading: 'Credits', text: 'No boost credits on Free. You can still create and join everything; only paid plans get credits to boost posts for more reach.' }
     ]
@@ -40,20 +46,24 @@ const PLAYER_PLANS = [
     creditsPerWeek: 0,
     description: 'Most popular for serious players.',
     features: [
-      'Unlimited Random Connect + gender filter',
-      'Get discovered – more visibility',
-      'Pro badge on profile',
-      'Eligible for Creator monetization',
-      'Higher player card visibility'
+      'Pro Badge on Profile',
+      'Eligible for Creator Monetization',
+      'Random Connect — Unlimited Call Duration',
+      'Gender Filter — Unlimited Daily Uses',
+      'Extended Player Card Limits — 10/month',
+      'Extended Recruitment Applications — 20/month',
+      'Get Discovered — More Visibility'
     ],
     cta: 'Upgrade to Pro',
     highlighted: true,
     exploreDetails: [
-      { heading: 'Credits – value for money', text: '2 credits every week. 1 credit = 1 post boost (normal or recruitment). So for ₹99/month you get 2 boosts per week—each boost gives the same visibility that would cost ₹100 if bought alone. Unused credits don’t roll over to the next week.' },
-      { heading: 'Random Connect', text: 'Unlimited 1-on-1 connections per day. You get matched with one other player at a time (not squad/duo). Use the gender filter (Pro only) to match your preference.' },
-      { heading: 'Get discovered', text: 'Your profile is weighted higher in suggestions and discover so more players see you. Pro badge appears on your profile and in search.' },
-      { heading: 'Creator monetization', text: 'You can apply for Creator monetization only if you have an active Pro (or higher) plan. Other eligibility rules (followers, engagement, etc.) still apply.' },
-      { heading: 'Player card', text: 'Your player card can appear more often in discover and suggestions compared to Free users.' }
+      { heading: 'Pro Badge on Profile', text: 'Display the Pro badge on your profile and in relevant discovery and search areas.' },
+      { heading: 'Eligible for Creator Monetization', text: 'Eligible to apply for Creator Monetization with an active Pro plan, subject to applicable eligibility requirements.' },
+      { heading: 'Random Connect', text: 'Pro users get unlimited call duration for each session, compared to 3 minutes per session for free users.' },
+      { heading: 'Gender Filter', text: 'Use the gender filter with unlimited daily access. Free users can use the gender filter up to 5 times per day.' },
+      { heading: 'Extended Player Card Limits', text: 'Post up to 10 player cards per month, compared to 2 player cards per month for free users.' },
+      { heading: 'Extended Recruitment Applications', text: 'Apply to up to 20 recruitment posts per month, including staff recruitment posts. Free users can apply to up to 5 recruitment posts per month.' },
+      { heading: 'Get Discovered — More Visibility', text: 'Your profile, posts, and player cards receive higher visibility across relevant discovery and search surfaces, helping more users and teams discover you.' }
     ]
   },
   {
@@ -78,7 +88,7 @@ const PLAYER_PLANS = [
     highlighted: false,
     exploreDetails: [
       { heading: 'Credits – best value', text: '5 credits every week. 1 credit = 1 post boost (same as ₹100 value per boost). So for ₹199/month you get 5 boosts per week. Unused credits don’t roll over to the next week.' },
-      { heading: 'Everything in Pro', text: 'All Pro benefits included: unlimited AI Coach, unlimited Random Connect with gender filter, get discovered, Pro badge, Creator monetization eligibility, higher player card visibility.' },
+      { heading: 'Everything in Pro', text: 'All Pro benefits included: Pro Badge on Profile, eligibility to apply for Creator Monetization subject to all requirements, unlimited Random Connect call duration, unlimited daily Gender Filter use, 10 player cards per month, 20 recruitment applications per month, and increased visibility.' },
       { heading: 'Priority support', text: 'Your tickets and help requests are handled before Free and Pro users so you get faster resolution. Direct line to support team.' },
       { heading: 'Early access', text: 'Get access to new features (e.g. new AI tools, advanced discovery options, new monetization features) before they roll out to other plans.' },
       { heading: 'Featured in discover', text: 'Your profile appears in top slots of discover and suggestions 3x more often than Pro users. Maximum visibility for serious creators.' },
@@ -98,16 +108,16 @@ const TEAM_PLANS = [
     creditsPerMonth: 0,
     description: 'Run your team with core features.',
     features: [
-      'Unlimited recruitment posts',
-      'Unlimited tournaments & scrims',
+      '7 recruitment posts/month',
+      'Standard tournament hosting limits',
       'Full roster & staff management',
       'Basic visibility'
     ],
     cta: 'Current plan',
     highlighted: false,
     exploreDetails: [
-      { heading: 'Recruitment', text: 'Create as many recruitment posts as you need for roster and staff. No limit on open posts. Players can apply; you manage applications from your dashboard.' },
-      { heading: 'Tournaments & scrims', text: 'Host unlimited tournaments and scrims. Set dates, formats, prize pool and rules. No cap on how many you create.' },
+      { heading: 'Recruitment', text: 'Create up to 7 recruitment posts per month across roster and staff openings.' },
+      { heading: 'Tournaments & scrims', text: 'Standard tournament and scrim hosting limits apply.' },
       { heading: 'Roster & staff', text: 'Add and manage full rosters per game and staff (coach, manager, etc.). All core management features are included.' },
       { heading: 'Visibility', text: 'Your team profile and recruitment posts get normal visibility. No boost credits on Free.' },
       { heading: 'Credits', text: 'No boost credits on Free. Paid plans get monthly credits to boost normal posts and recruitment posts for more reach.' }
@@ -123,19 +133,19 @@ const TEAM_PLANS = [
     description: 'For growing teams.',
     features: [
       'Premium Badge',
-      'Extended Recruitment Posting Limits',
-      'More Visibility Across All Post Types',
-      'Early Access to Exclusive Features',
-      'Unlimited Tournament Hosting'
+      'Extended Recruitment Posting Limits — 30/month',
+      'More Visibility Across All Posts & Recruitment Listings',
+      'Priority Notifications for Squad Tournaments',
+      'Enhanced Team Profile Visibility'
     ],
     cta: 'Upgrade to Pro',
     highlighted: true,
     exploreDetails: [
-      { heading: 'Premium Badge', text: 'Display the Premium badge on your team profile wherever Premium badges are currently supported.' },
-      { heading: 'Extended Recruitment Posting Limits', text: 'Create more recruitment posts for roster and staff openings.' },
-      { heading: 'More Visibility Across All Post Types', text: 'Get more visibility for recruitment, achievement, and normal posts.' },
-      { heading: 'Early Access to Exclusive Features', text: 'Get early access to exclusive features as they become available.' },
-      { heading: 'Unlimited Tournament Hosting', text: 'Host tournaments without the standard active-tournament limit. Prize-pool tournaments still require Verified Host status.' }
+      { heading: 'Premium Badge', text: 'Display the Premium badge on your team profile and across relevant areas where Premium badges are supported.' },
+      { heading: 'Extended Recruitment Posting Limits', text: 'Create up to 30 recruitment posts per month, including roster and staff recruitment openings. Free teams can create up to 7 recruitment posts per month.' },
+      { heading: 'More Visibility Across All Posts & Recruitment Listings', text: "Get higher visibility for your team's normal, achievement, and recruitment posts, helping your team reach more players and get discovered faster." },
+      { heading: 'Priority Notifications for Squad Tournaments', text: 'Receive priority notifications for relevant squad tournaments, helping your team discover and respond to tournament opportunities sooner.' },
+      { heading: 'Enhanced Team Profile Visibility', text: 'Your team profile gets increased visibility across relevant discovery and search surfaces, making it easier for players to find and connect with your team.' }
     ]
   },
   {
@@ -157,7 +167,7 @@ const TEAM_PLANS = [
     highlighted: false,
     exploreDetails: [
       { heading: 'Credits – best value', text: '60 credits every month. 1 credit = 1 post boost (₹100 value each). So for ₹499 you get 60 boosts—₹6000 value. Ideal for orgs that post and recruit frequently.' },
-      { heading: 'Everything in Pro', text: 'All Pro benefits: Premium Badge, Extended Recruitment Posting Limits, More Visibility Across All Post Types, Early Access to Exclusive Features, and Unlimited Tournament Hosting.' },
+      { heading: 'Everything in Pro', text: 'All Pro benefits: Premium Badge, 30 recruitment posts per month, higher visibility across posts and recruitment listings, priority notifications for relevant squad tournaments, and enhanced team profile visibility.' },
       { heading: 'Custom branding & verified badge', text: 'Org badge and verified status on your team profile. Optional custom branding so your org stands out.' },
       { heading: 'Priority support', text: 'Your support requests are prioritised so you get faster help for billing, features and issues.' },
       { heading: 'Advanced analytics & export', text: 'Deeper analytics and ability to export data (e.g. recruitment reports, tournament stats) for internal use or sponsors.' }
@@ -211,6 +221,7 @@ async function getMembership(req, res) {
     const premiumService = require('../services/premiumMembershipService');
     const {
       resolvePremiumEntitlement,
+      buildPlayerPremiumEntitlement,
       buildTeamPremiumEntitlement
     } = require('../services/entitlementService');
     const canonical = await premiumService.currentForUser(req.user._id).lean();
@@ -257,6 +268,7 @@ async function getMembership(req, res) {
         providerSubscriptionId: canonical?.razorpay?.subscriptionId || null,
         providerControlsAvailable: Boolean(canonical?.razorpay?.subscriptionId),
         entitlements: {
+          playerPremium: buildPlayerPremiumEntitlement(premiumEntitlement),
           teamPremium: buildTeamPremiumEntitlement(premiumEntitlement)
         },
         plans: {
