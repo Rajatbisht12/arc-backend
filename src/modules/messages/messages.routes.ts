@@ -92,14 +92,24 @@ router.get("/recent", protect, messageController.getRecentConversations);
 router.post("/rooms", protect, createChatRoomValidation, handleValidationErrors, messageController.createChatRoom);
 router.get("/rooms", protect, messageController.getChatRooms);
 router.post("/rooms/:chatRoomId/leave", protect, chatRoomIdValidation, handleValidationErrors, messageController.leaveGroup);
-// User-scoped conversation removal. This intentionally does not leave or
-// delete the group; the legacy controller records the caller in deletedFor.
+// User-scoped conversation removal ("Delete Group for me"): hides history AND
+// removes the room from the caller's list (deletedFor marker). Does not leave or
+// delete the group; other members are unaffected.
 router.delete(
   "/rooms/:chatRoomId/conversation",
   protect,
   chatRoomIdValidation,
   handleValidationErrors,
   messageController.clearGroupConversation
+);
+// User-scoped "Clear Chat": hides history for the caller only but KEEPS the group
+// in their list. Does not delete the group, remove members, or touch settings.
+router.post(
+  "/rooms/:chatRoomId/clear",
+  protect,
+  chatRoomIdValidation,
+  handleValidationErrors,
+  messageController.clearGroupChat
 );
 router.get("/rooms/:chatRoomId/invite-link", protect, chatRoomIdValidation, handleValidationErrors, messageController.getGroupInviteLink);
 router.post("/rooms/:chatRoomId/reset-invite-link", protect, chatRoomIdValidation, handleValidationErrors, messageController.resetGroupInviteLink);

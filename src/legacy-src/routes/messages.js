@@ -20,6 +20,7 @@ const {
   deleteDirectMessage,
   deleteGroupMessage,
   clearGroupConversation,
+  clearGroupChat,
   leaveGroup,
   createCallSummary,
   toggleMuteChat,
@@ -115,6 +116,7 @@ router.get('/rooms', protect, getChatRooms);
 router.post('/rooms/:chatRoomId/leave', protect, leaveGroup);
 // Per-user "Delete Chat" for a group (hides it from the caller's list only).
 router.delete('/rooms/:chatRoomId/conversation', protect, clearGroupConversation);
+router.post('/rooms/:chatRoomId/clear', protect, clearGroupChat);
 router.get('/rooms/:chatRoomId/invite-link', protect, getGroupInviteLink);
 router.post('/rooms/:chatRoomId/reset-invite-link', protect, resetGroupInviteLink);
 router.post('/rooms/:chatRoomId/invite-dm', protect, sendGroupInviteDM);
