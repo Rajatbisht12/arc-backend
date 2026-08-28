@@ -8,6 +8,7 @@ const PaymentTransaction = require('../models/PaymentTransaction');
 const MonetizationEligibility = require('../models/MonetizationEligibility');
 const MonetizationApplication = require('../models/MonetizationApplication');
 const CreatorEligibilityHistory = require('../models/CreatorEligibilityHistory');
+const { THRESHOLDS: CREATOR_ELIGIBILITY_THRESHOLDS } = require('../services/MonetizationEligibilityEngine');
 const CreatorPayout = require('../models/CreatorPayout');
 const CreatorPayoutHistory = require('../models/CreatorPayoutHistory');
 const CreatorBankDetails = require('../models/CreatorBankDetails');
@@ -776,12 +777,14 @@ const getCreatorOverview = async (req, res) => {
           finalPayoutAmount: pendingEarnings
         },
         eligibility: eligibility || null,
+        // Derived from the engine's canonical THRESHOLDS so admin, clients, and
+        // the eligibility calculation never drift (e.g. active days = 45).
         eligibilityCriteria: {
           premiumMembership: true,
-          followers: 1000,
-          organicViews45d: 100000,
-          clipsAbove3000Views: 5,
-          activeDays45d: 25
+          followers: CREATOR_ELIGIBILITY_THRESHOLDS.minFollowers,
+          organicViews45d: CREATOR_ELIGIBILITY_THRESHOLDS.minTotalClipViews45d,
+          clipsAbove3000Views: CREATOR_ELIGIBILITY_THRESHOLDS.minClipsWith3kViews45d,
+          activeDays45d: CREATOR_ELIGIBILITY_THRESHOLDS.minActiveDays45d
         },
         application: application || null,
         eligibilityHistory,

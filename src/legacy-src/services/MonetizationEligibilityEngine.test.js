@@ -98,9 +98,15 @@ async function run() {
       }
       const eventTypes = pipeline[0]?.$match?.eventType?.$in || [];
       if (eventTypes.includes('view')) {
-        return Array.from({ length: 24 }, (_, index) => ({
-          _id: `2026-06-${String(index + 1).padStart(2, '0')}`
-        }));
+        // Exactly meet the active-days threshold: generate that many distinct
+        // UTC days. The single uploaded post (2026-06-25, added by Post.find
+        // above) falls inside this contiguous range, so the deduped Set size
+        // equals the threshold — an "exactly at the bar" eligibility case.
+        return Array.from({ length: engine.THRESHOLDS.minActiveDays45d }, (_, index) => {
+          const day = new Date('2026-06-01T00:00:00.000Z');
+          day.setUTCDate(day.getUTCDate() + index);
+          return { _id: day.toISOString().slice(0, 10) };
+        });
       }
       return [];
     };
@@ -112,7 +118,8 @@ async function run() {
     assert.equal(result.metrics.totalBoostedClipViews45d, 4999995);
     assert.equal(result.metrics.totalClipViews45d, 100000, 'the legacy total alias must remain organic-only');
     assert.equal(result.metrics.clipsWith3kOrganicViews45d, 5);
-    assert.equal(result.metrics.activeDays45d, 25);
+    assert.equal(result.metrics.activeDays45d, engine.THRESHOLDS.minActiveDays45d);
+    assert.equal(engine.THRESHOLDS.minActiveDays45d, 45, 'active-days requirement is 45, not 25');
     assert.equal(result.isEligible, true, 'boosted views must not influence an otherwise exact threshold result');
     assert.equal(result.failedConditions.length, 0);
 

@@ -71,9 +71,13 @@ const registerValidation = [
     .isLength({ min: 1, max: 50 })
     .withMessage('Display name is required and must be less than 50 characters'),
   body('gender')
-    .optional()
-    .isIn(['male', 'female', 'other', 'prefer_not_to_say'])
-    .withMessage('Gender must be male, female, other, or prefer_not_to_say')
+    .notEmpty()
+    .withMessage('Gender is required')
+    .isIn(['male', 'female', 'other'])
+    .withMessage('Gender must be male, female, or other'),
+  body('dob')
+    .notEmpty()
+    .withMessage('Date of birth is required')
 ];
 
 const loginValidation = [
