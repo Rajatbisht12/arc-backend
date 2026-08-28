@@ -145,7 +145,7 @@ const dateYearsAgo = (years) => {
     username: 'existing_player',
     userType: 'player',
     isActive: true,
-    profile: { displayName: 'Existing Player' },
+    profile: { displayName: 'Existing Player', gender: 'prefer_not_to_say' },
     needsProfileCompletion: false,
     async save() {
       existingGoogleSaveCalled = true;
@@ -166,6 +166,7 @@ const dateYearsAgo = (years) => {
   assert.strictEqual(existingGoogleRes.statusCode, 200);
   assert.strictEqual(existingGoogleRes.body.profileComplete, true);
   assert.strictEqual(existingGoogleRes.body.data.user.profile.displayName, 'Existing Player');
+  assert.strictEqual(existingGoogleRes.body.data.user.profile.gender, 'prefer_not_to_say');
   assert.strictEqual(existingGoogleSaveCalled, true);
 
   let createdGoogleData = null;
@@ -233,11 +234,83 @@ const dateYearsAgo = (years) => {
   assert.strictEqual(completionUser.needsProfileCompletion, true);
   assert.deepStrictEqual(completionEvents, []);
 
+  const validDob = dateYearsAgo(25);
+  const missingGenderRes = createRes();
+  await completeProfile({
+    user: { _id: 'google-user-id' },
+    body: {
+      userType: 'team',
+      username: 'completed_team',
+      displayName: 'Completed Team',
+      dob: validDob
+    }
+  }, missingGenderRes);
+  assert.strictEqual(missingGenderRes.statusCode, 400);
+  assert.strictEqual(missingGenderRes.body.message, 'Gender is required');
+
+  const missingDobRes = createRes();
+  await completeProfile({
+    user: { _id: 'google-user-id' },
+    body: {
+      userType: 'team',
+      username: 'completed_team',
+      displayName: 'Completed Team',
+      gender: 'female'
+    }
+  }, missingDobRes);
+  assert.strictEqual(missingDobRes.statusCode, 400);
+  assert.strictEqual(missingDobRes.body.message, 'Date of birth is required');
+
+  const legacyGenderRes = createRes();
+  await completeProfile({
+    user: { _id: 'google-user-id' },
+    body: {
+      userType: 'team',
+      username: 'completed_team',
+      displayName: 'Completed Team',
+      gender: 'prefer_not_to_say',
+      dob: validDob
+    }
+  }, legacyGenderRes);
+  assert.strictEqual(legacyGenderRes.statusCode, 400);
+  assert.strictEqual(legacyGenderRes.body.message, 'Gender must be male, female, or other');
+
+  const registrationWithoutGenderRes = createRes();
+  await register({
+    body: {
+      userType: 'player',
+      displayName: 'New Player',
+      username: 'new_player',
+      email: 'new-player@example.com',
+      password: 'password',
+      dob: validDob,
+      otp: '123456'
+    }
+  }, registrationWithoutGenderRes);
+  assert.strictEqual(registrationWithoutGenderRes.statusCode, 400);
+  assert.strictEqual(registrationWithoutGenderRes.body.message, 'Gender is required');
+
+  const registrationWithoutDobRes = createRes();
+  await register({
+    body: {
+      userType: 'player',
+      displayName: 'New Player',
+      username: 'new_player',
+      email: 'new-player@example.com',
+      password: 'password',
+      gender: 'male',
+      otp: '123456'
+    }
+  }, registrationWithoutDobRes);
+  assert.strictEqual(registrationWithoutDobRes.statusCode, 400);
+  assert.strictEqual(registrationWithoutDobRes.body.message, 'Date of birth is required');
+
   const underageRegistrationRes = createRes();
   await register({
     body: {
       userType: 'player',
       displayName: 'Young Player',
+      gender: 'other',
       username: 'young_player',
       email: 'young@example.com',
       password: 'password',
@@ -250,14 +323,13 @@ const dateYearsAgo = (years) => {
   assert.strictEqual(underageRegistrationRes.body.message, 'You must be at least 13 years old');
 
   const completionRes = createRes();
-  const validDob = dateYearsAgo(25);
   await completeProfile({
     user: { _id: 'google-user-id' },
     body: {
       userType: 'team',
       username: 'completed_team',
       displayName: 'Completed Team',
-      gender: 'prefer_not_to_say',
+      gender: 'other',
       dob: validDob,
       bio: 'Ready to compete'
     }
@@ -270,7 +342,7 @@ const dateYearsAgo = (years) => {
   assert.strictEqual(completionUser.username, 'completed_team');
   assert.strictEqual(completionUser.password, 'temporary-password');
   assert.strictEqual(completionUser.profile.displayName, 'Completed Team');
-  assert.strictEqual(completionUser.profile.gender, 'prefer_not_to_say');
+  assert.strictEqual(completionUser.profile.gender, 'other');
   assert.strictEqual(completionUser.profile.dob.toISOString(), `${validDob}T00:00:00.000Z`);
   assert.strictEqual(completionUser.profile.bio, 'Ready to compete');
   assert.strictEqual(completionUser.needsProfileCompletion, false);
@@ -292,6 +364,8 @@ const dateYearsAgo = (years) => {
     body: {
       userType: 'player',
       username: 'compatible_user',
+      gender: 'female',
+      dob: validDob,
       password: 'legacy-client-password'
     }
   }, compatibilityRes);

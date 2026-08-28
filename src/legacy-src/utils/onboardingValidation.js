@@ -1,5 +1,7 @@
 const ONBOARDING_USER_TYPES = new Set(['player', 'team']);
-const ONBOARDING_GENDERS = new Set(['male', 'female', 'other', 'prefer_not_to_say']);
+// New onboarding accepts only these values. The User model intentionally
+// retains its legacy enum so existing prefer_not_to_say profiles still load.
+const ONBOARDING_GENDERS = new Set(['male', 'female', 'other']);
 
 const parseDateOnly = (value) => {
   if (typeof value !== 'string') return null;
@@ -50,25 +52,29 @@ const validateOnboardingProfile = (input = {}, now = new Date()) => {
   }
 
   const gender = input.gender == null ? '' : String(input.gender).trim().toLowerCase();
-  if (gender && !ONBOARDING_GENDERS.has(gender)) {
-    return { error: 'Gender must be male, female, other, or prefer_not_to_say' };
+  if (!gender) {
+    return { error: 'Gender is required' };
+  }
+  if (!ONBOARDING_GENDERS.has(gender)) {
+    return { error: 'Gender must be male, female, or other' };
   }
 
-  let dob = null;
   const rawDob = input.dob == null ? '' : String(input.dob).trim();
-  if (rawDob) {
-    dob = parseDateOnly(rawDob);
-    if (!dob) {
-      return { error: 'Please enter a valid date of birth' };
-    }
+  if (!rawDob) {
+    return { error: 'Date of birth is required' };
+  }
 
-    const age = getAge(dob, now);
-    if (age < 13) {
-      return { error: 'You must be at least 13 years old' };
-    }
-    if (age > 100) {
-      return { error: 'Please enter a valid date of birth' };
-    }
+  const dob = parseDateOnly(rawDob);
+  if (!dob || dob.getTime() > now.getTime()) {
+    return { error: 'Please enter a valid date of birth' };
+  }
+
+  const age = getAge(dob, now);
+  if (age < 13) {
+    return { error: 'You must be at least 13 years old' };
+  }
+  if (age > 100) {
+    return { error: 'Please enter a valid date of birth' };
   }
 
   const bio = input.bio == null ? '' : String(input.bio).trim();

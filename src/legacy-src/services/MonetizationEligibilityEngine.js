@@ -15,12 +15,15 @@ const Follow = require('../models/Follow');
 const mongoose = require('mongoose');
 const { buildUniquePostViewPipeline } = require('./postEngagementAnalytics');
 
-// Configurable thresholds (short-form clip creator monetization)
+// Configurable thresholds (short-form clip creator monetization).
+// Canonical source of truth: the admin criteria endpoint and both clients derive
+// their displayed requirement from these values via the eligibility response.
+// The 45-day rolling window is applied in rollingWindow() / sinceDate below.
 const THRESHOLDS = {
   minFollowers: 1000,
   minTotalClipViews45d: 100000,
   minClipsWith3kViews45d: 5,
-  minActiveDays45d: 25
+  minActiveDays45d: 45
 };
 
 function toObjectId(id) {
