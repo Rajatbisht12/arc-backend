@@ -66,16 +66,16 @@ async function run() {
       allowed: true,
       isVerified: false,
       isPremiumTeam: true,
-      unlimited: true,
-      used: null,
-      limit: null,
-      period: 'unlimited',
+      unlimited: false,
+      used: 0,
+      limit: 1,
+      period: 'active_tournament',
       activeTournamentId: null,
       activeTournamentName: null,
       nextAllowedAt: null
     });
-    assert.equal(activeTournamentQueries, 0, 'Team Premium must not query or enforce the active-tournament cap');
-    assert.equal(premium.responseBody.data.scrim.limit, 5, 'Team Premium does not advertise unlimited scrims');
+    assert.equal(activeTournamentQueries, 1, 'Team Premium must retain the standard active-tournament cap');
+    assert.equal(premium.responseBody.data.scrim.limit, 5, 'Team Premium must retain standard scrim limits');
 
     PremiumMembership.findOne = () => queryReturning(null);
     const free = await invokeHostingLimits();
@@ -83,7 +83,7 @@ async function run() {
     assert.equal(free.responseBody.data.tournament.unlimited, false);
     assert.equal(free.responseBody.data.tournament.limit, 1);
     assert.equal(free.responseBody.data.tournament.period, 'active_tournament');
-    assert.equal(activeTournamentQueries, 1, 'Free Team accounts must retain the active-tournament limit');
+    assert.equal(activeTournamentQueries, 2, 'Free Team accounts must retain the active-tournament limit');
   } finally {
     PremiumMembership.findOne = originals.premiumFindOne;
     Scrim.countDocuments = originals.scrimCountDocuments;
@@ -94,7 +94,7 @@ async function run() {
 }
 
 run()
-  .then(() => console.log('Team Premium tournament hosting tests passed'))
+  .then(() => console.log('Retired Team Premium tournament hosting entitlement tests passed'))
   .catch((error) => {
     console.error(error);
     process.exitCode = 1;

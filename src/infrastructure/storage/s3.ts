@@ -209,7 +209,7 @@ export async function deleteFile(publicId: string): Promise<void> {
 export async function uploadMultipleFiles(
   files: Array<{ buffer: Buffer; mimetype: string }>,
   folder = "gaming-social"
-): Promise<Array<{ type: string } & UploadResult>> {
+): Promise<Array<{ type: string; width?: number; height?: number } & UploadResult>> {
   const results = await Promise.all(
     files.map(async (f) => {
       if (f.mimetype.startsWith("image/")) {

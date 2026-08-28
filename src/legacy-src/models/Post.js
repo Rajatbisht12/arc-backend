@@ -35,6 +35,21 @@ const postSchema = new mongoose.Schema({
         type: String,
         required: true
       },
+      // Optional for backwards compatibility. New image uploads persist the
+      // dimensions reported by the server-side Sharp pipeline so clients can
+      // reserve the correct aspect-ratio box before the asset loads.
+      width: {
+        type: Number,
+        min: 1
+      },
+      height: {
+        type: Number,
+        min: 1
+      },
+      aspectRatio: {
+        type: Number,
+        min: 0.01
+      },
       coverUrl: {
         type: String,
         default: ''

@@ -54,8 +54,7 @@ const loadHydratedMessageWindow = async (messageIds, { direct = false, group = f
     .populate({ path: 'replyTo', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } })
     .populate('forwardedFrom', 'content.text content.media sender')
     .populate('forwardedFrom.sender', 'username profile.displayName profile.avatar')
-    .populate('sharedPost', sharedPostSelect)
-    .populate('sharedPost.author', sharedPostAuthorSelect)
+    .populate({ path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } })
     .populate('reactions.user', 'username profile.displayName');
   if (direct) {
     query = query
@@ -491,8 +490,7 @@ const getDirectMessages = async (req, res) => {
     .populate({ path: 'replyTo', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } })
     .populate('forwardedFrom', 'content.text content.media sender')
     .populate('forwardedFrom.sender', 'username profile.displayName profile.avatar')
-    .populate('sharedPost', sharedPostSelect)
-    .populate('sharedPost.author', sharedPostAuthorSelect)
+    .populate({ path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } })
     .populate('sharedProfile', 'username profile.displayName profile.avatar')
     .populate('reactions.user', 'username profile.displayName')
     .sort({ createdAt: -1 })
@@ -1403,8 +1401,7 @@ const getGroupMessages = async (req, res) => {
     .populate({ path: 'replyTo', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } })
     .populate('forwardedFrom', 'content.text content.media sender')
     .populate('forwardedFrom.sender', 'username profile.displayName profile.avatar')
-    .populate('sharedPost', sharedPostSelect)
-    .populate('sharedPost.author', sharedPostAuthorSelect)
+    .populate({ path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } })
     .populate('reactions.user', 'username profile.displayName')
     .populate('mentions', 'username profile.displayName profile.avatar')
     .sort({ createdAt: -1 })
