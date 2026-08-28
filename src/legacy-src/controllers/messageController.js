@@ -3416,6 +3416,48 @@ const clearGroupConversation = async (req, res) => {
   }
 };
 
+// "Clear Chat" for a group: hide the existing message history for THIS user only,
+// but keep the group in their list (no room-level deletedFor marker). Distinct
+// from clearGroupConversation ("Delete Group for me", which also removes the room
+// from the caller's list) and from leaveGroup. User-scoped: members, admins,
+// group name/photo/description and everyone else's history are untouched.
+const clearGroupChat = async (req, res) => {
+  try {
+    const { chatRoomId } = req.params;
+    const userId = req.user._id;
+
+    const chatRoom = await ChatRoom.findOne({ _id: chatRoomId, isActive: true });
+    if (!chatRoom) {
+      return res.status(404).json({ success: false, code: 'GROUP_CONVERSATION_NOT_FOUND', message: 'Chat room not found' });
+    }
+    const isMember = chatRoom.members.some(m => m.user.toString() === userId.toString())
+      || (chatRoom.removedMembers || []).some(m => m.user.toString() === userId.toString());
+    if (!isMember) {
+      return res.status(403).json({ success: false, code: 'NOT_GROUP_MEMBER', message: 'You are not a member of this chat room' });
+    }
+
+    const clearedAt = new Date();
+    // Hide existing history for this user only (mirrors direct-chat clear),
+    // never deletedForEveryone — other members keep their history.
+    await Message.updateMany(
+      {
+        chatRoom: chatRoomId,
+        messageType: 'group',
+        deletedForEveryone: { $ne: true },
+        'deletedForUsers.user': { $ne: userId }
+      },
+      { $addToSet: { deletedForUsers: { user: userId, deletedAt: clearedAt } } }
+    );
+    // Deliberately NO ChatRoom.deletedFor marker: the group remains in the
+    // caller's Groups list, showing "No messages yet" until a new message.
+
+    return res.status(200).json({ success: true, message: 'Chat cleared' });
+  } catch (error) {
+    log.error('Error clearing group chat:', { error: String(error) });
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
 module.exports = {
   getMessageMediaPolicy,
   sendDirectMessage,
@@ -3435,6 +3477,7 @@ module.exports = {
   deleteDirectMessage,
   deleteGroupMessage,
   clearGroupConversation,
+  clearGroupChat,
   leaveGroup,
   createCallSummary,
   toggleMuteChat,
