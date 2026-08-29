@@ -21,6 +21,7 @@ let tokenCalls = 0;
 let refreshTokenCalls = 0;
 const invalidatedUserIds = [];
 const completionEvents = [];
+let passwordObservedBeforeSave = null;
 
 const User = {
   findOne(query) {
@@ -162,12 +163,15 @@ const dateYearsAgo = (years) => {
   findOneImpl = () => Promise.resolve(existingGoogleUser);
 
   const existingGoogleRes = createRes();
-  await googleTokenLogin({ body: { access_token: 'google-access-token' } }, existingGoogleRes);
+  await googleTokenLogin({
+    body: { access_token: 'google-access-token', requirePasswordSetup: true }
+  }, existingGoogleRes);
   assert.strictEqual(existingGoogleRes.statusCode, 200);
   assert.strictEqual(existingGoogleRes.body.profileComplete, true);
   assert.strictEqual(existingGoogleRes.body.data.user.profile.displayName, 'Existing Player');
   assert.strictEqual(existingGoogleRes.body.data.user.profile.gender, 'prefer_not_to_say');
   assert.strictEqual(existingGoogleSaveCalled, true);
+  assert.strictEqual(existingGoogleUser.requiresPasswordSetup, undefined);
 
   let createdGoogleData = null;
   googleProfile = {
@@ -188,12 +192,36 @@ const dateYearsAgo = (years) => {
   };
 
   const newGoogleRes = createRes();
-  await googleTokenLogin({ body: { access_token: 'google-access-token' } }, newGoogleRes);
+  await googleTokenLogin({
+    body: { access_token: 'google-access-token', requirePasswordSetup: true }
+  }, newGoogleRes);
   assert.strictEqual(newGoogleRes.statusCode, 200);
   assert.strictEqual(newGoogleRes.body.profileComplete, false);
   assert.strictEqual(newGoogleRes.body.user.needsProfileCompletion, true);
   assert.strictEqual(createdGoogleData.needsProfileCompletion, true);
+  assert.strictEqual(createdGoogleData.requiresPasswordSetup, true);
   assert.strictEqual(createdGoogleData.profile.displayName, 'New Google User');
+
+  let createdWebGoogleData = null;
+  googleProfile = {
+    sub: 'new-web-google-subject',
+    email: 'new-web@example.com',
+    name: 'New Web Google User'
+  };
+  createImpl = async (data) => {
+    createdWebGoogleData = data;
+    return {
+      _id: 'new-web-google-id',
+      ...data,
+      toObject() {
+        return { ...this };
+      }
+    };
+  };
+  const newWebGoogleRes = createRes();
+  await googleTokenLogin({ body: { access_token: 'google-access-token' } }, newWebGoogleRes);
+  assert.strictEqual(newWebGoogleRes.statusCode, 200);
+  assert.strictEqual(createdWebGoogleData.requiresPasswordSetup, false);
 
   createImpl = async () => {
     throw new Error('User.create should not be called during profile completion');
@@ -205,13 +233,22 @@ const dateYearsAgo = (years) => {
     username: 'temporary-name',
     userType: 'player',
     password: 'temporary-password',
+    googleId: 'new-google-subject',
     profile: {
       displayName: 'Google Name',
       avatar: 'https://example.test/avatar.png'
     },
     needsProfileCompletion: true,
+    requiresPasswordSetup: true,
     teamInfo: null,
     async save() {
+      if (this.password !== 'temporary-password') {
+        passwordObservedBeforeSave = this.password;
+        // The real User model pre-save hook replaces this value with a bcrypt
+        // hash. The stub mirrors that observable controller contract without
+        // retaining plaintext in its response fixture.
+        this.password = '$2b$10$hashed-oauth-password';
+      }
       completionEvents.push('save');
     },
     toObject() {
@@ -322,7 +359,7 @@ const dateYearsAgo = (years) => {
   assert.strictEqual(underageRegistrationRes.statusCode, 400);
   assert.strictEqual(underageRegistrationRes.body.message, 'You must be at least 13 years old');
 
-  const completionRes = createRes();
+  const missingPasswordRes = createRes();
   await completeProfile({
     user: { _id: 'google-user-id' },
     body: {
@@ -333,6 +370,38 @@ const dateYearsAgo = (years) => {
       dob: validDob,
       bio: 'Ready to compete'
     }
+  }, missingPasswordRes);
+  assert.strictEqual(missingPasswordRes.statusCode, 400);
+  assert.strictEqual(missingPasswordRes.body.error, 'PASSWORD_POLICY_FAILED');
+  assert.strictEqual(completionUser.needsProfileCompletion, true);
+
+  const weakPasswordRes = createRes();
+  await completeProfile({
+    user: { _id: 'google-user-id' },
+    body: {
+      userType: 'team',
+      username: 'completed_team',
+      displayName: 'Completed Team',
+      gender: 'other',
+      dob: validDob,
+      password: '12345'
+    }
+  }, weakPasswordRes);
+  assert.strictEqual(weakPasswordRes.statusCode, 400);
+  assert.strictEqual(weakPasswordRes.body.error, 'PASSWORD_POLICY_FAILED');
+
+  const completionRes = createRes();
+  await completeProfile({
+    user: { _id: 'google-user-id' },
+    body: {
+      userType: 'team',
+      username: 'completed_team',
+      displayName: 'Completed Team',
+      gender: 'other',
+      dob: validDob,
+      bio: 'Ready to compete',
+      password: 'oauth-local-password'
+    }
   }, completionRes);
 
   assert.strictEqual(completionRes.statusCode, 200);
@@ -340,21 +409,71 @@ const dateYearsAgo = (years) => {
   assert.deepStrictEqual(invalidatedUserIds, ['google-user-id']);
   assert.strictEqual(completionUser.userType, 'team');
   assert.strictEqual(completionUser.username, 'completed_team');
-  assert.strictEqual(completionUser.password, 'temporary-password');
+  assert.strictEqual(passwordObservedBeforeSave, 'oauth-local-password');
+  assert.strictEqual(completionUser.password, '$2b$10$hashed-oauth-password');
   assert.strictEqual(completionUser.profile.displayName, 'Completed Team');
   assert.strictEqual(completionUser.profile.gender, 'other');
   assert.strictEqual(completionUser.profile.dob.toISOString(), `${validDob}T00:00:00.000Z`);
   assert.strictEqual(completionUser.profile.bio, 'Ready to compete');
   assert.strictEqual(completionUser.needsProfileCompletion, false);
+  assert.strictEqual(completionUser.requiresPasswordSetup, false);
   assert.strictEqual(completionRes.body.profileComplete, true);
   assert.strictEqual(completionRes.body.data.token, 'app-token');
   assert.strictEqual(completionRes.body.data.refreshToken, 'refresh-token');
   assert.strictEqual(completionRes.body.data.user.password, undefined);
 
+  const completedTeamUser = completionUser;
   completionEvents.length = 0;
   invalidatedUserIds.length = 0;
+  passwordObservedBeforeSave = null;
+  completionUser = {
+    _id: 'google-player-id',
+    email: 'oauth-player@example.com',
+    username: 'temporary-player',
+    userType: 'player',
+    password: 'temporary-password',
+    googleId: 'new-player-google-subject',
+    profile: { displayName: 'OAuth Player', avatar: '' },
+    needsProfileCompletion: true,
+    requiresPasswordSetup: true,
+    playerInfo: null,
+    async save() {
+      if (this.password !== 'temporary-password') {
+        passwordObservedBeforeSave = this.password;
+        this.password = '$2b$10$hashed-player-password';
+      }
+      completionEvents.push('save');
+    },
+    toObject() {
+      return { ...this };
+    }
+  };
+  const playerCompletionRes = createRes();
+  await completeProfile({
+    user: { _id: 'google-player-id' },
+    body: {
+      userType: 'player',
+      username: 'completed_player',
+      displayName: 'Completed Player',
+      gender: 'male',
+      dob: validDob,
+      password: 'player-local-password'
+    }
+  }, playerCompletionRes);
+  assert.strictEqual(playerCompletionRes.statusCode, 200);
+  assert.strictEqual(passwordObservedBeforeSave, 'player-local-password');
+  assert.strictEqual(completionUser.password, '$2b$10$hashed-player-password');
+  assert.strictEqual(completionUser.requiresPasswordSetup, false);
+  assert.strictEqual(completionUser.needsProfileCompletion, false);
+  assert.deepStrictEqual(completionUser.playerInfo.games, []);
+  assert.strictEqual(playerCompletionRes.body.data.user.password, undefined);
+
+  completionEvents.length = 0;
+  invalidatedUserIds.length = 0;
+  completionUser = completedTeamUser;
   completionUser.needsProfileCompletion = true;
   completionUser.username = 'temporary-name';
+  const passwordBeforeCompatibilityCompletion = completionUser.password;
   const compatibilityRes = createRes();
   await completeGoogleProfile({
     user: {
@@ -372,7 +491,7 @@ const dateYearsAgo = (years) => {
 
   assert.strictEqual(compatibilityRes.statusCode, 200);
   assert.strictEqual(completionUser.profile.displayName, 'Stored OAuth Name');
-  assert.strictEqual(completionUser.password, 'temporary-password');
+  assert.strictEqual(completionUser.password, passwordBeforeCompatibilityCompletion);
   assert.strictEqual(completionUser.needsProfileCompletion, false);
 
   console.log('Auth OAuth contract tests passed');

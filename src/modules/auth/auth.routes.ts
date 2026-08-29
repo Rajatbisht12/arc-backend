@@ -85,12 +85,21 @@ const resetPasswordValidation = [
   body("newPassword").isString().isLength({ min: 6, max: 128 }).withMessage("New password must be between 6 and 128 characters")
 ];
 const googleTokenValidation = [
-  body("access_token").isString().isLength({ min: 1, max: 8192 }).withMessage("Invalid Google access token")
+  body("access_token").isString().isLength({ min: 1, max: 8192 }).withMessage("Invalid Google access token"),
+  body("requirePasswordSetup").optional().isBoolean().withMessage("Invalid password setup request")
 ];
 const appleTokenValidation = [
   body("identityToken").isString().isLength({ min: 1, max: 8192 }).withMessage("Invalid Apple identity token"),
   body("displayName").optional().isString().isLength({ max: 100 }).withMessage("Display name is too long"),
-  body("nonce").optional().isString().isLength({ max: 512 }).withMessage("Invalid Apple nonce")
+  body("nonce").optional().isString().isLength({ max: 512 }).withMessage("Invalid Apple nonce"),
+  body("requirePasswordSetup").optional().isBoolean().withMessage("Invalid password setup request")
+];
+const profileCompletionValidation = [
+  body("password")
+    .optional()
+    .isString()
+    .isLength({ min: 6, max: 128 })
+    .withMessage("Password must be between 6 and 128 characters")
 ];
 const passwordCheckValidation = [
   body("password")
@@ -176,7 +185,13 @@ router.post("/upload-banner", protect, uploadSingle("image"), legacyAuthControll
 router.put("/change-password", protect, changePasswordValidation, handleValidationErrors, legacyAuthController.changePassword);
 router.delete("/account", protect, deleteAccountValidation, handleValidationErrors, legacyAuthController.deleteAccount);
 router.post("/logout", protectAllowIncomplete, legacyAuthController.logout);
-router.post("/complete-profile", protectAllowIncomplete, legacyAuthController.completeProfile);
+router.post(
+  "/complete-profile",
+  protectAllowIncomplete,
+  profileCompletionValidation,
+  handleValidationErrors,
+  legacyAuthController.completeProfile
+);
 router.post("/complete-google-profile", protectAllowIncomplete, legacyAuthController.completeGoogleProfile);
 
 router.post("/google/token", externalAuthLimiter, googleTokenValidation, handleValidationErrors, legacyAuthController.googleTokenLogin);

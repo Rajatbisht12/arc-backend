@@ -642,6 +642,14 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // Set only for newly-created mobile OAuth accounts. Existing OAuth users
+  // intentionally default to false so this feature cannot create a migration
+  // loop. The flag is cleared atomically when onboarding stores a real local
+  // password.
+  requiresPasswordSetup: {
+    type: Boolean,
+    default: false
+  },
   mutedChats: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
