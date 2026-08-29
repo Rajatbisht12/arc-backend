@@ -1103,7 +1103,7 @@ const logout = async (req, res) => {
 const completeProfile = async (req, res) => {
   try {
     const userId = req.user._id;
-    let { userType, username, displayName, gender, dob, bio } = req.body;
+    let { userType, username, displayName, gender, dob, bio, password } = req.body;
     username = normalizeUsernameInput(username);
 
     // Get user
@@ -1134,6 +1134,24 @@ const completeProfile = async (req, res) => {
 
     ({ userType, displayName, gender, dob, bio } = onboardingProfile.value);
 
+    const passwordSetupRequired = user.requiresPasswordSetup === true;
+    if (passwordSetupRequired) {
+      if (!user.googleId && !user.appleId) {
+        return res.status(409).json({
+          success: false,
+          message: 'Password setup is not available for this account',
+          error: 'INVALID_PASSWORD_SETUP_STATE'
+        });
+      }
+      if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must be between 6 and 128 characters',
+          error: 'PASSWORD_POLICY_FAILED'
+        });
+      }
+    }
+
     // Validate username
     const usernameValidationError = validateUsernameCandidate(username);
     if (usernameValidationError) {
@@ -1160,6 +1178,12 @@ const completeProfile = async (req, res) => {
     user.profile.gender = gender;
     user.profile.dob = dob;
     user.profile.bio = bio;
+    if (passwordSetupRequired) {
+      // Assignment deliberately goes through the User model's existing
+      // pre-save bcrypt hook. The controller never stores or returns plaintext.
+      user.password = password;
+      user.requiresPasswordSetup = false;
+    }
     user.needsProfileCompletion = false;
 
     // Initialize type-specific fields if not already set
@@ -1380,7 +1404,7 @@ const generateGuestToken = async (_req, res) => {
 
 const googleTokenLogin = async (req, res) => {
   try {
-    const { access_token } = req.body;
+    const { access_token, requirePasswordSetup } = req.body;
     if (!access_token) {
       return res.status(400).json({ success: false, message: 'access_token is required' });
     }
@@ -1447,6 +1471,7 @@ const googleTokenLogin = async (req, res) => {
           avatar: avatarUrl
         },
         needsProfileCompletion: true,
+        requiresPasswordSetup: requirePasswordSetup === true,
         isActive: true
       });
     } else {
@@ -1535,7 +1560,7 @@ const verifyAppleIdentityToken = async (identityToken) => {
 
 const appleMobileLogin = async (req, res) => {
   try {
-    const { identityToken, displayName, nonce } = req.body;
+    const { identityToken, displayName, nonce, requirePasswordSetup } = req.body;
     if (!identityToken) {
       return res.status(400).json({ success: false, message: 'identityToken is required' });
     }
@@ -1601,6 +1626,7 @@ const appleMobileLogin = async (req, res) => {
             avatar: ''
           },
           needsProfileCompletion: true,
+          requiresPasswordSetup: requirePasswordSetup === true,
           isActive: true
         });
       } catch (createError) {

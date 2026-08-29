@@ -9,7 +9,7 @@
     "start": "node dist/launcher.js",
     "typecheck": "tsc --noEmit",
     "test:auth-oauth-contracts": "node src/legacy-src/controllers/authController.oauth.test.js",
-    "test:auth-onboarding": "node src/legacy-src/utils/onboardingValidation.test.js && node src/legacy-src/middleware/auth.profile-completion.test.js && node src/legacy-src/controllers/authController.oauth.test.js && node src/legacy-src/config/passport.oauth.test.js",
+    "test:auth-onboarding": "node src/legacy-src/utils/onboardingValidation.test.js && node src/legacy-src/middleware/auth.profile-completion.test.js && node src/legacy-src/controllers/authController.oauth.test.js && node src/legacy-src/models/User.oauthPasswordSetup.test.js && node src/legacy-src/config/passport.oauth.test.js",
     "test:auth-limiter": "node src/legacy-src/middleware/progressiveAuthLimiter.test.js",
     "test:profile-social-links": "node --test src/legacy-src/utils/profileSocialLinks.test.js",
     "test:auth-login-audit": "node src/legacy-src/utils/userLoginAudit.test.js && node src/legacy-src/models/UserLoginEvent.test.js",
