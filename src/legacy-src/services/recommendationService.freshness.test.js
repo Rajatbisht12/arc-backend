@@ -7,6 +7,7 @@ const {
   pickNextCursorPost,
   buildImpressionOps,
   getSeenPenalty,
+  getRecentTopPositionPenalty,
   getDampedBoostScore,
   normalizeSessionSeed,
   stableNoise,
@@ -14,7 +15,9 @@ const {
   decodeCursor,
   BOOST_USER_COOLDOWN_HOURS,
   BOOST_FREQUENCY_CAP,
-  BOOST_TOP_WINDOW
+  BOOST_TOP_WINDOW,
+  TOP_POSITION_PENALTY_BASE,
+  TOP_POSITION_PENALTY_WINDOW_HOURS
 } = require('./recommendationService');
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -100,6 +103,59 @@ assert(shownYesterday < justShown && shownYesterday > 0, 'the penalty must decay
 assert.strictEqual(shownLongAgo, 0, 'posts resurface after the cooldown');
 const repeatShown = getSeenPenalty({ lastShownAt: now - (0.5 * HOUR_MS), impressionCount: 4 }, now);
 assert(repeatShown > justShown, 'repeat impressions must sink a post harder');
+
+const priorTopEntry = {
+  lastShownAt: now - (5 * 60 * 1000),
+  impressionCount: 1,
+  lastPositionShownAt: now - (5 * 60 * 1000),
+  lastPositionShown: 0,
+  lastSessionId: 'session-before-refresh'
+};
+const priorSecondEntry = { ...priorTopEntry, lastPositionShown: 1 };
+const priorThirdEntry = { ...priorTopEntry, lastPositionShown: 2 };
+const priorFourthEntry = { ...priorTopEntry, lastPositionShown: 3 };
+
+assert.deepStrictEqual(TOP_POSITION_PENALTY_BASE, [125, 70, 35]);
+assert(
+  getRecentTopPositionPenalty(priorTopEntry, now, 'session-after-refresh')
+    > getRecentTopPositionPenalty(priorSecondEntry, now, 'session-after-refresh'),
+  'the previous first item must receive the strongest refresh penalty'
+);
+assert(
+  getRecentTopPositionPenalty(priorSecondEntry, now, 'session-after-refresh')
+    > getRecentTopPositionPenalty(priorThirdEntry, now, 'session-after-refresh'),
+  'the position penalty must taper through the previous top three'
+);
+assert.strictEqual(
+  getRecentTopPositionPenalty(priorFourthEntry, now, 'session-after-refresh'),
+  0,
+  'items outside the previous top three keep their normal relevance score'
+);
+assert.strictEqual(
+  getRecentTopPositionPenalty(priorTopEntry, now, 'session-before-refresh'),
+  0,
+  'the same session must remain stable for pagination and revalidation'
+);
+assert.strictEqual(
+  getRecentTopPositionPenalty({
+    ...priorTopEntry,
+    lastPositionShownAt: now - ((TOP_POSITION_PENALTY_WINDOW_HOURS + 1) * HOUR_MS)
+  }, now, 'session-after-refresh'),
+  0,
+  'the top-position penalty must expire so content is never permanently hidden'
+);
+
+const sameExposure = {
+  lastShownAt: priorTopEntry.lastShownAt,
+  impressionCount: priorTopEntry.impressionCount,
+  lastPositionShownAt: priorTopEntry.lastPositionShownAt,
+  lastSessionId: priorTopEntry.lastSessionId
+};
+assert(
+  getSeenPenalty({ ...sameExposure, lastPositionShown: 0 }, now, 'session-after-refresh')
+    > getSeenPenalty({ ...sameExposure, lastPositionShown: 4 }, now, 'session-after-refresh') + 100,
+  'equal page-wide exposure must not leave the previous first item with the same penalty as every other item'
+);
 
 const seenContext = baseContext({
   seenMap: new Map([['p-seen', { lastShownAt: now - (1 * HOUR_MS), impressionCount: 2 }]])
@@ -299,13 +355,52 @@ assert(differingSessions.length > 0,
 
 const seenAfterFirstPage = new Map(sessionOne.map((id, index) => [id, {
   lastShownAt: now - (5 * 60 * 1000),
-  impressionCount: 1 + (index === 0 ? 1 : 0)
+  impressionCount: 1,
+  lastPositionShownAt: now - (5 * 60 * 1000),
+  lastPositionShown: index,
+  lastSessionId: 'session-1'
 }]));
 const nextSession = rankPool(`${USER_ID}:feed:session-6`, seenAfterFirstPage);
 assert.notStrictEqual(nextSession[0], sessionOne[0],
   'the previous top post must not immediately repeat at position 1');
 assert(nextSession.slice(0, 3).some((id) => !sessionOne.includes(id)),
   'fresh unseen posts must break into the top after a refresh');
+
+// Device regression: when the Clips inventory fits entirely on page one,
+// every clip receives the same generic impression penalty. The positional
+// signal must still rotate the first clip on the next explicit session.
+function rankFullyExposedClips(sessionId, seenMap = new Map()) {
+  const pool = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'].map((id, index) =>
+    makePost(id, {
+      authorId: `clip-author-${index}`,
+      createdAt: new Date(now - ((index + 1) * HOUR_MS)),
+      likes: new Array(Math.max(0, 8 - index)).fill({ user: 'u' })
+    }));
+  const context = baseContext({
+    mode: 'clips',
+    seed: `${USER_ID}:clips:${sessionId}`,
+    sessionId,
+    seenMap
+  });
+  return selectDiversePosts(pool
+    .map((post) => ({ post, score: scorePost(post, context) }))
+    .sort((a, b) => b.score - a.score), pool.length, 'clips')
+    .map((item) => String(item.post._id));
+}
+
+const firstClipSession = rankFullyExposedClips('clips-session-1');
+const fullySeenClips = new Map(firstClipSession.map((id, index) => [id, {
+  lastShownAt: now - (5 * 60 * 1000),
+  impressionCount: 1,
+  lastPositionShownAt: now - (5 * 60 * 1000),
+  lastPositionShown: index,
+  lastSessionId: 'clips-session-1'
+}]));
+const secondClipSession = rankFullyExposedClips('clips-session-2', fullySeenClips);
+assert.notStrictEqual(secondClipSession[0], firstClipSession[0],
+  'a fully exposed Clips page must not keep the same first clip in the next session');
+assert.notDeepStrictEqual(secondClipSession, firstClipSession,
+  'a fully exposed Clips page must not keep an identical sequence after refresh');
 
 // No duplicates within a ranked page.
 assert.strictEqual(new Set(nextSession).size, nextSession.length);

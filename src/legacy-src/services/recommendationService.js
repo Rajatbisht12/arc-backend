@@ -22,6 +22,13 @@ const SEEN_COOLDOWN_HOURS = 36;
 const SEEN_PENALTY_BASE = 85;
 const SEEN_PENALTY_HALF_LIFE_HOURS = 7;
 const SEEN_FETCH_LIMIT = 400;
+// A generic seen penalty affects every item delivered on a page almost
+// equally. Preserve its long-lived exposure control, but add a short-lived
+// positional penalty so the previous session's first few items do not keep
+// winning by the same margin on every explicit refresh.
+const TOP_POSITION_PENALTY_BASE = [125, 70, 35];
+const TOP_POSITION_PENALTY_HALF_LIFE_HOURS = 2;
+const TOP_POSITION_PENALTY_WINDOW_HOURS = 8;
 // Boosted delivery fairness: a campaign keeps its paid score bonus, but not
 // for the same viewer back-to-back, and never more than one boosted slot in
 // the first page window.
@@ -375,7 +382,7 @@ async function getRecentlySeenMap(userId, mode) {
   })
     .sort({ updatedAt: -1 })
     .limit(SEEN_FETCH_LIMIT)
-    .select('post updatedAt impressionCount')
+    .select('post eventType updatedAt impressionCount positionShown sessionId')
     .lean()
     .catch(() => []);
 
@@ -383,15 +390,32 @@ async function getRecentlySeenMap(userId, mode) {
   rows.forEach((row) => {
     const postId = normalizeId(row.post);
     if (!postId) return;
-    const existing = seenMap.get(postId);
-    const lastShownAt = new Date(row.updatedAt || Date.now()).getTime();
-    const impressionCount = Math.max(1, Number(row.impressionCount) || 1);
-    if (!existing) {
-      seenMap.set(postId, { lastShownAt, impressionCount });
-      return;
+    const rowUpdatedAt = new Date(row.updatedAt || Date.now()).getTime();
+    const existing = seenMap.get(postId) || {
+      lastShownAt: 0,
+      impressionCount: 1,
+      lastPositionShownAt: 0,
+      lastPositionShown: null,
+      lastSessionId: null
+    };
+
+    existing.lastShownAt = Math.max(existing.lastShownAt, rowUpdatedAt);
+    if (row.eventType === 'impression') {
+      existing.impressionCount = Math.max(
+        existing.impressionCount,
+        Math.max(1, Number(row.impressionCount) || 1)
+      );
+      if (rowUpdatedAt >= existing.lastPositionShownAt) {
+        existing.lastPositionShownAt = rowUpdatedAt;
+        existing.lastPositionShown = Number.isInteger(row.positionShown)
+          ? row.positionShown
+          : null;
+        existing.lastSessionId = typeof row.sessionId === 'string' && row.sessionId
+          ? row.sessionId
+          : null;
+      }
     }
-    existing.lastShownAt = Math.max(existing.lastShownAt, lastShownAt);
-    existing.impressionCount = Math.max(existing.impressionCount, impressionCount);
+    seenMap.set(postId, existing);
   });
   return seenMap;
 }
@@ -537,14 +561,37 @@ async function getInterestProfile(userId, relationship) {
   };
 }
 
-function getSeenPenalty(seenEntry, now) {
+function getRecentTopPositionPenalty(seenEntry, now, currentSessionId) {
+  if (!seenEntry || !Number.isInteger(seenEntry.lastPositionShown)) return 0;
+  if (seenEntry.lastPositionShown < 0 || seenEntry.lastPositionShown >= TOP_POSITION_PENALTY_BASE.length) {
+    return 0;
+  }
+  // Pagination and silent revalidation inside one session must keep the same
+  // ordering. Positional rotation only applies when the client intentionally
+  // starts a different feed/clips session.
+  if (currentSessionId && seenEntry.lastSessionId === currentSessionId) return 0;
+
+  const lastPositionShownAt = Number(seenEntry.lastPositionShownAt) || 0;
+  if (!lastPositionShownAt) return 0;
+  const hoursSincePosition = Math.max(0, (now - lastPositionShownAt) / 36e5);
+  if (hoursSincePosition >= TOP_POSITION_PENALTY_WINDOW_HOURS) return 0;
+
+  const base = TOP_POSITION_PENALTY_BASE[seenEntry.lastPositionShown];
+  return base * Math.exp(-hoursSincePosition / TOP_POSITION_PENALTY_HALF_LIFE_HOURS);
+}
+
+function getSeenPenalty(seenEntry, now, currentSessionId) {
   if (!seenEntry?.lastShownAt) return 0;
   const hoursSinceShown = Math.max(0, (now - seenEntry.lastShownAt) / 36e5);
-  if (hoursSinceShown >= SEEN_COOLDOWN_HOURS) return 0;
+  const topPositionPenalty = getRecentTopPositionPenalty(seenEntry, now, currentSessionId);
+  if (hoursSinceShown >= SEEN_COOLDOWN_HOURS) return topPositionPenalty;
   // Repeat exposures decay slower so a post shown many times sinks harder,
   // but the penalty always reaches zero — content is never permanently hidden.
   const repeatFactor = Math.min(2.2, 1 + (Math.max(0, (seenEntry.impressionCount || 1) - 1) * 0.35));
-  return SEEN_PENALTY_BASE * Math.exp(-hoursSinceShown / SEEN_PENALTY_HALF_LIFE_HOURS) * repeatFactor;
+  const exposurePenalty = SEEN_PENALTY_BASE
+    * Math.exp(-hoursSinceShown / SEEN_PENALTY_HALF_LIFE_HOURS)
+    * repeatFactor;
+  return exposurePenalty + topPositionPenalty;
 }
 
 function getDampedBoostScore(post, { mode, now, boostDeliveryMap }) {
@@ -562,7 +609,15 @@ function getDampedBoostScore(post, { mode, now, boostDeliveryMap }) {
   return rawBoost;
 }
 
-function scorePost(post, { mode, relationship, interestProfile, seed, seenMap, boostDeliveryMap }) {
+function scorePost(post, {
+  mode,
+  relationship,
+  interestProfile,
+  seed,
+  sessionId,
+  seenMap,
+  boostDeliveryMap
+}) {
   const now = Date.now();
   const createdAt = new Date(post.createdAt).getTime();
   const hoursOld = Math.max(0, (now - createdAt) / 36e5);
@@ -600,7 +655,7 @@ function scorePost(post, { mode, relationship, interestProfile, seed, seenMap, b
   const newPostKicker = hoursOld < NEW_POST_KICKER_HOURS
     ? (mode === 'clips' ? 20 : 26) * Math.exp(-hoursOld / 2.5)
     : 0;
-  const seenPenalty = getSeenPenalty(seenMap?.get(normalizeId(post._id)), now);
+  const seenPenalty = getSeenPenalty(seenMap?.get(normalizeId(post._id)), now, sessionId);
 
   const score =
     freshness * (mode === 'clips' ? 85 : 70)
@@ -784,7 +839,18 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   // so consecutive refreshes explore a different ordering.
   const seed = `${relationship.currentUserId || 'guest'}:${mode}:${sessionSeed}`;
   const scored = candidates
-    .map((post) => ({ post, score: scorePost(post, { mode, relationship, interestProfile, seed, seenMap, boostDeliveryMap }) }))
+    .map((post) => ({
+      post,
+      score: scorePost(post, {
+        mode,
+        relationship,
+        interestProfile,
+        seed,
+        sessionId: sessionSeed,
+        seenMap,
+        boostDeliveryMap
+      })
+    }))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return new Date(b.post.createdAt).getTime() - new Date(a.post.createdAt).getTime();
@@ -885,7 +951,9 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
           isBoosted,
           boostWeight: isBoosted ? getDampedBoostScore(post, { mode, now: rankingNow, boostDeliveryMap }) : 0,
           isPreviouslySeen,
-          seenPenalty: Math.round(getSeenPenalty(seenMap.get(postId), rankingNow) * 100) / 100,
+          seenPenalty: Math.round(getSeenPenalty(seenMap.get(postId), rankingNow, sessionSeed) * 100) / 100,
+          previousPosition: seenMap.get(postId)?.lastPositionShown ?? null,
+          previousSessionId: seenMap.get(postId)?.lastSessionId ?? null,
           freshness: Math.round(Math.exp(-hoursOld / (mode === 'clips' ? 96 : 72)) * 1000) / 1000,
           hoursOld: Math.round(hoursOld * 10) / 10,
           newPostKicker: hoursOld < NEW_POST_KICKER_HOURS,
@@ -945,6 +1013,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
         'diversity',
         'session_exploration',
         'seen_post_cooldown',
+        'previous_top_position_penalty',
         'boost_campaign_score',
         'boost_frequency_cap',
         'boost_slot_rotation',
@@ -1016,6 +1085,7 @@ module.exports = {
   pickNextCursorPost,
   buildImpressionOps,
   getSeenPenalty,
+  getRecentTopPositionPenalty,
   getDampedBoostScore,
   normalizeSessionSeed,
   stableNoise,
@@ -1029,6 +1099,8 @@ module.exports = {
   normalizeCompletionRate,
   MAX_ENGAGEMENT_DURATION_MS,
   SEEN_COOLDOWN_HOURS,
+  TOP_POSITION_PENALTY_BASE,
+  TOP_POSITION_PENALTY_WINDOW_HOURS,
   BOOST_USER_COOLDOWN_HOURS,
   BOOST_FREQUENCY_CAP,
   BOOST_TOP_WINDOW
