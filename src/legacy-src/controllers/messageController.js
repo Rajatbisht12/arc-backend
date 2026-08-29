@@ -1658,11 +1658,22 @@ const updateChatRoom = async (req, res) => {
       });
     }
 
-    // Check if user is admin
+    // Resolve membership before applying capability rules. A room with member
+    // editing enabled still must never be editable by an unrelated user who
+    // happens to know its id.
     const isAdmin = chatRoom.creator.toString() === userId.toString() || 
                    chatRoom.members.some(member => 
                      member.user.toString() === userId.toString() && member.role === 'admin'
                    );
+    const isMember = isAdmin || chatRoom.members.some(member =>
+      member.user.toString() === userId.toString()
+    );
+    if (!isMember) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not a member of this group'
+      });
+    }
 
     // Check editGroupSettings permission — if disabled, only admins can edit
     const editAllowed = chatRoom.memberPermissions?.editGroupSettings !== false;
@@ -1739,14 +1750,28 @@ const updateChatRoom = async (req, res) => {
         systemMessages.forEach(msg => {
           io.to(`chat-${chatRoom._id}`).emit('newMessage', { chatId: chatRoom._id.toString(), message: msg });
         });
-        // Notify all members of group info update
-        io.to(`chat-${chatRoom._id}`).emit('groupInfoUpdated', {
-          chatRoomId: chatRoom._id,
-          name: chatRoom.name,
-          description: chatRoom.description,
-          avatar: chatRoom.avatar
-        });
       }
+    }
+
+    // Metadata updates must be broadcast even when no system message is
+    // created. In particular, an avatar-only save previously succeeded but
+    // never notified open chat headers or conversation lists.
+    if (io) {
+      const groupInfoPayload = {
+        chatRoomId: chatRoom._id,
+        name: chatRoom.name,
+        description: chatRoom.description,
+        avatar: chatRoom.avatar,
+        updatedAt: chatRoom.updatedAt
+      };
+      io.to(`chat-${chatRoom._id}`).emit('groupInfoUpdated', groupInfoPayload);
+      const memberUserIds = new Set([
+        chatRoom.creator.toString(),
+        ...chatRoom.members.map(member => member.user.toString())
+      ]);
+      memberUserIds.forEach(memberUserId => {
+        io.to(`user-${memberUserId}`).emit('groupInfoUpdated', groupInfoPayload);
+      });
     }
 
     // Populate and transform for frontend
@@ -2162,6 +2187,20 @@ const updateMemberRole = async (req, res) => {
       }
     } catch (sysErr) {
       log.error('Failed to record admin-change system message:', { error: String(sysErr) });
+    }
+
+    // Role is a live authorization input. Broadcast the canonical result so a
+    // promoted member gains admin UI immediately and a demoted admin loses it
+    // without reopening the group. The target's user room covers clients that
+    // are not currently joined to this chat room.
+    if (io) {
+      const rolePayload = {
+        chatRoomId: chatRoom._id.toString(),
+        memberId: memberId.toString(),
+        role
+      };
+      io.to(`chat-${chatRoom._id}`).emit('groupMemberRoleUpdated', rolePayload);
+      io.to(`user-${memberId}`).emit('groupMemberRoleUpdated', rolePayload);
     }
 
     // Populate and transform for frontend
