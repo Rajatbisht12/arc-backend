@@ -135,6 +135,12 @@ const bootstrap = async () => {
   }>(path.join(backendRootPath, "jobs", "premiumMembershipCron.js"));
   premiumMembershipCron?.startPremiumMembershipCron?.();
 
+  const storyMediaCleanupCron = safeRequire<{
+    startStoryMediaCleanupCron?: () => void;
+    stopStoryMediaCleanupCron?: () => void;
+  }>(path.join(backendRootPath, "jobs", "storyMediaCleanupCron.js"));
+  storyMediaCleanupCron?.startStoryMediaCleanupCron?.();
+
   httpServer.listen(env.PORT, () => {
     logger.info("Server started", {
       port: env.PORT,
@@ -161,6 +167,7 @@ const bootstrap = async () => {
       callSessionService?.stopCallSessionSweeper?.();
       apnsVoipPushService?.stopApnsVoipPushSweeper?.();
       premiumMembershipCron?.stopPremiumMembershipCron?.();
+      storyMediaCleanupCron?.stopStoryMediaCleanupCron?.();
       const { emailWorker, notificationWorker, broadcastWorker } = await import("./infrastructure/jobs/queue");
       await Promise.allSettled([emailWorker.close(), notificationWorker.close(), broadcastWorker.close()]);
     } catch { /* queue may not be initialized */ }

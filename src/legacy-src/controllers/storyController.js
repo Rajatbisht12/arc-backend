@@ -1,8 +1,15 @@
 const Story = require('../models/Story');
+const StoryMediaAsset = require('../models/StoryMediaAsset');
 const StoryView = require('../models/StoryView');
 const User = require('../models/User');
-const { uploadMultipleFiles } = require('../utils/cloudinary');
-const { STORY_MAX_SECONDS, processStoryVideo } = require('../utils/videoProcessing');
+const { uploadMultipleFiles, uploadAudio } = require('../utils/cloudinary');
+const { STORY_MAX_SECONDS, processStoryVideo, probeMediaDuration } = require('../utils/videoProcessing');
+const { validateStoryMusicDuration, validateStoryMusicFile } = require('../utils/storyMusicPolicy');
+const {
+  cleanupStoryAssets,
+  deferStoryAssetCleanup,
+  deletePublicIds,
+} = require('../services/storyMediaCleanupService');
 const log = require('../utils/logger');
 const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
 const mongoose = require('mongoose');
@@ -163,6 +170,8 @@ const createStory = async (req, res) => {
   const clientUploadId = normalizeClientUploadId(
     req.get?.('x-idempotency-key') || req.body?.clientUploadId
   );
+  const uploadedPublicIds = [];
+  let createdStoryId = null;
 
   try {
     if (clientUploadId) {
@@ -193,6 +202,18 @@ const createStory = async (req, res) => {
         message: 'Media upload is not configured. Please set AWS_S3_BUCKET in environment.'
       });
     }
+    if (!mediaFile.mimetype.startsWith('image/') && !mediaFile.mimetype.startsWith('video/')) {
+      return res.status(415).json({ success: false, code: 'STORY_MEDIA_INVALID', message: 'Story media must be an image or video.' });
+    }
+    const musicFile = req.files?.music?.[0];
+    const musicValidation = validateStoryMusicFile(musicFile);
+    if (!musicValidation.ok) {
+      return res.status(musicValidation.statusCode).json({
+        success: false,
+        code: musicValidation.code,
+        message: musicValidation.message,
+      });
+    }
     const isVideo = mediaFile.mimetype.startsWith('video/');
     const uploadFile = isVideo ? await processStoryVideo(mediaFile) : mediaFile;
     const results = await uploadMultipleFiles([uploadFile], 'gaming-social/stories');
@@ -204,18 +225,51 @@ const createStory = async (req, res) => {
         message: 'Story media upload did not complete. Please try again.'
       });
     }
+    uploadedPublicIds.push(mediaPublicId);
     const media = {
       type: isVideo ? 'video' : 'image',
       url: mediaUrl,
       publicId: mediaPublicId
     };
-    const duration = isVideo ? STORY_MAX_SECONDS : 30;
+    const verifiedVideoDuration = isVideo
+      ? Number(uploadFile.duration || await probeMediaDuration(uploadFile))
+      : STORY_MAX_SECONDS;
+    const duration = isVideo
+      ? Math.max(1, Math.min(STORY_MAX_SECONDS, verifiedVideoDuration))
+      : STORY_MAX_SECONDS;
     let musicData;
-    const musicFile = req.files?.music?.[0];
     if (musicFile) {
-      const { uploadAudio } = require('../utils/cloudinary');
+      const verifiedMusicDuration = await probeMediaDuration(musicFile).catch((error) => {
+        const validationError = new Error('Music duration could not be verified. Please choose another MP3.');
+        validationError.statusCode = 422;
+        validationError.code = 'STORY_MUSIC_DURATION_INVALID';
+        validationError.cause = error;
+        throw validationError;
+      });
+      const musicDurationValidation = validateStoryMusicDuration(verifiedMusicDuration);
+      if (!musicDurationValidation.ok) {
+        const durationError = new Error(musicDurationValidation.message);
+        durationError.statusCode = musicDurationValidation.statusCode;
+        durationError.code = musicDurationValidation.code;
+        throw durationError;
+      }
       const musicResult = await uploadAudio(musicFile, 'gaming-social/stories/music');
-      musicData = { url: musicResult.url, publicId: musicResult.publicId };
+      if (!musicResult?.url || !musicResult?.publicId) {
+        const uploadError = new Error('Music upload did not complete. Please retry or remove music.');
+        uploadError.statusCode = 502;
+        uploadError.code = 'STORY_MUSIC_UPLOAD_FAILED';
+        throw uploadError;
+      }
+      uploadedPublicIds.push(musicResult.publicId);
+      musicData = {
+        url: musicResult.url,
+        publicId: musicResult.publicId,
+        filename: musicValidation.filename,
+        mimeType: musicValidation.mimeType,
+        size: musicValidation.size,
+        duration: musicDurationValidation.duration,
+        playbackDuration: Math.min(musicDurationValidation.duration, duration),
+      };
     }
     const story = await Story.create({
       author: req.user._id,
@@ -224,18 +278,53 @@ const createStory = async (req, res) => {
       ...(clientUploadId && { clientUploadId }),
       ...(musicData && { music: musicData })
     });
+    createdStoryId = story._id;
+    await StoryMediaAsset.create({
+      story: story._id,
+      owner: req.user._id,
+      publicIds: uploadedPublicIds,
+      expiresAt: new Date(story.createdAt.getTime() + TWENTY_FOUR_HOURS_MS),
+    });
     return respondWithStory(res, story, 201);
   } catch (err) {
     if (clientUploadId && isDuplicateClientUploadError(err)) {
       const existingStory = await findStoryByClientUploadId(req.user._id, clientUploadId);
       if (existingStory) {
+        await deletePublicIds(uploadedPublicIds).catch(async cleanupError => {
+          await deferStoryAssetCleanup({
+            ownerId: req.user._id,
+            publicIds: uploadedPublicIds,
+            error: cleanupError,
+          }).catch(() => {});
+          log.error('Duplicate Story upload cleanup failed', { error: String(cleanupError) });
+        });
         return respondWithStory(res, existingStory, 200);
       }
     }
+    if (createdStoryId) {
+      await Story.deleteOne({ _id: createdStoryId }).catch(() => {});
+    }
+    await deletePublicIds(uploadedPublicIds).then(async () => {
+      if (createdStoryId) await StoryMediaAsset.deleteOne({ story: createdStoryId }).catch(() => {});
+    }).catch(async cleanupError => {
+      await deferStoryAssetCleanup({
+        storyId: createdStoryId,
+        ownerId: req.user._id,
+        publicIds: uploadedPublicIds,
+        error: cleanupError,
+      }).catch(() => {});
+      log.error('Failed Story creation media cleanup failed', { error: String(cleanupError) });
+    });
     const status = Number(err?.statusCode || 500);
+    const safeMusicError = String(err?.code || '').startsWith('STORY_MUSIC_');
     return res.status(status).json({
       success: false,
-      message: status >= 500 ? 'Failed to create story' : (err.message || 'Failed to create story')
+      ...(err?.code && { code: err.code }),
+      message: safeMusicError
+        ? (err.message || 'Music could not be attached to this Story.')
+        : status >= 500
+          ? 'Failed to create story'
+          : (err.message || 'Failed to create story')
     });
   }
 };
@@ -534,6 +623,15 @@ const deleteStory = async (req, res) => {
       Story.findByIdAndDelete(req.params.storyId),
       StoryView.deleteMany({ story: req.params.storyId })
     ]);
+    cleanupStoryAssets({
+      storyId: story._id,
+      fallbackPublicIds: [story.media?.publicId, story.music?.publicId],
+    }).catch((cleanupError) => {
+      log.error('Story object storage cleanup deferred for retry', {
+        error: String(cleanupError),
+        storyId: String(story._id),
+      });
+    });
     await deleteNotificationsForTarget({ targetType: 'story', targetId: req.params.storyId }).catch((cleanupError) => {
       log.error('Story notification cleanup failed', { error: String(cleanupError), storyId: String(req.params.storyId) });
     });

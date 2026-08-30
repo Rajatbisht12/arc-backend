@@ -31,8 +31,13 @@ const storySchema = new mongoose.Schema({
     viewedAt: { type: Date, default: Date.now }
   }],
   music: {
-    url: { type: String },
-    publicId: { type: String }
+    url: { type: String, trim: true },
+    publicId: { type: String, trim: true },
+    filename: { type: String, trim: true },
+    mimeType: { type: String, enum: ['audio/mpeg'], trim: true },
+    size: { type: Number, min: 1 },
+    duration: { type: Number, min: 0.01 },
+    playbackDuration: { type: Number, min: 0.01, max: 30 }
   }
 }, { timestamps: true });
 

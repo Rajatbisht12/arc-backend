@@ -27,6 +27,7 @@
     "test:clash-royale": "node --test src/legacy-src/utils/clashRoyaleAPI.test.js",
     "test:gaming-stats": "node --test src/legacy-src/utils/gamingStatsPolicy.test.js && node --check src/legacy-src/controllers/userController.js && node --check src/legacy-src/models/User.js",
     "test:message-history": "node --test src/legacy-src/services/messageHistoryWindowService.test.mjs",
+    "test:story-music": "node --test src/legacy-src/utils/storyMusicPolicy.test.js && node --check src/legacy-src/controllers/storyController.js && node --check src/legacy-src/services/storyMediaCleanupService.js && node --check src/legacy-src/jobs/storyMediaCleanupCron.js",
     "test:message-header": "node --test src/legacy-src/controllers/messageDirectHeader.contract.test.js",
     "test:message-media": "node src/legacy-src/config/messageMediaPolicy.test.js && node src/legacy-src/middleware/upload.security.test.js && node src/legacy-src/utils/mediaUploadError.test.js",
     "test:message-deletion": "node --test src/legacy-src/controllers/messageDeletionOwnership.contract.test.js src/legacy-src/controllers/groupConversationDeletion.test.js",
