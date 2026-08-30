@@ -44,6 +44,54 @@ const runFfmpeg = (args) => new Promise((resolve, reject) => {
   });
 });
 
+const runFfprobe = (inputPath) => new Promise((resolve, reject) => {
+  const child = spawn('ffprobe', [
+    '-v', 'error',
+    '-show_entries', 'format=duration',
+    '-of', 'default=noprint_wrappers=1:nokey=1',
+    inputPath,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  let settled = false;
+  const timeout = setTimeout(() => {
+    child.kill('SIGKILL');
+    if (!settled) {
+      settled = true;
+      reject(new Error('Media duration probe timed out'));
+    }
+  }, 20_000);
+  child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+  child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+  child.on('error', (error) => {
+    clearTimeout(timeout);
+    if (!settled) { settled = true; reject(error); }
+  });
+  child.on('close', (code) => {
+    clearTimeout(timeout);
+    if (settled) return;
+    settled = true;
+    const duration = Number.parseFloat(stdout.trim());
+    if (code !== 0 || !Number.isFinite(duration) || duration <= 0) {
+      reject(new Error(stderr || 'Media duration could not be verified'));
+      return;
+    }
+    resolve(duration);
+  });
+});
+
+const probeMediaDuration = async (file) => {
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'arc-media-probe-'));
+  const extension = path.extname(file.originalname || '') || '.bin';
+  const inputPath = path.join(workDir, `${randomUUID()}${extension}`);
+  try {
+    await fs.writeFile(inputPath, file.buffer);
+    return await runFfprobe(inputPath);
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+};
+
 const processStoryVideo = async (file) => {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'arc-story-'));
   const inputPath = path.join(workDir, `${randomUUID()}.input`);
@@ -74,7 +122,10 @@ const processStoryVideo = async (file) => {
       outputPath,
     ]);
 
-    const buffer = await fs.readFile(outputPath);
+    const [buffer, duration] = await Promise.all([
+      fs.readFile(outputPath),
+      runFfprobe(outputPath),
+    ]);
     return {
       ...file,
       buffer,
@@ -82,6 +133,7 @@ const processStoryVideo = async (file) => {
       originalname: `${path.parse(file.originalname || 'story').name}.mp4`,
       size: buffer.length,
       optimized: true,
+      duration,
     };
   } catch (err) {
     if (String(file.mimetype || '').toLowerCase() === 'video/mp4') {
@@ -101,4 +153,5 @@ module.exports = {
   STORY_MAX_SECONDS,
   FFMPEG_TIMEOUT_MS,
   processStoryVideo,
+  probeMediaDuration,
 };

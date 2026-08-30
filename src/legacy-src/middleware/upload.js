@@ -1,6 +1,7 @@
 const multer = require('multer');
 const log = require('../utils/logger');
 const { MESSAGE_MEDIA_POLICY } = require('../config/messageMediaPolicy');
+const { STORY_MUSIC_MAX_BYTES } = require('../utils/storyMusicPolicy');
 
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
@@ -61,11 +62,15 @@ const SAFE_FILE_FILTER_MESSAGES = new Set([
 const sendUploadError = (res, err, maxCount = 10) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      const maxMegabytes = MESSAGE_MEDIA_POLICY.maxFileBytes / (1024 * 1024);
+      const isStoryMusic = err.field === 'music';
+      const maxBytes = isStoryMusic ? STORY_MUSIC_MAX_BYTES : MESSAGE_MEDIA_POLICY.maxFileBytes;
+      const maxMegabytes = maxBytes / (1024 * 1024);
       return res.status(413).json({
         success: false,
-        code: 'FILE_TOO_LARGE',
-        message: `File too large. Maximum size is ${maxMegabytes} MB.`
+        code: isStoryMusic ? 'STORY_MUSIC_TOO_LARGE' : 'FILE_TOO_LARGE',
+        message: isStoryMusic
+          ? `Music file is too large. Maximum allowed size is ${maxMegabytes} MB.`
+          : `File too large. Maximum size is ${maxMegabytes} MB.`
       });
     }
     if (err.code === 'LIMIT_FILE_COUNT') {
