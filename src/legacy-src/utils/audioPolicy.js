@@ -1,3 +1,5 @@
+const path = require('path');
+
 /**
  * Single source of truth for user-uploaded audio limits + validation, shared by
  * the upload route (server-side enforcement) and mirrored by the Mobile client
@@ -14,8 +16,10 @@ const AUDIO_LIMITS = {
   minDurationSec: Number(process.env.AUDIO_MIN_DURATION_SEC) || 1,
 };
 
-// MP3 / M4A / AAC / WAV — the containers the playback stack (expo-av / <audio>)
-// decodes reliably. mp4 audio containers report several of these.
+// MP3 / M4A / AAC / WAV / OGG / FLAC — shared by Story/Post custom music.
+// Server still verifies actual media readability with ffprobe before publish.
+const AUDIO_FORMAT_LABEL = 'MP3, M4A, AAC, WAV, OGG, or FLAC';
+
 const ALLOWED_AUDIO_MIME_TYPES = new Set([
   'audio/mpeg',
   'audio/mp3',
@@ -28,12 +32,49 @@ const ALLOWED_AUDIO_MIME_TYPES = new Set([
   'audio/x-wav',
   'audio/wave',
   'audio/vnd.wave',
+  'audio/ogg',
+  'application/ogg',
+  'audio/flac',
+  'audio/x-flac',
 ]);
 
 const normalizeMime = (mimeType) =>
   typeof mimeType === 'string' ? mimeType.split(';')[0].trim().toLowerCase() : '';
 
 const isAllowedAudioMime = (mimeType) => ALLOWED_AUDIO_MIME_TYPES.has(normalizeMime(mimeType));
+
+const EXTENSION_MIME = {
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  flac: 'audio/flac',
+};
+
+const extensionOf = (value) => {
+  const ext = path.extname(String(value || '')).replace(/^\./, '').toLowerCase();
+  return ext || '';
+};
+
+/**
+ * Resolve a canonical audio MIME for server validation/storage.
+ * Priority:
+ * 1. trusted allow-listed MIME observed by Multer
+ * 2. supported extension as a recovery path for generic OS/browser MIME
+ * 3. non-generic reported MIME so validation can reject it clearly
+ *
+ * This does not by itself trust the extension: upload controllers still verify
+ * media readability/duration with ffprobe before persisting or publishing.
+ */
+const resolveAudioMimeType = (filename, reportedMimeType) => {
+  const reported = normalizeMime(reportedMimeType);
+  if (reported && isAllowedAudioMime(reported)) return reported;
+  const fromExt = EXTENSION_MIME[extensionOf(filename)];
+  if (fromExt) return fromExt;
+  return reported && reported !== 'application/octet-stream' ? reported : '';
+};
 
 /**
  * Validate audio metadata. Returns { ok: true } or { ok: false, message } with a
@@ -43,7 +84,7 @@ const isAllowedAudioMime = (mimeType) => ALLOWED_AUDIO_MIME_TYPES.has(normalizeM
  */
 const validateAudioUpload = ({ mimeType, size, durationSec } = {}) => {
   if (!isAllowedAudioMime(mimeType)) {
-    return { ok: false, code: 'unsupported_format', message: 'Unsupported audio format' };
+    return { ok: false, code: 'unsupported_format', message: `Unsupported audio format. Please upload ${AUDIO_FORMAT_LABEL}.` };
   }
   const bytes = Number(size);
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -69,8 +110,10 @@ const validateAudioUpload = ({ mimeType, size, durationSec } = {}) => {
 
 module.exports = {
   AUDIO_LIMITS,
+  AUDIO_FORMAT_LABEL,
   ALLOWED_AUDIO_MIME_TYPES,
   normalizeMime,
   isAllowedAudioMime,
+  resolveAudioMimeType,
   validateAudioUpload,
 };

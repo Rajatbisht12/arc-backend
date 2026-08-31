@@ -5,13 +5,14 @@ const {
   AUDIO_LIMITS,
   isAllowedAudioMime,
   normalizeMime,
+  resolveAudioMimeType,
   validateAudioUpload,
 } = require('./audioPolicy');
 
 const MB = 1024 * 1024;
 
-test('accepts the four required container MIME types (MP3/M4A/AAC/WAV)', () => {
-  for (const mime of ['audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/wav']) {
+test('accepts the supported custom-audio MIME types', () => {
+  for (const mime of ['audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/wav', 'audio/ogg', 'audio/flac']) {
     assert.equal(isAllowedAudioMime(mime), true, `${mime} should be allowed`);
   }
 });
@@ -28,6 +29,14 @@ test('rejects non-audio and generic types (never trusts extension)', () => {
   }
 });
 
+test('resolves supported extension only as generic-MIME recovery before ffprobe validation', () => {
+  assert.equal(resolveAudioMimeType('song.flac', 'application/octet-stream'), 'audio/flac');
+  assert.equal(resolveAudioMimeType('song.ogg', ''), 'audio/ogg');
+  assert.equal(resolveAudioMimeType('song.m4a', 'audio/mp4'), 'audio/mp4');
+  assert.equal(resolveAudioMimeType('payload.exe', 'application/octet-stream'), '');
+  assert.equal(resolveAudioMimeType('payload.exe', 'application/pdf'), 'application/pdf');
+});
+
 test('valid audio within limits passes', () => {
   const r = validateAudioUpload({ mimeType: 'audio/mpeg', size: 4 * MB, durationSec: 42 });
   assert.deepEqual(r, { ok: true });
@@ -38,11 +47,11 @@ test('duration is optional — absent duration does not fail validation', () => 
   assert.equal(r.ok, true);
 });
 
-test('unsupported format -> unsupported_format / "Unsupported audio format"', () => {
+test('unsupported format -> unsupported_format with supported-format guidance', () => {
   const r = validateAudioUpload({ mimeType: 'application/pdf', size: 1000 });
   assert.equal(r.ok, false);
   assert.equal(r.code, 'unsupported_format');
-  assert.equal(r.message, 'Unsupported audio format');
+  assert.match(r.message, /MP3, M4A, AAC, WAV, OGG, or FLAC/);
 });
 
 test('oversize -> too_large / "File is too large"', () => {

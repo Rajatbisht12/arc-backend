@@ -34,9 +34,31 @@ const storySchema = new mongoose.Schema({
     url: { type: String, trim: true },
     publicId: { type: String, trim: true },
     filename: { type: String, trim: true },
-    mimeType: { type: String, enum: ['audio/mpeg'], trim: true },
+    mimeType: {
+      type: String,
+      enum: [
+        'audio/mpeg',
+        'audio/mp3',
+        'audio/mp4',
+        'audio/aac',
+        'audio/x-aac',
+        'audio/m4a',
+        'audio/x-m4a',
+        'audio/wav',
+        'audio/x-wav',
+        'audio/wave',
+        'audio/vnd.wave',
+        'audio/ogg',
+        'application/ogg',
+        'audio/flac',
+        'audio/x-flac',
+      ],
+      trim: true,
+    },
     size: { type: Number, min: 1 },
     duration: { type: Number, min: 0.01 },
+    startTime: { type: Number, min: 0, default: 0 },
+    endTime: { type: Number, min: 0 },
     playbackDuration: { type: Number, min: 0.01, max: 30 }
   }
 }, { timestamps: true });

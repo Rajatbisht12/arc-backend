@@ -27,8 +27,11 @@ test('Post.attachedMusic distinguishes library vs user_upload and references aud
 });
 
 test('upload controller enforces server-side validation and never trusts the extension', () => {
-  // MIME + size validated from the multer-parsed upload, not the client's word.
-  assert.match(controller, /validateAudioUpload\(\{[\s\S]*?mimeType:\s*file\.mimetype/);
+  // MIME + size are server-resolved from the multer-parsed upload. Extension is
+  // only a recovery path for generic MIME and ffprobe still validates actual media.
+  assert.match(controller, /resolveAudioMimeType\(file\.originalname,\s*file\.mimetype\)/);
+  assert.match(controller, /validateAudioUpload\(\{[\s\S]*?mimeType:\s*resolvedMimeType/);
+  assert.match(controller, /probeMediaDuration\(file\)/);
   assert.match(controller, /size:\s*file\.size\s*\?\?\s*file\.buffer\.length/);
   // No file received -> explicit error, not a crash.
   assert.match(controller, /code:\s*'no_file'/);

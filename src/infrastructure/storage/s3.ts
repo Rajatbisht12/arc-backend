@@ -71,17 +71,24 @@ function getAudioFileExtension(file: { mimetype?: string; originalname?: string 
     "audio/mpeg": "mp3",
     "audio/mp3": "mp3",
     "audio/mp4": "m4a",
+    "audio/m4a": "m4a",
     "audio/x-m4a": "m4a",
     "audio/aac": "aac",
+    "audio/x-aac": "aac",
     "audio/wav": "wav",
     "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/vnd.wave": "wav",
     "audio/ogg": "ogg",
+    "application/ogg": "ogg",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
     "audio/webm": "webm",
   };
   if (byMime[mimetype]) return byMime[mimetype];
 
   const name = String(file.originalname || "").toLowerCase();
-  const match = name.match(/\.(mp3|m4a|aac|wav|ogg|oga|webm)$/);
+  const match = name.match(/\.(mp3|m4a|aac|wav|ogg|oga|flac|webm)$/);
   return match?.[1] || "m4a";
 }
 
@@ -97,6 +104,7 @@ function getAudioContentType(file: { mimetype?: string; originalname?: string })
     wav: "audio/wav",
     ogg: "audio/ogg",
     oga: "audio/ogg",
+    flac: "audio/flac",
     webm: "audio/webm",
   };
   return byExtension[extension] || "audio/mp4";

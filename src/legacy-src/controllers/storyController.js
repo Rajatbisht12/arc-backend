@@ -4,7 +4,7 @@ const StoryView = require('../models/StoryView');
 const User = require('../models/User');
 const { uploadMultipleFiles, uploadAudio } = require('../utils/cloudinary');
 const { STORY_MAX_SECONDS, processStoryVideo, probeMediaDuration } = require('../utils/videoProcessing');
-const { validateStoryMusicDuration, validateStoryMusicFile } = require('../utils/storyMusicPolicy');
+const { resolveStoryMusicTrim, validateStoryMusicDuration, validateStoryMusicFile } = require('../utils/storyMusicPolicy');
 const {
   cleanupStoryAssets,
   deferStoryAssetCleanup,
@@ -240,7 +240,7 @@ const createStory = async (req, res) => {
     let musicData;
     if (musicFile) {
       const verifiedMusicDuration = await probeMediaDuration(musicFile).catch((error) => {
-        const validationError = new Error('Music duration could not be verified. Please choose another MP3.');
+        const validationError = new Error('Music duration could not be verified. Please choose another audio file.');
         validationError.statusCode = 422;
         validationError.code = 'STORY_MUSIC_DURATION_INVALID';
         validationError.cause = error;
@@ -253,7 +253,12 @@ const createStory = async (req, res) => {
         durationError.code = musicDurationValidation.code;
         throw durationError;
       }
-      const musicResult = await uploadAudio(musicFile, 'gaming-social/stories/music');
+      const musicUploadFile = {
+        ...musicFile,
+        mimetype: musicValidation.mimeType,
+        originalname: musicValidation.filename,
+      };
+      const musicResult = await uploadAudio(musicUploadFile, 'gaming-social/stories/music');
       if (!musicResult?.url || !musicResult?.publicId) {
         const uploadError = new Error('Music upload did not complete. Please retry or remove music.');
         uploadError.statusCode = 502;
@@ -261,6 +266,7 @@ const createStory = async (req, res) => {
         throw uploadError;
       }
       uploadedPublicIds.push(musicResult.publicId);
+      const trim = resolveStoryMusicTrim(req.body, musicDurationValidation.duration, duration);
       musicData = {
         url: musicResult.url,
         publicId: musicResult.publicId,
@@ -268,7 +274,9 @@ const createStory = async (req, res) => {
         mimeType: musicValidation.mimeType,
         size: musicValidation.size,
         duration: musicDurationValidation.duration,
-        playbackDuration: Math.min(musicDurationValidation.duration, duration),
+        startTime: trim.startTime,
+        endTime: trim.endTime,
+        playbackDuration: trim.playbackDuration,
       };
     }
     const story = await Story.create({
