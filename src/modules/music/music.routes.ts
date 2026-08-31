@@ -41,6 +41,20 @@ const FALLBACK_TRACKS: TrackResult[] = [
   { trackId: "fb-15", title: "Respawn",        artist: "Pixel Sounds",   url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-15.mp3", coverUrl: "", duration: 335, source: "demo" },
 ];
 
+const hasDirectPlayableUrl = (track: TrackResult): boolean => {
+  const url = typeof track.url === "string" ? track.url.trim() : "";
+  if (!/^https?:\/\//i.test(url)) return false;
+
+  // SoundCloud API stream URLs require provider-side token/redirect handling
+  // and are not a stable direct media URL for Web/RN audio players. Do not
+  // expose them as selectable catalog rows until a media proxy/resolver exists.
+  if (track.source === "soundcloud" && /api\.soundcloud\.com\/.*\/stream/i.test(url)) {
+    return false;
+  }
+
+  return true;
+};
+
 const searchJamendo = async (q: string, tags: string, limit: number): Promise<TrackResult[]> => {
   const clientId = process.env.JAMENDO_CLIENT_ID;
   if (!clientId) return [];
@@ -61,15 +75,17 @@ const searchJamendo = async (q: string, tags: string, limit: number): Promise<Tr
   });
 
   const results = (data as { results?: Array<Record<string, unknown>> }).results || [];
-  return results.map((t) => ({
-    trackId: `jm-${t.id}`,
-    title: t.name || "Unknown",
-    artist: t.artist_name || "Unknown",
-    url: t.audio || "",
-    coverUrl: t.album_image || t.image || "",
-    duration: t.duration || 0,
-    source: "jamendo",
-  }));
+  return results
+    .map((t) => ({
+      trackId: `jm-${t.id}`,
+      title: t.name || "Unknown",
+      artist: t.artist_name || "Unknown",
+      url: t.audio || "",
+      coverUrl: t.album_image || t.image || "",
+      duration: t.duration || 0,
+      source: "jamendo",
+    }))
+    .filter(hasDirectPlayableUrl);
 };
 
 const searchSoundCloud = async (q: string, limit: number): Promise<TrackResult[]> => {
@@ -180,8 +196,9 @@ router.get("/search", optionalAuth, async (req: Request, res: Response) => {
     }
 
     // If both APIs returned nothing, return curated fallback tracks
-    const results = merged.length > 0 ? merged.slice(0, limit) : FALLBACK_TRACKS.slice(0, limit);
-    return res.json({ success: true, tracks: results, fallback: merged.length === 0 });
+    const playableTracks = merged.filter(hasDirectPlayableUrl);
+    const results = playableTracks.length > 0 ? playableTracks.slice(0, limit) : FALLBACK_TRACKS.slice(0, limit);
+    return res.json({ success: true, tracks: results, fallback: playableTracks.length === 0 });
   } catch (err) {
     const axiosError = err as { response?: { status?: number }; message?: string };
     if (axiosError.response?.status === 429) {
