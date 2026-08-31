@@ -31,7 +31,17 @@ const storySchema = new mongoose.Schema({
     viewedAt: { type: Date, default: Date.now }
   }],
   music: {
+    sourceType: {
+      type: String,
+      enum: ['library', 'user_upload'],
+      default: 'library'
+    },
+    trackId: { type: String, trim: true },
+    audioId: { type: mongoose.Schema.Types.ObjectId, ref: 'UserAudio', default: null },
+    title: { type: String, trim: true, default: '' },
+    artist: { type: String, trim: true, default: '' },
     url: { type: String, trim: true },
+    coverUrl: { type: String, trim: true, default: '' },
     publicId: { type: String, trim: true },
     filename: { type: String, trim: true },
     mimeType: {
@@ -59,7 +69,8 @@ const storySchema = new mongoose.Schema({
     duration: { type: Number, min: 0.01 },
     startTime: { type: Number, min: 0, default: 0 },
     endTime: { type: Number, min: 0 },
-    playbackDuration: { type: Number, min: 0.01, max: 30 }
+    playbackDuration: { type: Number, min: 0.01, max: 30 },
+    copyrightConfirmedAt: { type: Date, default: null }
   }
 }, { timestamps: true });
 
