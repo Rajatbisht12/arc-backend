@@ -1,6 +1,7 @@
 const UserAudio = require('../models/UserAudio');
-const { validateAudioUpload, AUDIO_LIMITS } = require('../utils/audioPolicy');
+const { validateAudioUpload, resolveAudioMimeType, AUDIO_LIMITS } = require('../utils/audioPolicy');
 const { uploadAudio, deleteFile } = require('../utils/cloudinary');
+const { probeMediaDuration } = require('../utils/videoProcessing');
 
 const AUDIO_FOLDER = 'gaming-social/audio/user-uploads';
 
@@ -15,11 +16,6 @@ const cleanText = (v, max = 200) =>
 
 // String 'true'/'1' (multipart form fields arrive as strings) or a real boolean.
 const isTruthyFlag = (v) => v === true || v === 'true' || v === '1' || v === 1;
-
-const toDurationSec = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
-};
 
 /**
  * Canonical audio payload returned to clients. Published content references
@@ -58,17 +54,37 @@ const uploadUserAudio = async (req, res) => {
       return res.status(400).json({ success: false, code: 'no_file', message: 'No audio file provided' });
     }
 
-    const durationSec = toDurationSec(req.body.duration);
-
-    // Server-side validation — MIME allow-list + size (+ duration when the client
-    // provided it). Never trusts the file extension.
-    const check = validateAudioUpload({
-      mimeType: file.mimetype,
+    // Server-side validation — allow-listed MIME + size first, then ffprobe-based
+    // readability/duration verification. Extension is only a recovery path for
+    // generic OS/browser MIME; ffprobe remains the actual-media authority.
+    const resolvedMimeType = resolveAudioMimeType(file.originalname, file.mimetype);
+    const metadataCheck = validateAudioUpload({
+      mimeType: resolvedMimeType,
       size: file.size ?? file.buffer.length,
-      durationSec,
     });
-    if (!check.ok) {
-      return res.status(400).json({ success: false, code: check.code, message: check.message });
+    if (!metadataCheck.ok) {
+      return res.status(400).json({ success: false, code: metadataCheck.code, message: metadataCheck.message });
+    }
+
+    let verifiedDurationSec;
+    try {
+      verifiedDurationSec = await probeMediaDuration(file);
+    } catch (probeErr) {
+      console.error('Audio duration probe failed:', probeErr?.message);
+      return res.status(422).json({
+        success: false,
+        code: 'unreadable',
+        message: 'Audio file could not be read',
+      });
+    }
+
+    const durationCheck = validateAudioUpload({
+      mimeType: resolvedMimeType,
+      size: file.size ?? file.buffer.length,
+      durationSec: verifiedDurationSec,
+    });
+    if (!durationCheck.ok) {
+      return res.status(400).json({ success: false, code: durationCheck.code, message: durationCheck.message });
     }
 
     // Upload to storage first; only persist a row if storage succeeded, so a
@@ -76,7 +92,7 @@ const uploadUserAudio = async (req, res) => {
     let stored;
     try {
       stored = await uploadAudio(
-        { buffer: file.buffer, mimetype: file.mimetype, originalname: file.originalname },
+        { buffer: file.buffer, mimetype: resolvedMimeType, originalname: file.originalname },
         AUDIO_FOLDER
       );
     } catch (storageErr) {
@@ -96,9 +112,9 @@ const uploadUserAudio = async (req, res) => {
         url: stored.url,
         title: cleanText(req.body.title),
         artistName: cleanText(req.body.artistName),
-        mimeType: file.mimetype,
+        mimeType: resolvedMimeType,
         fileSize: file.size ?? file.buffer.length,
-        duration: durationSec || 0,
+        duration: verifiedDurationSec || 0,
         sourceType: 'user_upload',
         status: 'ready',
         copyrightConfirmedAt: isTruthyFlag(req.body.copyrightConfirmed) ? new Date() : null,
