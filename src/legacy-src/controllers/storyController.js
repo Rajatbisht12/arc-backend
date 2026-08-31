@@ -2,6 +2,7 @@ const Story = require('../models/Story');
 const StoryMediaAsset = require('../models/StoryMediaAsset');
 const StoryView = require('../models/StoryView');
 const User = require('../models/User');
+const UserAudio = require('../models/UserAudio');
 const { uploadMultipleFiles, uploadAudio } = require('../utils/cloudinary');
 const { STORY_MAX_SECONDS, processStoryVideo, probeMediaDuration } = require('../utils/videoProcessing');
 const { resolveStoryMusicTrim, validateStoryMusicDuration, validateStoryMusicFile } = require('../utils/storyMusicPolicy');
@@ -66,6 +67,135 @@ const normalizeClientUploadId = (value) => {
   const raw = String(value || '').trim();
   if (!raw || raw.length > MAX_CLIENT_UPLOAD_ID_LENGTH) return '';
   return raw;
+};
+
+const cleanMusicText = (value, max = 200) => (
+  typeof value === 'string'
+    ? value
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x1f\x7f]/g, '')
+      .trim()
+      .slice(0, max)
+    : ''
+);
+
+const isTruthyFlag = (value) => value === true || value === 'true' || value === '1' || value === 1;
+
+const storyMusicError = (statusCode, code, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+};
+
+const parseAttachedMusicPayload = (value) => {
+  if (!value) return null;
+  try {
+    return typeof value === 'string' ? JSON.parse(value) : value;
+  } catch (_) {
+    throw storyMusicError(400, 'STORY_MUSIC_INVALID_PAYLOAD', 'Story music metadata is invalid.');
+  }
+};
+
+const getTrimBodyFromAttachedMusic = (payload = {}) => ({
+  musicStartTime: payload.musicStartTime ?? payload.musicStart ?? payload.musicOffset ?? payload.startTime,
+  musicEndTime: payload.musicEndTime ?? payload.endTime,
+  musicPlaybackDuration: payload.musicPlaybackDuration ?? payload.playbackDuration,
+});
+
+const resolveAttachedStoryMusic = async ({ payload, userId, storyDuration }) => {
+  if (!payload || typeof payload !== 'object') return null;
+  const sourceType = payload.sourceType === 'user_upload' ? 'user_upload' : 'library';
+
+  if (sourceType === 'user_upload') {
+    if (!payload.audioId || !mongoose.Types.ObjectId.isValid(payload.audioId)) {
+      throw storyMusicError(400, 'STORY_MUSIC_UPLOAD_NOT_FOUND', 'Uploaded music could not be found.');
+    }
+
+    const audioDoc = await UserAudio.findOne({
+      _id: payload.audioId,
+      owner: userId,
+      removed: { $ne: true },
+    });
+    if (!audioDoc) {
+      throw storyMusicError(404, 'STORY_MUSIC_UPLOAD_NOT_FOUND', 'Uploaded music could not be found.');
+    }
+    if (audioDoc.status && audioDoc.status !== 'ready') {
+      throw storyMusicError(422, 'STORY_MUSIC_NOT_READY', 'Uploaded music is not ready yet.');
+    }
+
+    const confirmedAt = audioDoc.copyrightConfirmedAt
+      || (isTruthyFlag(payload.copyrightConfirmed) ? new Date() : null);
+    if (!confirmedAt) {
+      throw storyMusicError(403, 'STORY_MUSIC_RIGHTS_REQUIRED', 'Confirm you have rights to use this audio before attaching it.');
+    }
+
+    const durationValidation = validateStoryMusicDuration(audioDoc.duration);
+    if (!durationValidation.ok) {
+      throw storyMusicError(durationValidation.statusCode, durationValidation.code, durationValidation.message);
+    }
+
+    const trim = resolveStoryMusicTrim(
+      getTrimBodyFromAttachedMusic(payload),
+      durationValidation.duration,
+      storyDuration,
+    );
+
+    if (!audioDoc.copyrightConfirmedAt) {
+      audioDoc.copyrightConfirmedAt = confirmedAt;
+      audioDoc.save().catch(() => {});
+    }
+
+    return {
+      sourceType: 'user_upload',
+      audioId: audioDoc._id,
+      trackId: undefined,
+      title: cleanMusicText(audioDoc.title || payload.title || 'Custom track'),
+      artist: cleanMusicText(audioDoc.artistName || payload.artist || 'Custom track'),
+      url: audioDoc.url,
+      coverUrl: '',
+      filename: cleanMusicText(audioDoc.title || payload.title || 'custom-track'),
+      mimeType: audioDoc.mimeType || undefined,
+      size: audioDoc.fileSize || undefined,
+      duration: durationValidation.duration,
+      startTime: trim.startTime,
+      endTime: trim.endTime,
+      playbackDuration: trim.playbackDuration,
+      copyrightConfirmedAt: confirmedAt,
+    };
+  }
+
+  const url = cleanMusicText(payload.url, 2048);
+  if (!url || !/^https?:\/\//i.test(url)) {
+    throw storyMusicError(400, 'STORY_MUSIC_INVALID_URL', 'Selected music is unavailable. Choose another track.');
+  }
+
+  const declaredDuration = Number(payload.duration);
+  const inferredDuration = Number.isFinite(declaredDuration) && declaredDuration > 0
+    ? declaredDuration
+    : Math.max(Number(payload.endTime) || 0, storyDuration);
+  if (!Number.isFinite(inferredDuration) || inferredDuration <= 0) {
+    throw storyMusicError(400, 'STORY_MUSIC_DURATION_INVALID', 'Selected music is unavailable. Choose another track.');
+  }
+
+  const trim = resolveStoryMusicTrim(
+    getTrimBodyFromAttachedMusic(payload),
+    inferredDuration,
+    storyDuration,
+  );
+
+  return {
+    sourceType: 'library',
+    trackId: cleanMusicText(payload.trackId, 120) || undefined,
+    title: cleanMusicText(payload.title || 'Selected track'),
+    artist: cleanMusicText(payload.artist || 'Music'),
+    url,
+    coverUrl: cleanMusicText(payload.coverUrl, 2048),
+    duration: inferredDuration,
+    startTime: trim.startTime,
+    endTime: trim.endTime,
+    playbackDuration: trim.playbackDuration,
+  };
 };
 
 const isDuplicateClientUploadError = (err) => (
@@ -206,6 +336,14 @@ const createStory = async (req, res) => {
       return res.status(415).json({ success: false, code: 'STORY_MEDIA_INVALID', message: 'Story media must be an image or video.' });
     }
     const musicFile = req.files?.music?.[0];
+    const attachedMusicPayload = parseAttachedMusicPayload(req.body?.attachedMusic);
+    if (musicFile && attachedMusicPayload) {
+      return res.status(400).json({
+        success: false,
+        code: 'STORY_MUSIC_AMBIGUOUS',
+        message: 'Choose either uploaded story music or selected music metadata, not both.',
+      });
+    }
     const musicValidation = validateStoryMusicFile(musicFile);
     if (!musicValidation.ok) {
       return res.status(musicValidation.statusCode).json({
@@ -278,6 +416,13 @@ const createStory = async (req, res) => {
         endTime: trim.endTime,
         playbackDuration: trim.playbackDuration,
       };
+    }
+    if (!musicData && attachedMusicPayload) {
+      musicData = await resolveAttachedStoryMusic({
+        payload: attachedMusicPayload,
+        userId: req.user._id,
+        storyDuration: duration,
+      });
     }
     const story = await Story.create({
       author: req.user._id,
