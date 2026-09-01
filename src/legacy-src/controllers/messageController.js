@@ -44,6 +44,11 @@ const getMessageMediaPolicy = (_req, res) => res.json({
   data: getPublicMessageMediaPolicy(),
 });
 
+// Terminal call outcomes ranked so the truest result wins when both
+// participants report the same call out of order. A real answer beats an
+// explicit decline, and either beats an unanswered/timed-out "missed".
+const CALL_OUTCOME_PRIORITY = { missed: 1, declined: 2, answered: 3 };
+
 const sharedPostSelect = 'content.text content.media author likes comments shares createdAt postType visibility isActive hiddenByAdmin';
 const sharedPostAuthorSelect = 'username profile.displayName profile.avatar profilePicture avatar profileImage avatarUrl userType role';
 
@@ -2870,6 +2875,7 @@ const createCallSummary = async (req, res) => {
 
     let message = await Message.findOne({ messageType: 'call', 'callSummary.callId': callId });
     let created = false;
+    let upgraded = false;
     if (!message) {
       try {
         message = await Message.create(messageData);
@@ -2880,16 +2886,33 @@ const createCallSummary = async (req, res) => {
         if (!message) throw error;
       }
     }
-    if (idString(message.sender) !== idString(senderId)) {
-      return res.status(409).json({
-        success: false,
-        code: 'CALL_SUMMARY_CONFLICT',
-        message: 'Call summary already belongs to another participant'
-      });
-    }
-    await message.populate('sender', 'username profile.displayName profile.avatar');
 
     if (!created) {
+      // A call has ONE history item, but both participants report it and their
+      // reports can arrive out of order (a caller's ring-timeout "missed" can
+      // land after the callee already answered or declined). Resolving by
+      // outcome priority — answered > declined > missed — makes the stored
+      // result deterministic and idempotent regardless of arrival order, so a
+      // late-but-truer outcome upgrades the record instead of being dropped.
+      // Authorization for this callId was already verified above, so the other
+      // participant is allowed to correct it; the original sender is preserved
+      // (the item still belongs to the side that opened the call).
+      const storedOutcome = message.callSummary?.outcome;
+      if ((CALL_OUTCOME_PRIORITY[outcome] || 0) > (CALL_OUTCOME_PRIORITY[storedOutcome] || 0)) {
+        message.callSummary.outcome = outcome;
+        // Duration is only meaningful for an answered call.
+        message.callSummary.durationSeconds = outcome === 'answered'
+          ? messageData.callSummary.durationSeconds
+          : 0;
+        message.content.text = summaryText;
+        await message.save();
+        upgraded = true;
+      }
+    }
+
+    await message.populate('sender', 'username profile.displayName profile.avatar');
+
+    if (!created && !upgraded) {
       return res.status(200).json({ success: true, data: { message, deduplicated: true } });
     }
 
@@ -2908,7 +2931,7 @@ const createCallSummary = async (req, res) => {
       }
     }
 
-    res.status(201).json({ success: true, data: { message } });
+    res.status(created ? 201 : 200).json({ success: true, data: { message, upgraded } });
   } catch (error) {
     log.error('createCallSummary error:', { error: String(error) });
     const status = Number(error?.statusCode || 500);
