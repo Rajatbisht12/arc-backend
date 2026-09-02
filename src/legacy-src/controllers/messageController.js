@@ -430,7 +430,10 @@ const getDirectMessages = async (req, res) => {
     const { userId } = req.params;
     const currentUserId = req.user._id;
     const directFilter = {
-      messageType: 'direct',
+      // Call summaries are stored as messageType 'call' on the same DM pair.
+      // They were excluded here, so a missed/answered call appeared live over
+      // the socket and then vanished the next time the chat was opened.
+      messageType: { $in: ['direct', 'call'] },
       deletedForEveryone: { $ne: true },
       $or: [
         { sender: currentUserId, recipient: userId },
@@ -1356,7 +1359,9 @@ const getGroupMessages = async (req, res) => {
     const historyBoundary = groupHistoryBoundary(membershipWindow);
     const groupFilter = {
       chatRoom: chatRoomId,
-      messageType: 'group',
+      // Group call summaries are stored as messageType 'call' on this room;
+      // excluding them made call history disappear on reopen (same defect as DMs).
+      messageType: { $in: ['group', 'call'] },
       deletedForEveryone: { $ne: true },
       ...historyBoundary,
       $and: [
