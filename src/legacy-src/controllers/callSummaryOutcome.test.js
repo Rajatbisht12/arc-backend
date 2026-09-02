@@ -113,3 +113,27 @@ test('an upgrade keeps exactly one call item and clears duration for non-answere
   assert.equal(summary.outcome, 'declined');
   assert.equal(summary.durationSeconds, 0, 'declined/missed must not carry a duration');
 });
+
+// Regression: a call summary is stored as messageType 'call', but the DM and
+// group history queries filtered on 'direct'/'group'. The item therefore showed
+// up live over the socket and then VANISHED as soon as the chat was reopened.
+test('call summaries are returned by DM history, not just over the socket', async () => {
+  await postSummary(caller, { outcome: 'missed', recipient: callee });
+
+  // Mirror the history filter used by getDirectMessages.
+  const historyFilter = {
+    messageType: { $in: ['direct', 'call'] },
+    deletedForEveryone: { $ne: true },
+    $or: [
+      { sender: caller._id, recipient: callee._id },
+      { sender: callee._id, recipient: caller._id },
+    ],
+  };
+  const history = await Message.find(historyFilter).lean();
+  assert.equal(history.length, 1, 'the missed call must survive a chat reopen');
+  assert.equal(history[0].callSummary.outcome, 'missed');
+
+  // The old filter is what dropped it — proves the regression is real.
+  const legacy = await Message.find({ ...historyFilter, messageType: 'direct' }).lean();
+  assert.equal(legacy.length, 0);
+});
