@@ -137,3 +137,37 @@ test('call summaries are returned by DM history, not just over the socket', asyn
   const legacy = await Message.find({ ...historyFilter, messageType: 'direct' }).lean();
   assert.equal(legacy.length, 0);
 });
+
+// Regression: including call summaries in DM history made them permanent
+// "unread" anchors — markMessagesAsRead only covers direct/group, so the
+// "New messages" divider pinned itself above an old call and reading never
+// cleared it. Unread must mean an unread MESSAGE.
+test('a call summary never anchors the "New messages" divider', async () => {
+  const {
+    createMongooseMessageHistoryRepository,
+    resolveMessageHistoryWindow,
+  } = require('../services/messageHistoryWindowService');
+
+  // An unread call summary from the other side, and nothing else unread.
+  await postSummary(callee, { outcome: 'missed', recipient: caller });
+
+  const baseFilter = {
+    messageType: { $in: ['direct', 'call'] },
+    deletedForEveryone: { $ne: true },
+    $or: [
+      { sender: caller._id, recipient: callee._id },
+      { sender: callee._id, recipient: caller._id },
+    ],
+  };
+  const repository = createMongooseMessageHistoryRepository({
+    Message, baseFilter, viewerId: caller._id,
+  });
+
+  assert.equal(await repository.countUnread(), 0, 'a call is not an unread message');
+  assert.equal(await repository.findFirstUnread(), null, 'it must not anchor the divider');
+
+  const window = await resolveMessageHistoryWindow({ repository, limit: 20 });
+  assert.notEqual(window.initialPosition.mode, 'first_unread');
+  // ...but it is still part of the history the chat renders.
+  assert.equal(window.messageIds.length, 1);
+});
