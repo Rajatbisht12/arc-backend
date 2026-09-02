@@ -40,7 +40,13 @@ const createMongooseMessageHistoryRepository = ({ Message, baseFilter, viewerId 
     .select(summary)
     .lean();
   const exists = async (filter) => Boolean(await Message.exists(andFilter(baseFilter, filter)));
+  // Unread means an unread MESSAGE. Call summaries live in the same history but
+  // are never marked read (markMessagesAsRead only covers direct/group), and the
+  // conversation-list badge does not count them either — so including them here
+  // pinned the "New messages" divider above an old call forever and no amount of
+  // reading could clear it.
   const unreadFilter = {
+    messageType: { $ne: 'call' },
     sender: { $ne: viewerId },
     'readBy.user': { $ne: viewerId },
   };
