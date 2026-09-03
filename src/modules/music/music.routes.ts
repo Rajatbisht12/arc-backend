@@ -20,7 +20,31 @@ interface TrackResult {
   coverUrl: unknown;
   duration: unknown;
   source: string;
+  genre?: unknown;
+  mood?: unknown;
+  style?: unknown;
+  category?: unknown;
+  tags?: unknown;
+  keywords?: unknown;
 }
+
+const FALLBACK_SEARCH_METADATA: Record<string, Partial<TrackResult>> = {
+  "fb-1": { genre: "Gaming", mood: "Energetic", style: "Cinematic", tags: ["action", "battle", "music"] },
+  "fb-2": { genre: "Gaming", style: "Cinematic", tags: ["arena", "battle", "music"] },
+  "fb-3": { genre: "Gaming", mood: "Energetic", tags: ["action", "battle", "music"] },
+  "fb-4": { genre: "Electronic", mood: "Energetic", tags: ["action", "party", "dance", "music"] },
+  "fb-5": { genre: "Gaming", mood: "Emotional", style: "Cinematic", tags: ["sad", "soundtrack", "music"] },
+  "fb-6": { genre: "Gaming", style: "Cinematic", tags: ["action", "battle", "soundtrack", "music"] },
+  "fb-7": { genre: "Gaming", mood: "Energetic", tags: ["action", "battle", "music"] },
+  "fb-8": { genre: "Gaming", mood: "Energetic", tags: ["action", "music"] },
+  "fb-9": { genre: "Pop", mood: "Party", style: "Electronic", tags: ["dance", "party", "pop", "music"] },
+  "fb-10": { genre: "Gaming", mood: "Energetic", style: "Cinematic", tags: ["action", "battle", "soundtrack", "music"] },
+  "fb-11": { genre: "Hip Hop", mood: "Focused", tags: ["hiphop", "gaming", "music"] },
+  "fb-12": { genre: "Gaming", mood: "Energetic", tags: ["action", "battle", "music"] },
+  "fb-13": { genre: "Gaming", mood: "Celebration", tags: ["victory", "party", "music"] },
+  "fb-14": { genre: "Gaming", mood: "Focused", tags: ["action", "battle", "music"] },
+  "fb-15": { genre: "Gaming", mood: "Energetic", tags: ["action", "music"] },
+};
 
 // Curated fallback tracks returned when external APIs are unavailable
 const FALLBACK_TRACKS: TrackResult[] = [
@@ -39,7 +63,43 @@ const FALLBACK_TRACKS: TrackResult[] = [
   { trackId: "fb-13", title: "Chicken Dinner", artist: "Arc Studio",     url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-13.mp3", coverUrl: "", duration: 188, source: "demo" },
   { trackId: "fb-14", title: "Tactical Push",  artist: "War Zone",       url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3", coverUrl: "", duration: 266, source: "demo" },
   { trackId: "fb-15", title: "Respawn",        artist: "Pixel Sounds",   url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-15.mp3", coverUrl: "", duration: 335, source: "demo" },
-];
+].map(track => ({ ...track, ...FALLBACK_SEARCH_METADATA[track.trackId] }));
+
+const normalizeSearchText = (value: unknown): string => {
+  if (Array.isArray(value)) return value.map(normalizeSearchText).filter(Boolean).join(" ");
+  if (value == null) return "";
+  return String(value)
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const tokenizeSearch = (value: unknown): string[] => {
+  const normalized = normalizeSearchText(value);
+  return normalized ? [...new Set(normalized.split(" "))] : [];
+};
+
+const filterCatalogTracks = (tracks: TrackResult[], q: string, tags: string, limit: number): TrackResult[] => {
+  const queryTokens = tokenizeSearch(q);
+  const tagTokens = tokenizeSearch(tags);
+
+  return tracks.filter(track => {
+    const searchable = normalizeSearchText([
+      track.title,
+      track.artist,
+      track.genre,
+      track.mood,
+      track.style,
+      track.category,
+      track.tags,
+      track.keywords,
+    ]);
+    const matchesQuery = queryTokens.every(token => searchable.includes(token));
+    const matchesTags = tagTokens.length === 0 || tagTokens.some(token => searchable.includes(token));
+    return matchesQuery && matchesTags;
+  }).slice(0, limit);
+};
 
 const hasDirectPlayableUrl = (track: TrackResult): boolean => {
   const url = typeof track.url === "string" ? track.url.trim() : "";
@@ -65,6 +125,7 @@ const searchJamendo = async (q: string, tags: string, limit: number): Promise<Tr
     limit: String(limit),
     order: "relevance_desc",
     audioformat: "mp32",
+    include: "musicinfo",
   });
   if (q) params.set("search", q);
   if (tags) params.set("tags", tags.replace(/\s+/g, "+"));
@@ -76,15 +137,24 @@ const searchJamendo = async (q: string, tags: string, limit: number): Promise<Tr
 
   const results = (data as { results?: Array<Record<string, unknown>> }).results || [];
   return results
-    .map((t) => ({
-      trackId: `jm-${t.id}`,
-      title: t.name || "Unknown",
-      artist: t.artist_name || "Unknown",
-      url: t.audio || "",
-      coverUrl: t.album_image || t.image || "",
-      duration: t.duration || 0,
-      source: "jamendo",
-    }))
+    .map((t) => {
+      const musicInfo = t.musicinfo as { tags?: Record<string, unknown> } | undefined;
+      const providerTags = musicInfo?.tags
+        ? Object.values(musicInfo.tags).flatMap(value => Array.isArray(value) ? value : [value])
+            .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+        : [];
+      return ({
+        trackId: `jm-${t.id}`,
+        title: t.name || "Unknown",
+        artist: t.artist_name || "Unknown",
+        url: t.audio || "",
+        coverUrl: t.album_image || t.image || "",
+        duration: t.duration || 0,
+        source: "jamendo",
+        genre: providerTags[0],
+        tags: providerTags,
+      });
+    })
     .filter(hasDirectPlayableUrl);
 };
 
@@ -115,6 +185,8 @@ const searchSoundCloud = async (q: string, limit: number): Promise<TrackResult[]
       duration?: number;
       artwork_url?: string;
       user?: { username?: string; avatar_url?: string };
+      genre?: string;
+      tag_list?: string;
     };
 
     const params = new URLSearchParams({ q, limit: String(limit), linked_partitioning: "1" });
@@ -137,6 +209,8 @@ const searchSoundCloud = async (q: string, limit: number): Promise<TrackResult[]
         coverUrl: (t.artwork_url || t.user?.avatar_url || "").replace("-large", "-t300x300"),
         duration: Math.floor((t.duration || 0) / 1000),
         source: "soundcloud",
+        genre: t.genre,
+        tags: typeof t.tag_list === "string" ? t.tag_list.split(/\s+/).filter(Boolean) : [],
       }));
   } catch (err) {
     console.warn("SoundCloud search skipped:", (err as { response?: { status?: number }; message?: string }).response?.status || (err as Error).message);
@@ -150,20 +224,20 @@ const searchSoundCloud = async (q: string, limit: number): Promise<TrackResult[]
  */
 router.get("/search", optionalAuth, async (req: Request, res: Response) => {
   try {
+    const q = (String(req.query.q || "")).trim();
+    const tags = (String(req.query.tags || "")).trim();
+    const limit = Math.min(parseInt(String(req.query.limit || "20"), 10) || 20, 50);
     const jamendoConfigured = !!process.env.JAMENDO_CLIENT_ID;
     const soundcloudConfigured = !!process.env.SOUNDCLOUD_CLIENT_ID;
 
     if (!jamendoConfigured && !soundcloudConfigured) {
       return res.status(200).json({
         success: true,
-        tracks: [],
+        tracks: filterCatalogTracks(FALLBACK_TRACKS, q, tags, limit),
+        fallback: true,
         message: "Music search not configured. Add JAMENDO_CLIENT_ID or SOUNDCLOUD_CLIENT_ID to environment.",
       });
     }
-
-    const q = (String(req.query.q || "")).trim();
-    const tags = (String(req.query.tags || "")).trim();
-    const limit = Math.min(parseInt(String(req.query.limit || "20"), 10) || 20, 50);
 
     if (!q && !tags) {
       return res.status(200).json({ success: true, tracks: FALLBACK_TRACKS.slice(0, limit) });
@@ -174,7 +248,9 @@ router.get("/search", optionalAuth, async (req: Request, res: Response) => {
 
     const [jamendoResult, soundcloudResult] = await Promise.allSettled([
       jamendoConfigured ? searchJamendo(q, tags, perSource) : Promise.resolve([]),
-      soundcloudConfigured && q ? searchSoundCloud(q, perSource) : Promise.resolve([]),
+      soundcloudConfigured && (q || tags)
+        ? searchSoundCloud([q, tags].filter(Boolean).join(" "), perSource)
+        : Promise.resolve([]),
     ]);
 
     if (jamendoResult.status === "rejected") {
@@ -197,7 +273,9 @@ router.get("/search", optionalAuth, async (req: Request, res: Response) => {
 
     // If both APIs returned nothing, return curated fallback tracks
     const playableTracks = merged.filter(hasDirectPlayableUrl);
-    const results = playableTracks.length > 0 ? playableTracks.slice(0, limit) : FALLBACK_TRACKS.slice(0, limit);
+    const results = playableTracks.length > 0
+      ? playableTracks.slice(0, limit)
+      : filterCatalogTracks(FALLBACK_TRACKS, q, tags, limit);
     return res.json({ success: true, tracks: results, fallback: playableTracks.length === 0 });
   } catch (err) {
     const axiosError = err as { response?: { status?: number }; message?: string };
