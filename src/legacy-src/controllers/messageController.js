@@ -1853,7 +1853,12 @@ const addMemberToChatRoom = async (req, res) => {
     }
 
     // Check if user exists
-    const user = await User.findById(memberId).select('+privacySettings username isActive profile blockedUsers');
+    // `privacySettings` is not schema-excluded. Using Mongoose's `+path`
+    // force-include syntax here caused the parent subdocument to be omitted
+    // from this inclusive projection in production, so the group-add policy
+    // saw a missing setting and applied the backwards-compatible `anyone`
+    // default. Select the real field explicitly, as group creation does.
+    const user = await User.findById(memberId).select('privacySettings username isActive profile blockedUsers');
     if (!user || !user.isActive) {
       return res.status(404).json({
         success: false,

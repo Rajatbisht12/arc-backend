@@ -19,6 +19,8 @@ assert(createBody.includes('blockedMembers.push'));
 assert(createBody.includes('code: decision.code'));
 assert(createBody.includes('message: decision.message'));
 assert(addBody.includes('resolveGroupAddPrivacy({ actor: req.user, targets: [user] })'));
+assert(addBody.includes("select('privacySettings username isActive profile blockedUsers')"));
+assert(!addBody.includes("select('+privacySettings"), 'existing-group additions must load the real privacy subdocument');
 assert(addBody.includes('code: decision.code'));
 assert(addBody.includes('targetUsername: user.username'));
 assert(!joinBody.includes('resolveGroupAddPrivacy'), 'explicit invite acceptance must remain user-consented and exempt');
