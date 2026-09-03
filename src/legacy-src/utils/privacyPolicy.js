@@ -3,13 +3,15 @@ const User = require('../models/User');
 
 const PROFILE_VISIBILITY = Object.freeze(['public', 'followers', 'private']);
 const MESSAGE_AUDIENCE = Object.freeze(['everyone', 'followers', 'none']);
+const GROUP_ADD_AUDIENCE = Object.freeze(['anyone', 'people_you_follow', 'nobody']);
 
 const PRIVACY_DEFAULTS = Object.freeze({
   profileVisibility: 'public',
   allowMessageFrom: 'everyone',
   showOnlineStatus: true,
   allowFollowRequests: true,
-  showPostsToFollowers: true
+  showPostsToFollowers: true,
+  whoCanAddToGroup: 'anyone'
 });
 
 const idString = (value) => {
@@ -58,9 +60,15 @@ const normalizeBooleanSetting = (...values) => {
   return provided.length > 0 ? false : true;
 };
 
+const normalizeGroupAddAudience = (value) => {
+  if (value === undefined) return PRIVACY_DEFAULTS.whoCanAddToGroup;
+  const normalized = String(value).trim().toLowerCase();
+  return GROUP_ADD_AUDIENCE.includes(normalized) ? normalized : 'nobody';
+};
+
 /**
  * Canonical privacy contract. Legacy keys remain readable during the rollout,
- * but all policy decisions and API responses use these five fields.
+ * but all policy decisions and API responses use these fields.
  */
 const normalizePrivacySettings = (input = {}) => {
   const source = input?.toObject ? input.toObject() : (input || {});
@@ -77,7 +85,8 @@ const normalizePrivacySettings = (input = {}) => {
       ? normalizeBooleanSetting(source.showOnlineStatus)
       : normalizeBooleanSetting(source.showActivityStatus),
     allowFollowRequests: normalizeBooleanSetting(source.allowFollowRequests),
-    showPostsToFollowers: normalizeBooleanSetting(source.showPostsToFollowers)
+    showPostsToFollowers: normalizeBooleanSetting(source.showPostsToFollowers),
+    whoCanAddToGroup: normalizeGroupAddAudience(source.whoCanAddToGroup)
   };
 };
 
@@ -278,17 +287,14 @@ const minimalProfile = (user) => {
   };
 };
 
-const privacySettingsResponse = (settingsInput, extras = {}) => {
+const privacySettingsResponse = (settingsInput) => {
   const canonical = normalizePrivacySettings(settingsInput);
   return {
     success: true,
     data: canonical,
     privacySettings: {
       ...canonical,
-      ...canonicalToLegacyAliases(canonical),
-      ...(extras.whoCanAddToGroup !== undefined
-        ? { whoCanAddToGroup: extras.whoCanAddToGroup }
-        : {})
+      ...canonicalToLegacyAliases(canonical)
     }
   };
 };
@@ -296,10 +302,12 @@ const privacySettingsResponse = (settingsInput, extras = {}) => {
 module.exports = {
   PROFILE_VISIBILITY,
   MESSAGE_AUDIENCE,
+  GROUP_ADD_AUDIENCE,
   PRIVACY_DEFAULTS,
   idString,
   normalizeProfileVisibility,
   normalizeMessageAudience,
+  normalizeGroupAddAudience,
   normalizePrivacySettings,
   canonicalToLegacyAliases,
   buildPrivacyAccess,

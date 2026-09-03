@@ -28,6 +28,7 @@ const {
   groupHistoryBoundary,
   canReadGroupMessageAt
 } = require('../utils/groupMembershipPrivacy');
+const { resolveGroupAddPrivacy } = require('../utils/groupAddPrivacy');
 const {
   createMongooseMessageHistoryRepository,
   resolveMessageHistoryWindow
@@ -566,27 +567,16 @@ const createChatRoom = async (req, res) => {
         });
       }
 
-      const relationshipRestrictedIds = validMembers
-        .filter((member) => member.privacySettings?.whoCanAddToGroup === 'people_you_follow')
-        .map((member) => member._id);
-      const membersFollowingCreator = new Set((relationshipRestrictedIds.length > 0
-        ? await Follow.find({
-            follower: { $in: relationshipRestrictedIds },
-            following: creatorId
-          }).distinct('follower')
-        : []).map(String));
-
-      for (const member of validMembers) {
-        const privacy = member.privacySettings?.whoCanAddToGroup || 'anyone';
-        let blocked = (req.user.blockedUsers || []).some((id) => idString(id) === idString(member))
-          || (member.blockedUsers || []).some((id) => idString(id) === idString(creatorId));
-        if (privacy === 'nobody') {
-          blocked = true;
-        } else if (privacy === 'people_you_follow') {
-          if (!membersFollowingCreator.has(member._id.toString())) blocked = true;
-        }
-        if (blocked) {
-          blockedMembers.push({ _id: member._id, username: member.username });
+      const eligibility = await resolveGroupAddPrivacy({ actor: req.user, targets: validMembers });
+      for (const { target: member, decision } of eligibility) {
+        if (!decision.allowed) {
+          blockedMembers.push({
+            _id: member._id,
+            username: member.username,
+            code: decision.code,
+            reason: decision.reason,
+            message: decision.message
+          });
         } else {
           allowedMemberIds.push(member._id);
         }
@@ -1871,22 +1861,15 @@ const addMemberToChatRoom = async (req, res) => {
       });
     }
 
-    // Privacy check: whoCanAddToGroup
-    const targetPrivacy = user.privacySettings?.whoCanAddToGroup || 'anyone';
-    if (targetPrivacy === 'nobody') {
-      return res.status(403).json({ success: false, reason: 'privacy_blocked', targetUsername: user.username });
-    }
-    const blockedRelationship = (req.user.blockedUsers || []).some((id) => idString(id) === idString(user))
-      || (user.blockedUsers || []).some((id) => idString(id) === idString(userId));
-    if (blockedRelationship) {
-      return res.status(403).json({ success: false, reason: 'privacy_blocked', targetUsername: user.username });
-    }
-    if (targetPrivacy === 'people_you_follow') {
-      // Check if the target user follows the adder
-      const targetFollowsAdder = await Follow.isFollowing(user._id, userId);
-      if (!targetFollowsAdder) {
-        return res.status(403).json({ success: false, reason: 'privacy_blocked', targetUsername: user.username });
-      }
+    const [{ decision }] = await resolveGroupAddPrivacy({ actor: req.user, targets: [user] });
+    if (!decision.allowed) {
+      return res.status(403).json({
+        success: false,
+        code: decision.code,
+        reason: decision.reason,
+        message: decision.message,
+        targetUsername: user.username
+      });
     }
 
     // Add member

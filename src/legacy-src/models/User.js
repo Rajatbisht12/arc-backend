@@ -520,9 +520,9 @@ const userSchema = new mongoose.Schema({
     default: Date.now
   },
   privacySettings: {
-    // Canonical, cross-platform privacy contract. These fields intentionally
-    // have no schema default so legacy records continue to fall back to the
-    // aliases below until they are saved or migrated.
+    // Canonical, cross-platform privacy contract. The original controls retain
+    // their legacy-alias fallback; new independent controls declare their own
+    // backward-compatible defaults.
     profileVisibility: {
       type: String,
       enum: ['public', 'followers', 'private'],
@@ -863,6 +863,7 @@ userSchema.pre('save', function(next) {
   }
   if (privacy.allowFollowRequests === undefined) privacy.allowFollowRequests = true;
   if (privacy.showPostsToFollowers === undefined) privacy.showPostsToFollowers = true;
+  if (privacy.whoCanAddToGroup === undefined) privacy.whoCanAddToGroup = 'anyone';
   this.privacySettings = privacy;
   next();
 });
