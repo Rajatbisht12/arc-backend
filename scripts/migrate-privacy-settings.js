@@ -194,7 +194,8 @@ const verifyCanonicalFields = async () => {
       { 'privacySettings.allowMessageFrom': { $nin: ['everyone', 'followers', 'none'] } },
       { 'privacySettings.showOnlineStatus': { $not: { $type: 'bool' } } },
       { 'privacySettings.allowFollowRequests': { $not: { $type: 'bool' } } },
-      { 'privacySettings.showPostsToFollowers': { $not: { $type: 'bool' } } }
+      { 'privacySettings.showPostsToFollowers': { $not: { $type: 'bool' } } },
+      { 'privacySettings.whoCanAddToGroup': { $nin: ['anyone', 'people_you_follow', 'nobody'] } }
     ]
   });
   if (invalid > 0) throw new Error(`${invalid} users have missing or invalid canonical privacy fields`);

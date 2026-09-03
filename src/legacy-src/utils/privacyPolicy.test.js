@@ -5,6 +5,7 @@ const Follow = require('../models/Follow');
 const FollowRequest = require('../models/FollowRequest');
 const {
   idString,
+  normalizeGroupAddAudience,
   normalizePrivacySettings,
   canonicalToLegacyAliases,
   buildPrivacyAccess,
@@ -24,13 +25,17 @@ assert.strictEqual(idString(new User({
   username: 'identity_contract',
   userType: 'player'
 })), '507f1f77bcf86cd799439011');
+assert.strictEqual(normalizeGroupAddAudience(undefined), 'anyone');
+assert.strictEqual(normalizeGroupAddAudience('people_you_follow'), 'people_you_follow');
+assert.strictEqual(normalizeGroupAddAudience('invalid'), 'nobody');
 
 assert.deepStrictEqual(normalizePrivacySettings({}), {
   profileVisibility: 'public',
   allowMessageFrom: 'everyone',
   showOnlineStatus: true,
   allowFollowRequests: true,
-  showPostsToFollowers: true
+  showPostsToFollowers: true,
+  whoCanAddToGroup: 'anyone'
 });
 
 assert.deepStrictEqual(normalizePrivacySettings({
@@ -42,7 +47,8 @@ assert.deepStrictEqual(normalizePrivacySettings({
   allowMessageFrom: 'followers',
   showOnlineStatus: false,
   allowFollowRequests: true,
-  showPostsToFollowers: true
+  showPostsToFollowers: true,
+  whoCanAddToGroup: 'anyone'
 });
 
 assert.deepStrictEqual(normalizePrivacySettings({
@@ -59,7 +65,8 @@ assert.deepStrictEqual(normalizePrivacySettings({
   allowMessageFrom: 'none',
   showOnlineStatus: false,
   allowFollowRequests: false,
-  showPostsToFollowers: false
+  showPostsToFollowers: false,
+  whoCanAddToGroup: 'anyone'
 });
 
 assert.deepStrictEqual(normalizePrivacySettings({
@@ -74,7 +81,8 @@ assert.deepStrictEqual(normalizePrivacySettings({
   allowMessageFrom: 'none',
   showOnlineStatus: false,
   allowFollowRequests: true,
-  showPostsToFollowers: true
+  showPostsToFollowers: true,
+  whoCanAddToGroup: 'anyone'
 });
 
 assert.deepStrictEqual(normalizePrivacySettings({
@@ -88,7 +96,8 @@ assert.deepStrictEqual(normalizePrivacySettings({
   allowMessageFrom: 'none',
   showOnlineStatus: false,
   allowFollowRequests: false,
-  showPostsToFollowers: false
+  showPostsToFollowers: false,
+  whoCanAddToGroup: 'anyone'
 });
 
 assert.deepStrictEqual(canonicalToLegacyAliases({
@@ -169,6 +178,7 @@ const response = privacySettingsResponse({
   showPostsToFollowers: false
 });
 assert.strictEqual(response.data.profileVisibility, 'followers');
+assert.strictEqual(response.data.whoCanAddToGroup, 'anyone');
 assert.strictEqual(response.privacySettings.accountType, 'private');
 assert.strictEqual(response.privacySettings.whoCanMessage, 'people_you_follow');
 
@@ -178,6 +188,8 @@ assert(User.schema.path('privacySettings.allowMessageFrom'));
 assert(User.schema.path('privacySettings.showOnlineStatus'));
 assert(User.schema.path('privacySettings.allowFollowRequests'));
 assert(User.schema.path('privacySettings.showPostsToFollowers'));
+assert(User.schema.path('privacySettings.whoCanAddToGroup'));
+assert.strictEqual(User.schema.path('privacySettings.whoCanAddToGroup').defaultValue, 'anyone');
 assert(FollowRequest.schema.indexes().some(([key, options]) => key.requester === 1 && key.target === 1 && options.unique));
 
 const publicDto = formatUserDTO({

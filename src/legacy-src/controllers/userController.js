@@ -41,6 +41,7 @@ const {
 const {
   PROFILE_VISIBILITY,
   MESSAGE_AUDIENCE,
+  GROUP_ADD_AUDIENCE,
   normalizePrivacySettings,
   canonicalToLegacyAliases,
   buildPrivacyAccess,
@@ -4056,9 +4057,7 @@ const getPrivacySettings = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('privacySettings').lean();
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    return res.status(200).json(privacySettingsResponse(user.privacySettings, {
-      whoCanAddToGroup: user.privacySettings?.whoCanAddToGroup || 'anyone'
-    }));
+    return res.status(200).json(privacySettingsResponse(user.privacySettings));
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to fetch privacy settings' });
   }
@@ -4098,7 +4097,8 @@ const updatePrivacySettings = async (req, res) => {
         ? { showOnlineStatus: req.body.showOnlineStatus }
         : req.body.showActivityStatus !== undefined ? { showOnlineStatus: req.body.showActivityStatus } : {}),
       ...(req.body.allowFollowRequests !== undefined ? { allowFollowRequests: req.body.allowFollowRequests } : {}),
-      ...(req.body.showPostsToFollowers !== undefined ? { showPostsToFollowers: req.body.showPostsToFollowers } : {})
+      ...(req.body.showPostsToFollowers !== undefined ? { showPostsToFollowers: req.body.showPostsToFollowers } : {}),
+      ...(req.body.whoCanAddToGroup !== undefined ? { whoCanAddToGroup: req.body.whoCanAddToGroup } : {})
     };
 
     if (!PROFILE_VISIBILITY.includes(String(incomingCanonical.profileVisibility))) {
@@ -4115,19 +4115,15 @@ const updatePrivacySettings = async (req, res) => {
         return res.status(400).json({ success: false, message: `${key} must be a boolean` });
       }
     }
+    if (!GROUP_ADD_AUDIENCE.includes(String(incomingCanonical.whoCanAddToGroup))) {
+      return res.status(400).json({ success: false, message: "whoCanAddToGroup must be 'anyone', 'people_you_follow', or 'nobody'" });
+    }
 
     const canonical = normalizePrivacySettings(incomingCanonical);
     const legacy = canonicalToLegacyAliases(canonical);
     const update = {};
     Object.entries(canonical).forEach(([key, value]) => { update[`privacySettings.${key}`] = value; });
     Object.entries(legacy).forEach(([key, value]) => { update[`privacySettings.${key}`] = value; });
-
-    if (req.body.whoCanAddToGroup !== undefined) {
-      if (!['anyone', 'people_you_follow', 'nobody'].includes(req.body.whoCanAddToGroup)) {
-        return res.status(400).json({ success: false, message: "whoCanAddToGroup must be 'anyone', 'people_you_follow', or 'nobody'" });
-      }
-      update['privacySettings.whoCanAddToGroup'] = req.body.whoCanAddToGroup;
-    }
 
     const user = await User.findByIdAndUpdate(
       req.user._id,
@@ -4143,9 +4139,7 @@ const updatePrivacySettings = async (req, res) => {
     publishPrivacySettingsUpdate(io, req.user._id);
     evictPresenceAudience(io, req.user._id);
 
-    return res.status(200).json(privacySettingsResponse(user.privacySettings, {
-      whoCanAddToGroup: user.privacySettings?.whoCanAddToGroup || 'anyone'
-    }));
+    return res.status(200).json(privacySettingsResponse(user.privacySettings));
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to update privacy settings' });
   }

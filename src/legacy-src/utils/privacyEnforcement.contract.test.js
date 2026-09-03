@@ -26,7 +26,7 @@ const presence = fs.readFileSync(path.resolve(root, '../modules/presence/presenc
 const socket = fs.readFileSync(path.resolve(root, '../infrastructure/websocket/socket.ts'), 'utf8');
 const legacyMiddleware = fs.readFileSync(path.resolve(root, '../modules/legacy/legacy.middleware.ts'), 'utf8');
 
-for (const field of ['profileVisibility', 'allowMessageFrom', 'showOnlineStatus', 'allowFollowRequests', 'showPostsToFollowers']) {
+for (const field of ['profileVisibility', 'allowMessageFrom', 'showOnlineStatus', 'allowFollowRequests', 'showPostsToFollowers', 'whoCanAddToGroup']) {
   assert(user.includes(`'${field}'`) || user.includes(`.${field}`), `privacy endpoint must accept ${field}`);
 }
 assert(presencePrivacy.includes("'privacy-settings-updated'"));
@@ -37,6 +37,8 @@ assert(user.includes("followStatus: 'pending'"));
 assert(user.includes('privacyAccess: privacyRelationship.access') || user.includes('...privacyRelationship.access'));
 assert(user.includes('req.body.profileVisibility !== undefined\n        ? { profileVisibility: req.body.profileVisibility }'));
 assert(user.includes('req.body.allowMessageFrom !== undefined\n        ? { allowMessageFrom: req.body.allowMessageFrom }'));
+assert(user.includes('GROUP_ADD_AUDIENCE.includes(String(incomingCanonical.whoCanAddToGroup))'));
+assert(user.includes("whoCanAddToGroup must be 'anyone', 'people_you_follow', or 'nobody'"));
 assert(user.includes("const isGuest = !req.user || req.user.userType === 'guest'"));
 assert(user.includes('const requestingUserId = isGuest'));
 assert(user.includes('const pendingFollowRequest = !isGuest && !isSelf'));
@@ -68,6 +70,8 @@ assert(message.includes('GROUP_POST_PRIVACY_RESTRICTED'));
 assert(message.includes('filterPostsForViewer(sharedPosts, req.user)'));
 assert(message.includes('MESSAGE_ACCESS_DENIED'));
 assert(message.includes('existingConversation'));
+assert(message.includes('resolveGroupAddPrivacy({ actor: req.user, targets: validMembers })'));
+assert(message.includes('resolveGroupAddPrivacy({ actor: req.user, targets: [user] })'));
 assert(message.includes("reason: 'not_follower'") || message.includes("? 'not_follower'"));
 assert(call.includes('CALL_PRIVACY_RESTRICTED'));
 assert(legacySocket.includes('CALL_PRIVACY_RESTRICTED'));
