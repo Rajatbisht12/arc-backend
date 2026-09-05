@@ -14,6 +14,9 @@ const CALL_DISCONNECT_GRACE_MS = Math.max(
 const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
 const CALL_ID_PATTERN = /^[A-Za-z0-9:_-]{8,160}$/;
 const MAX_ACTIVE_GROUP_CALLS = 10_000;
+// Matches the Mobile 1-to-1 ring timeout so an abandoned group call cannot ring
+// forever if the caller's socket dies instead of sending a leave.
+const GROUP_CALL_RING_TIMEOUT_MS = 30_000;
 
 type ActiveCallSession = {
   callId: string;
@@ -24,6 +27,14 @@ type ActiveCallSession = {
   participants: Set<string>;
   startTime: Date;
   roomName: string;
+  /** Everyone who was rung — the terminal event must reach all of them. */
+  memberIds: string[];
+  /** True once ANY non-initiator joins. One joiner makes the call answered. */
+  answered: boolean;
+  answeredAt?: Date;
+  /** callId-keyed idempotency: a call is finalized exactly once. */
+  finalized: boolean;
+  ringTimer?: ReturnType<typeof setTimeout>;
 };
 
 type LeanRandomSession = {
@@ -360,6 +371,86 @@ const findAuthorizedRandomSession = async (
   return session;
 };
 
+/**
+ * Write the ONE call-history message for a group call.
+ *
+ * The outcome is decided here, on the server, from real join events — not from
+ * whichever client happened to report last. Keyed on callId with the same unique
+ * index the DM path uses, so duplicate finalization signals (hangup + timeout +
+ * disconnect) can never produce a second message.
+ */
+const writeGroupCallSummary = async (
+  io: Server,
+  session: ActiveCallSession,
+  outcome: "answered" | "missed",
+  durationSeconds: number
+): Promise<void> => {
+  const models = safeRequire<any>(path.join(backendModelPath, "Message.js"));
+  const Message = models?.Message;
+  if (!Message) return;
+
+  const label = session.callType === "video" ? "Video" : "Voice";
+  const summaryText = outcome === "answered" ? `${label} call ended` : `${label} call missed`;
+
+  try {
+    const existing = await Message.findOne({ messageType: "call", "callSummary.callId": session.callId });
+    if (existing) return;
+
+    const message = await Message.create({
+      sender: session.initiatorId,
+      chatRoom: session.chatRoomId,
+      messageType: "call",
+      content: { text: summaryText, media: [] },
+      callSummary: {
+        callId: session.callId,
+        callType: session.callType,
+        outcome,
+        durationSeconds: outcome === "answered" ? Math.max(0, Math.min(86400, durationSeconds)) : 0,
+        participantCount: Math.max(1, session.memberIds.length || 1)
+      }
+    });
+    await message.populate("sender", "username profile.displayName profile.avatar");
+    io.to(`chat-${session.chatRoomId}`).emit("newMessage", {
+      chatId: session.chatRoomId,
+      message
+    });
+  } catch (error: any) {
+    // 11000 = another finalizer won the race; the single record already exists.
+    if (error?.code !== 11000) {
+      // eslint-disable-next-line no-console
+      console.error("writeGroupCallSummary failed:", String(error));
+    }
+  }
+};
+
+/**
+ * Terminal state for a group call. Idempotent by callId.
+ *
+ * The terminal event goes to every member's PERSONAL room as well as the chat
+ * room: recipients are rung on `user-<id>` and only ever join `chat-<id>` while
+ * they have that conversation open, so broadcasting to the chat room alone left
+ * every other ringing client stuck on an incoming-call screen until it manually
+ * declined. Personal rooms also cover a user's other tabs/devices.
+ */
+const finalizeGroupCall = (io: Server, callId: string): void => {
+  const session = activeCalls.get(callId);
+  if (!session || session.finalized) return;
+  session.finalized = true;
+  if (session.ringTimer) clearTimeout(session.ringTimer);
+  activeCalls.delete(callId);
+
+  const outcome: "answered" | "missed" = session.answered ? "answered" : "missed";
+  const durationSeconds = session.answered && session.answeredAt
+    ? Math.floor((Date.now() - session.answeredAt.getTime()) / 1000)
+    : 0;
+
+  const payload = { callId, chatRoomId: session.chatRoomId, outcome };
+  io.to(`chat-${session.chatRoomId}`).emit("group-call-ended", payload);
+  session.memberIds.forEach((id) => io.to(`user-${id}`).emit("group-call-ended", payload));
+
+  void writeGroupCallSummary(io, session, outcome, durationSeconds);
+};
+
 const handleGroupCallLeave = (io: Server, callId: string, userId: string, socket?: Socket) => {
   const session = activeCalls.get(callId);
   if (!session) {
@@ -377,9 +468,11 @@ const handleGroupCallLeave = (io: Server, callId: string, userId: string, socket
     io.to(`call-${callId}`).emit("group-call-participant-left", { callId, userId });
   }
 
-  if (session.participants.size === 0) {
-    io.to(`chat-${session.chatRoomId}`).emit("group-call-ended", { callId });
-    activeCalls.delete(callId);
+  // The initiator hanging up ends the call for everyone; anyone else leaving
+  // does not (one member declining must never terminate the group call). The
+  // call also ends once the last participant is gone.
+  if (userId === session.initiatorId || session.participants.size === 0) {
+    finalizeGroupCall(io, callId);
   }
 };
 
@@ -860,7 +953,10 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       initiatorId: userIdStr,
       participants: new Set([userIdStr]),
       startTime: new Date(),
-      roomName: `call-${callId}`
+      roomName: `call-${callId}`,
+      memberIds: [],
+      answered: false,
+      finalized: false
     });
     socket.data.groupCallChats = {
       ...(socket.data.groupCallChats || {}),
@@ -892,6 +988,18 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     roomInfo.memberIds
       .filter((id) => id !== userIdStr)
       .forEach((id) => io.to(`user-${id}`).emit("group-call-incoming", incomingPayload));
+
+    // Remember who was rung so the terminal event can reach exactly them, and
+    // arm a server-side timeout so a caller who loses the network (rather than
+    // hanging up) still finalizes the call and stops everyone ringing.
+    const ringingSession = activeCalls.get(callId);
+    if (ringingSession) {
+      ringingSession.memberIds = roomInfo.memberIds;
+      ringingSession.ringTimer = setTimeout(() => {
+        const pending = activeCalls.get(callId);
+        if (pending && !pending.answered) finalizeGroupCall(io, callId);
+      }, GROUP_CALL_RING_TIMEOUT_MS);
+    }
   });
 
   socket.on("group-call-join", async (data: { callId?: string }) => {
@@ -922,6 +1030,17 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       [data.callId]: session.chatRoomId
     };
     await socket.join(`call-${data.callId}`);
+    // ONE non-initiator joining makes the whole call answered, and it stays
+    // answered even if that member later leaves or others decline/ignore. The
+    // ring timeout is disarmed the moment the call is genuinely live.
+    if (userIdStr !== session.initiatorId && !session.answered) {
+      session.answered = true;
+      session.answeredAt = new Date();
+      if (session.ringTimer) {
+        clearTimeout(session.ringTimer);
+        session.ringTimer = undefined;
+      }
+    }
     const existingIds = Array.from(session.participants).filter((id) => id !== userIdStr);
     const userInfo = await resolveGroupCallUsers([...existingIds, userIdStr]);
     const existingParticipants = existingIds.map((id) => {
