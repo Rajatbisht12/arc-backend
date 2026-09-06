@@ -9,6 +9,7 @@ const { createLikeNotification, createCommentNotification, createReplyNotificati
 const { resolveCommentRelation } = require('../utils/commentThreading');
 const { formatPostDTO } = require('../utils/dto');
 const { extractHashtags, mergeTags } = require('../utils/hashtags');
+const { isMusicAllowedForMedia } = require('../utils/postAudioRules');
 const {
   getRecommendedPosts,
   recordEngagementEvent,
@@ -260,6 +261,14 @@ const createPost = async (req, res) => {
       mentions: mentionedUserIds,
       visibility: visibility || 'public'
     };
+    // Server-side enforcement: a post with no image has nothing for a music
+    // track to play over, so the attachment is dropped rather than stored.
+    // Clients hide the option, but an API caller must not be able to create a
+    // video-only post carrying music. Mixed carousels are unaffected — their
+    // images still need it.
+    if (attachedMusic && !isMusicAllowedForMedia(mediaData)) {
+      attachedMusic = null;
+    }
     if (attachedMusic) postData.attachedMusic = attachedMusic;
 
     // Add recruitment info if it's a recruitment post
