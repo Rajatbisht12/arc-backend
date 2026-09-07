@@ -86,3 +86,38 @@ test('an abandoned call finalizes on a server timeout', () => {
   // ...and answering disarms it.
   assert.match(socket, /session\.answered = true;[\s\S]{0,200}?clearTimeout\(session\.ringTimer\)/);
 });
+
+// ── Participant count ────────────────────────────────────────────────────────
+// Reported: a 3-member group showed "Missed call · 3 participants". The count
+// was written from `session.memberIds` — the group's MEMBER LIST — so it
+// reported group size, not who actually joined, and it printed even when nobody
+// joined at all.
+
+test('participants are the users who actually JOINED, never the member list', () => {
+  assert.match(socket, /joinedUserIds: Set<string>;/);
+  // Seeded with the initiator (they are in the call from the moment it starts).
+  assert.match(socket, /joinedUserIds: new Set\(\[userIdStr\]\)/);
+  // Every joiner is recorded...
+  assert.match(socket, /session\.joinedUserIds\.add\(userIdStr\);/);
+  // ...and the written count comes from that set, not memberIds.
+  assert.match(socket, /participantCount: outcome === "answered" \? session\.joinedUserIds\.size : 0/);
+  assert.doesNotMatch(socket, /participantCount: Math\.max\(1, session\.memberIds\.length/);
+});
+
+test('a rejoin cannot double-count the same user', () => {
+  // A Set is the whole mechanism: add() of an existing id is a no-op.
+  const decl = socket.slice(socket.indexOf('joinedUserIds: Set<string>'), socket.indexOf('answered: boolean;'));
+  assert.match(decl, /Set<string>/);
+  assert.match(socket, /session\.joinedUserIds\.add\(/);
+});
+
+test('a missed call records ZERO participants, so nothing is rendered', () => {
+  assert.match(socket, /outcome === "answered" \? session\.joinedUserIds\.size : 0/);
+});
+
+test('users who were only rung are tracked separately from participants', () => {
+  // memberIds still exists — it is the ring/terminal-event list — but it must
+  // never be the participant count.
+  assert.match(socket, /session\.memberIds\.forEach\(\(id\) => io\.to\(`user-\$\{id\}`\)/);
+  assert.match(socket, /ringingSession\.memberIds = roomInfo\.memberIds;/);
+});
