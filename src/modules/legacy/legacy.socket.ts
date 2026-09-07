@@ -29,6 +29,12 @@ type ActiveCallSession = {
   roomName: string;
   /** Everyone who was rung — the terminal event must reach all of them. */
   memberIds: string[];
+  /**
+   * Unique users who ACTUALLY joined this call (initiator + every joiner).
+   * A Set so leaving and rejoining cannot double-count, and deliberately NOT
+   * `memberIds` — group membership is not participation.
+   */
+  joinedUserIds: Set<string>;
   /** True once ANY non-initiator joins. One joiner makes the call answered. */
   answered: boolean;
   answeredAt?: Date;
@@ -406,7 +412,9 @@ const writeGroupCallSummary = async (
         callType: session.callType,
         outcome,
         durationSeconds: outcome === "answered" ? Math.max(0, Math.min(86400, durationSeconds)) : 0,
-        participantCount: Math.max(1, session.memberIds.length || 1)
+        // Actual joiners, never group size. Zero for a missed call so the
+        // renderers can omit the count entirely.
+        participantCount: outcome === "answered" ? session.joinedUserIds.size : 0
       }
     });
     await message.populate("sender", "username profile.displayName profile.avatar");
@@ -955,6 +963,7 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       startTime: new Date(),
       roomName: `call-${callId}`,
       memberIds: [],
+      joinedUserIds: new Set([userIdStr]),
       answered: false,
       finalized: false
     });
@@ -1033,6 +1042,9 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     // ONE non-initiator joining makes the whole call answered, and it stays
     // answered even if that member later leaves or others decline/ignore. The
     // ring timeout is disarmed the moment the call is genuinely live.
+    // Participation is recorded for EVERY joiner, including a rejoin (the Set
+    // dedupes), and never for someone who was merely rung or who declined.
+    session.joinedUserIds.add(userIdStr);
     if (userIdStr !== session.initiatorId && !session.answered) {
       session.answered = true;
       session.answeredAt = new Date();

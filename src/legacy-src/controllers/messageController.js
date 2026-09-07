@@ -2856,7 +2856,13 @@ const createCallSummary = async (req, res) => {
         callType,
         outcome,
         durationSeconds: Math.max(0, Math.min(86400, Number(durationSeconds) || 0)),
-        participantCount: Math.max(1, Math.min(maximumParticipantCount, Number(participantCount) || 1))
+        // Participants = users who ACTUALLY joined, and only meaningful for a
+        // GROUP call. Zero for DMs and for any non-answered outcome, so the
+        // renderers can omit the count rather than print the group's size.
+        // Clamped to the room size so a client cannot inflate it.
+        participantCount: (authorizedChatRoomId && outcome === 'answered')
+          ? Math.max(1, Math.min(maximumParticipantCount, Number(participantCount) || 1))
+          : 0
       }
     };
 
