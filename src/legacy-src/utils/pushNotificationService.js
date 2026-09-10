@@ -355,6 +355,11 @@ const buildPushData = (notification, unreadCount = 0) => {
     chatId: toId(data.chatId || data.conversationId || customData.chatId || customData.conversationId) || undefined,
     messageId: toId(data.messageId || customData.messageId) || undefined,
     userId: toId(notification?.sender || customData.userId) || undefined,
+    // Identity for the tapped-notification chat header (see notificationService).
+    senderName: sanitizeString(customData.senderName).slice(0, 120) || undefined,
+    senderUsername: sanitizeString(customData.senderUsername).slice(0, 120) || undefined,
+    senderAvatar: sanitizeString(customData.senderAvatar).slice(0, 500) || undefined,
+    groupName: sanitizeString(customData.groupName).slice(0, 120) || undefined,
     eventType: sanitizeString(customData.eventType).slice(0, 80) || undefined,
     callId: toId(customData.callId) || undefined,
     nativeCallId: sanitizeString(customData.nativeCallId).slice(0, 64) || undefined,

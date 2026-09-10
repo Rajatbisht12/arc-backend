@@ -158,6 +158,14 @@ const createMessageNotification = async (recipientId, senderId, messageId, optio
         media: { hasMedia, ...(primaryMediaType ? { primaryType: primaryMediaType } : {}) },
         pushRequestId: `message:${String(messageId)}`,
         notificationCoalesceKey,
+        // The sender's identity travels WITH the notification so tapping it can
+        // render the conversation header immediately. Without these the app only
+        // knows a chatId, mounts the chat screen with nothing to show, and
+        // displays "Unknown user" + a spinner until the profile fetch lands.
+        // `sender` is already loaded above, so this costs no extra query.
+        ...(sender?.profile?.displayName ? { senderName: String(sender.profile.displayName) } : {}),
+        ...(sender?.username ? { senderUsername: String(sender.username) } : {}),
+        ...(sender?.profile?.avatar ? { senderAvatar: String(sender.profile.avatar) } : {}),
         ...(options.groupName ? { groupName: String(options.groupName) } : {})
       }
     };
