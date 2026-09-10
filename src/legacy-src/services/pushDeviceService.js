@@ -167,9 +167,22 @@ const isTransactionUnsupported = (error) => /Transaction numbers are only allowe
 const runOwnershipMutation = async (label, operation) => {
   let session;
   try {
-    session = await mongoose.startSession();
+    // causalConsistency:false mirrors startFinancialSession — Amazon DocumentDB
+    // rejects explicit sessions that use causal consistency.
+    session = await mongoose.startSession({ causalConsistency: false });
     let value;
     await session.withTransaction(async () => { value = await operation(session); }, {
+      // The connection is opened with readPreference 'primaryPreferred'
+      // (infrastructure/database/mongodb.ts), but a transaction MUST read from
+      // the primary — otherwise every attempt throws
+      //   MongoTransactionError: Read preference in a transaction must be
+      //   primary, not: primaryPreferred
+      // which is not one of the "transactions unsupported" messages below, so
+      // it was rethrown and surfaced as HTTP 500 on POST /notifications/push-token,
+      // meaning no device could ever register for push. Every other transaction
+      // in this codebase already overrides it the same way — see
+      // utils/financialTransactions.js, teamInvitationService, randomConnectAdmissionService.
+      readPreference: 'primary',
       readConcern: { level: 'snapshot' },
       writeConcern: { w: 'majority' }
     });
@@ -214,8 +227,21 @@ const tombstoneUpdate = (status, reason) => ({
 const registerPushDevice = async (userId, input) => {
   let session;
   try {
-    session = await mongoose.startSession();
+    // causalConsistency:false mirrors startFinancialSession — Amazon DocumentDB
+    // rejects explicit sessions that use causal consistency.
+    session = await mongoose.startSession({ causalConsistency: false });
     await session.withTransaction(() => writeOwnership(userId, input, session), {
+      // The connection is opened with readPreference 'primaryPreferred'
+      // (infrastructure/database/mongodb.ts), but a transaction MUST read from
+      // the primary — otherwise every attempt throws
+      //   MongoTransactionError: Read preference in a transaction must be
+      //   primary, not: primaryPreferred
+      // which is not one of the "transactions unsupported" messages below, so
+      // it was rethrown and surfaced as HTTP 500 on POST /notifications/push-token,
+      // meaning no device could ever register for push. Every other transaction
+      // in this codebase already overrides it the same way — see
+      // utils/financialTransactions.js, teamInvitationService, randomConnectAdmissionService.
+      readPreference: 'primary',
       readConcern: { level: 'snapshot' },
       writeConcern: { w: 'majority' }
     });

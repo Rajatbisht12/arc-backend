@@ -1245,14 +1245,20 @@ const updateReport = async (req, res) => {
       await Post.findByIdAndDelete(report.targetId);
       await cleanupTargetNotifications('post', report.targetId);
     } else if (adminAction === 'delete_content' && report.targetType === 'recruitment') {
-      const session = await mongoose.startSession();
+      // The connection is opened with readPreference 'primaryPreferred', but a
+      // transaction must read from the primary or it throws
+      //   MongoTransactionError: Read preference in a transaction must be primary
+      // This was the only withTransaction in the file not passing the shared
+      // options, so deleting a REPORTED RECRUITMENT would have 500'd while the
+      // sibling branches (post, comment) never open a transaction at all.
+      const session = await startFinancialSession();
       let deleted = null;
       try {
         await session.withTransaction(async () => {
           deleted = await TeamRecruitment.findOneAndDelete({ _id: report.targetId }, { session });
           if (!deleted) return;
           await RecruitmentApplication.deleteMany({ recruitment: report.targetId }, { session });
-        });
+        }, FINANCIAL_TRANSACTION_OPTIONS);
       } finally {
         await session.endSession().catch(() => null);
       }
