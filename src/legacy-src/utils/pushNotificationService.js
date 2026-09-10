@@ -360,6 +360,7 @@ const buildPushData = (notification, unreadCount = 0) => {
     senderUsername: sanitizeString(customData.senderUsername).slice(0, 120) || undefined,
     senderAvatar: sanitizeString(customData.senderAvatar).slice(0, 500) || undefined,
     groupName: sanitizeString(customData.groupName).slice(0, 120) || undefined,
+    groupAvatar: sanitizeString(customData.groupAvatar).slice(0, 500) || undefined,
     eventType: sanitizeString(customData.eventType).slice(0, 80) || undefined,
     callId: toId(customData.callId) || undefined,
     nativeCallId: sanitizeString(customData.nativeCallId).slice(0, 64) || undefined,
