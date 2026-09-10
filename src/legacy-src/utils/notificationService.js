@@ -166,7 +166,8 @@ const createMessageNotification = async (recipientId, senderId, messageId, optio
         ...(sender?.profile?.displayName ? { senderName: String(sender.profile.displayName) } : {}),
         ...(sender?.username ? { senderUsername: String(sender.username) } : {}),
         ...(sender?.profile?.avatar ? { senderAvatar: String(sender.profile.avatar) } : {}),
-        ...(options.groupName ? { groupName: String(options.groupName) } : {})
+        ...(options.groupName ? { groupName: String(options.groupName) } : {}),
+        ...(options.groupAvatar ? { groupAvatar: String(options.groupAvatar) } : {})
       }
     };
     const notificationTitle = options.title || 'New Message';

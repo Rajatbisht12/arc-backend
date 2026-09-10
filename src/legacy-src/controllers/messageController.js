@@ -1263,6 +1263,9 @@ const sendGroupMessage = async (req, res) => {
           chatId: String(chatRoomId),
           muteKey: String(chatRoomId),
           groupName: chatRoom.name,
+          // Lets the tapped notification render the real group photo instead of
+          // the generic placeholder avatar.
+          groupAvatar: chatRoom.avatar,
           title: chatRoom.name,
           message: `${senderName} sent a message in ${chatRoom.name}`,
           messageKind,
