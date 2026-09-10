@@ -74,6 +74,36 @@ const storySchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+// `music` is a nested path with defaults (sourceType 'library', title '', ...),
+// so Mongoose materialises it for EVERY story — including ones posted with no
+// music at all. Serialised, that is a truthy object carrying no url, and the
+// clients read "is there music?" as truthiness. The result: a video story with
+// no music had its original audio muted at playback, because the API claimed a
+// track existed. A track is only real if it has a url, so drop the phantom
+// object instead of shipping it. Composer state is untouched — it uses null
+// until the user actually picks something.
+const stripEmptyStoryMusic = (_doc, ret) => {
+  const url = typeof ret?.music?.url === 'string' ? ret.music.url.trim() : '';
+  if (!url) delete ret.music;
+  return ret;
+};
+storySchema.set('toJSON', { transform: stripEmptyStoryMusic });
+storySchema.set('toObject', { transform: stripEmptyStoryMusic });
+
+// The story read paths use .lean(), which bypasses toJSON/toObject entirely, so
+// the transform above is not enough on its own. Query post-hooks DO run for lean
+// results, and this is the path the story viewer is actually served from.
+const stripEmptyMusicFromResult = (doc) => {
+  if (!doc || typeof doc !== 'object') return;
+  const url = typeof doc.music?.url === 'string' ? doc.music.url.trim() : '';
+  if (!url) delete doc.music;
+};
+storySchema.post('find', (docs) => {
+  if (Array.isArray(docs)) docs.forEach(stripEmptyMusicFromResult);
+});
+storySchema.post('findOne', (doc) => stripEmptyMusicFromResult(doc));
+storySchema.post('findOneAndUpdate', (doc) => stripEmptyMusicFromResult(doc));
+
 storySchema.index({ createdAt: 1 }, { expireAfterSeconds: 24 * 60 * 60 }); // TTL: delete after 24 hours
 storySchema.index({ author: 1, createdAt: -1 });
 storySchema.index(
