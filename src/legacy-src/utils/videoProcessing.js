@@ -149,9 +149,53 @@ const processStoryVideo = async (file) => {
   }
 };
 
+// Post videos are already encoded by the client. Re-mux MP4 uploads without
+// re-encoding so the moov/index atom is written before mdat. Browsers and
+// ExoPlayer can then start from the first range request instead of fetching the
+// beginning, seeking to the tail for metadata, and returning to the beginning.
+const processPostVideo = async (file) => {
+  if (String(file?.mimetype || '').toLowerCase() !== 'video/mp4') return file;
+
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'arc-post-video-'));
+  const inputPath = path.join(workDir, `${randomUUID()}.mp4`);
+  const outputPath = path.join(workDir, `${randomUUID()}.mp4`);
+
+  try {
+    await fs.writeFile(inputPath, file.buffer);
+    await runFfmpeg([
+      '-nostdin',
+      '-loglevel', 'error',
+      '-y',
+      '-i', inputPath,
+      '-map', '0:v:0?',
+      '-map', '0:a:0?',
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      outputPath,
+    ]);
+    const buffer = await fs.readFile(outputPath);
+    return {
+      ...file,
+      buffer,
+      mimetype: 'video/mp4',
+      originalname: `${path.parse(file.originalname || 'post-video').name}.mp4`,
+      size: buffer.length,
+      optimized: true,
+    };
+  } catch (err) {
+    // An optimization failure must not turn a valid MP4 upload into a failed
+    // post. The original remains playable through range requests.
+    log.warn('Post video fast-start remux failed; uploading original MP4 video', { error: String(err) });
+    return file;
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+};
+
 module.exports = {
   STORY_MAX_SECONDS,
   FFMPEG_TIMEOUT_MS,
   processStoryVideo,
+  processPostVideo,
   probeMediaDuration,
 };

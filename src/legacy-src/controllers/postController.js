@@ -22,6 +22,7 @@ const log = require('../utils/logger');
 const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
 const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const { toPostMediaItem } = require('../utils/postMediaDimensions');
+const { processPostVideo } = require('../utils/videoProcessing');
 const { resolvePostAccess, filterPostsForViewer } = require('../utils/privacyPolicy');
 const {
   normalizeAchievementInfoInput,
@@ -131,8 +132,15 @@ const createPost = async (req, res) => {
           });
         }
         
-        const uploadResults = mediaFiles.length > 0
-          ? await uploadMultipleFiles(mediaFiles, 'gaming-social/posts')
+        const startupOptimizedMedia = mediaFiles.length > 0
+          ? await Promise.all(mediaFiles.map(file => (
+              String(file?.mimetype || '').toLowerCase() === 'video/mp4'
+                ? processPostVideo(file)
+                : file
+            )))
+          : [];
+        const uploadResults = startupOptimizedMedia.length > 0
+          ? await uploadMultipleFiles(startupOptimizedMedia, 'gaming-social/posts')
           : [];
         mediaData = uploadResults.map(toPostMediaItem);
         if (coverFile) {
