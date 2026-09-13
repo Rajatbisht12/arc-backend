@@ -14,6 +14,8 @@ assert.match(source, /'-threads', '2'/);
 const postFastStart = source.slice(source.indexOf('const processPostVideo'), source.indexOf('module.exports'));
 assert.match(postFastStart, /'-c', 'copy'/);
 assert.match(postFastStart, /'-movflags', '\+faststart'/);
+assert.match(postFastStart, /runVideoMetadataProbe\(outputPath\)/);
+assert.match(source, /stream=width,height/);
 assert.match(postFastStart, /mimetype[^\n]+!== 'video\/mp4'/);
 assert.match(postController, /processPostVideo\(file\)/);
 assert.match(postController, /uploadMultipleFiles\(startupOptimizedMedia, 'gaming-social\/posts'\)/);

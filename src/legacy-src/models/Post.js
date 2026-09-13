@@ -50,6 +50,10 @@ const postSchema = new mongoose.Schema({
         type: Number,
         min: 0.01
       },
+      duration: {
+        type: Number,
+        min: 0
+      },
       coverUrl: {
         type: String,
         default: ''

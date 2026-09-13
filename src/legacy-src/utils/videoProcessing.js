@@ -80,6 +80,58 @@ const runFfprobe = (inputPath) => new Promise((resolve, reject) => {
   });
 });
 
+const runVideoMetadataProbe = (inputPath) => new Promise((resolve, reject) => {
+  const child = spawn('ffprobe', [
+    '-v', 'error',
+    '-select_streams', 'v:0',
+    '-show_entries', 'format=duration:stream=width,height:stream_tags=rotate:stream_side_data=rotation',
+    '-of', 'json',
+    inputPath,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  let settled = false;
+  const timeout = setTimeout(() => {
+    child.kill('SIGKILL');
+    if (!settled) {
+      settled = true;
+      reject(new Error('Video metadata probe timed out'));
+    }
+  }, 20_000);
+  child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+  child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+  child.on('error', (error) => {
+    clearTimeout(timeout);
+    if (!settled) { settled = true; reject(error); }
+  });
+  child.on('close', (code) => {
+    clearTimeout(timeout);
+    if (settled) return;
+    settled = true;
+    try {
+      const parsed = JSON.parse(stdout);
+      const stream = parsed?.streams?.[0] || {};
+      const sideDataRotation = stream?.side_data_list?.find(item => Number.isFinite(Number(item?.rotation)))?.rotation;
+      const rotation = Number(sideDataRotation ?? stream?.tags?.rotate ?? 0);
+      let width = Number(stream.width);
+      let height = Number(stream.height);
+      if (Math.abs(rotation) % 180 === 90) [width, height] = [height, width];
+      const duration = Number(parsed?.format?.duration);
+      if (code !== 0 || !Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+        reject(new Error(stderr || 'Video dimensions could not be read'));
+        return;
+      }
+      resolve({
+        width,
+        height,
+        ...(Number.isFinite(duration) && duration > 0 ? { duration } : {}),
+      });
+    } catch (error) {
+      reject(new Error(stderr || `Video metadata could not be parsed: ${String(error)}`));
+    }
+  });
+});
+
 const probeMediaDuration = async (file) => {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'arc-media-probe-'));
   const extension = path.extname(file.originalname || '') || '.bin';
@@ -173,7 +225,15 @@ const processPostVideo = async (file) => {
       '-movflags', '+faststart',
       outputPath,
     ]);
-    const buffer = await fs.readFile(outputPath);
+    const [buffer, metadata] = await Promise.all([
+      fs.readFile(outputPath),
+      runVideoMetadataProbe(outputPath).catch((error) => {
+        // Metadata improves client initialization, but a probe failure must not
+        // discard a successful fast-start remux.
+        log.warn('Post video metadata probe failed; keeping optimized MP4 without metadata', { error: String(error) });
+        return {};
+      }),
+    ]);
     return {
       ...file,
       buffer,
@@ -181,6 +241,7 @@ const processPostVideo = async (file) => {
       originalname: `${path.parse(file.originalname || 'post-video').name}.mp4`,
       size: buffer.length,
       optimized: true,
+      ...metadata,
     };
   } catch (err) {
     // An optimization failure must not turn a valid MP4 upload into a failed

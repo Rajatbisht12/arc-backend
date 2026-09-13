@@ -32,8 +32,28 @@ test('media without valid dimensions remains backwards compatible', () => {
   });
 });
 
+test('video playback metadata is retained when the upload processor provides it', () => {
+  assert.deepEqual(toPostMediaItem({
+    type: 'video',
+    url: 'https://cdn.example/video.mp4',
+    publicId: 'posts/video.mp4',
+    width: 1080,
+    height: 1920,
+    duration: 12.75,
+  }), {
+    type: 'video',
+    url: 'https://cdn.example/video.mp4',
+    publicId: 'posts/video.mp4',
+    width: 1080,
+    height: 1920,
+    aspectRatio: 0.5625,
+    duration: 12.75,
+  });
+});
+
 test('Post schema exposes optional intrinsic media metadata', () => {
   assert.ok(Post.schema.path('content.media').schema.path('width'));
   assert.ok(Post.schema.path('content.media').schema.path('height'));
   assert.ok(Post.schema.path('content.media').schema.path('aspectRatio'));
+  assert.ok(Post.schema.path('content.media').schema.path('duration'));
 });
