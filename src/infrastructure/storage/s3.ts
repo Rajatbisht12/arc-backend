@@ -171,7 +171,7 @@ export async function uploadAvatarFromUrl(
 }
 
 export async function uploadVideo(
-  file: { buffer: Buffer },
+  file: { buffer: Buffer; duration?: number; width?: number; height?: number },
   folder = "gaming-social"
 ): Promise<UploadResult & { duration?: number; width?: number; height?: number }> {
   assertBucket();
@@ -187,7 +187,13 @@ export async function uploadVideo(
     },
   });
   await upload.done();
-  return { url: publicUrl(key), publicId: key };
+  return {
+    url: publicUrl(key),
+    publicId: key,
+    ...(Number.isFinite(file.duration) && Number(file.duration) > 0 ? { duration: Number(file.duration) } : {}),
+    ...(Number.isFinite(file.width) && Number(file.width) > 0 ? { width: Number(file.width) } : {}),
+    ...(Number.isFinite(file.height) && Number(file.height) > 0 ? { height: Number(file.height) } : {}),
+  };
 }
 
 export async function uploadAudio(
@@ -215,9 +221,9 @@ export async function deleteFile(publicId: string): Promise<void> {
 }
 
 export async function uploadMultipleFiles(
-  files: Array<{ buffer: Buffer; mimetype: string }>,
+  files: Array<{ buffer: Buffer; mimetype: string; duration?: number; width?: number; height?: number }>,
   folder = "gaming-social"
-): Promise<Array<{ type: string; width?: number; height?: number } & UploadResult>> {
+): Promise<Array<{ type: string; duration?: number; width?: number; height?: number } & UploadResult>> {
   const results = await Promise.all(
     files.map(async (f) => {
       if (f.mimetype.startsWith("image/")) {

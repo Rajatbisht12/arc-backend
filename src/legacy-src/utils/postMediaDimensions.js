@@ -5,17 +5,18 @@ const positiveNumber = (value) => {
 
 /**
  * Convert the authoritative storage upload result into the post media shape.
- * Video upload results currently omit dimensions, so the metadata remains
- * optional and legacy/video documents stay backwards-compatible.
+ * Metadata remains optional so legacy media documents stay backwards-compatible.
  */
 const toPostMediaItem = (result) => {
   const width = positiveNumber(result?.width);
   const height = positiveNumber(result?.height);
+  const duration = positiveNumber(result?.duration);
   return {
     type: result.type,
     url: result.url,
     publicId: result.publicId,
-    ...(width && height ? { width, height, aspectRatio: width / height } : {})
+    ...(width && height ? { width, height, aspectRatio: width / height } : {}),
+    ...(duration ? { duration } : {})
   };
 };
 
