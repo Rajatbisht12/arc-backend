@@ -23,6 +23,7 @@ const { deleteNotificationsForTarget } = require('../services/notificationHistor
 const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const { toPostMediaItem } = require('../utils/postMediaDimensions');
 const { processPostVideo } = require('../utils/videoProcessing');
+const { enqueueClipTranscode } = require('../utils/jobQueue');
 const { resolvePostAccess, filterPostsForViewer } = require('../utils/privacyPolicy');
 const {
   normalizeAchievementInfoInput,
@@ -298,6 +299,28 @@ const createPost = async (req, res) => {
     }
 
     const post = await Post.create(postData);
+
+    // The fallback MP4 is already durable and playable at this point. HLS
+    // rendition work is handed to BullMQ and never blocks the upload request.
+    const clipJobs = post.content.media
+      .filter(media => media.type === 'video' && media.playback?.status === 'processing')
+      .map(media => ({
+        postId: String(post._id),
+        mediaId: String(media._id),
+        version: String(media.playback.version)
+      }));
+    const queueResults = await Promise.allSettled(clipJobs.map(job => (
+      enqueueClipTranscode(job.postId, job.mediaId, job.version)
+    )));
+    queueResults.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        log.error('Clip HLS enqueue failed; recovery scan will retry', {
+          postId: clipJobs[index].postId,
+          mediaId: clipJobs[index].mediaId,
+          error: String(result.reason)
+        });
+      }
+    });
     
     // Populate author info
     await post.populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType');

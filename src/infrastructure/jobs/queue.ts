@@ -9,7 +9,8 @@ import { backendRootPath } from "../../modules/legacy/legacy.paths";
 export const QUEUE_NAMES = {
   EMAIL: "email",
   NOTIFICATION: "notification",
-  BROADCAST: "broadcast"
+  BROADCAST: "broadcast",
+  CLIP_VIDEO: "clip-video"
 } as const;
 
 // ── Connection config — BullMQ uses ioredis format (flat host/port, not node-redis socket object) ──
@@ -30,6 +31,7 @@ const BROADCAST_SEND_MAX_ATTEMPTS = Math.max(
 export const emailQueue = new Queue(QUEUE_NAMES.EMAIL, { connection });
 export const notificationQueue = new Queue(QUEUE_NAMES.NOTIFICATION, { connection });
 export const broadcastQueue = new Queue(QUEUE_NAMES.BROADCAST, { connection });
+export const clipVideoQueue = new Queue(QUEUE_NAMES.CLIP_VIDEO, { connection });
 
 export type EmailDeliveryContext = {
   intent: string;
@@ -318,7 +320,58 @@ export const broadcastWorker = new Worker(
   }
 );
 
+type ClipTranscodingService = {
+  processClipTranscodeJob: (data: {
+    postId: string;
+    mediaId: string;
+    version: string;
+    workerJobId?: string;
+  }) => Promise<unknown>;
+};
+
+const loadClipTranscodingService = (): ClipTranscodingService => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require(path.join(backendRootPath, "services", "clipTranscodingService.js")) as ClipTranscodingService;
+};
+
+export const clipVideoWorker = new Worker(
+  QUEUE_NAMES.CLIP_VIDEO,
+  async (job: Job) => {
+    if (job.name !== "transcode-hls") throw new Error(`Unknown clip video job: ${job.name}`);
+    return loadClipTranscodingService().processClipTranscodeJob({
+      ...job.data,
+      workerJobId: String(job.id || "")
+    });
+  },
+  {
+    connection,
+    concurrency: env.CLIP_HLS_WORKER_CONCURRENCY,
+    autorun: env.CLIP_HLS_ENABLED && env.CLIP_HLS_WORKER_ENABLED,
+    lockDuration: 120000
+  }
+);
+
 // ── Convenience helpers for legacy JS ──────────────────────────────────────
+export const enqueueClipTranscode = async (
+  postId: string,
+  mediaId: string,
+  version: string
+): Promise<void> => {
+  if (!env.CLIP_HLS_ENABLED) return;
+  const normalized = [postId, mediaId, version].map((part) => String(part).replace(/[^a-zA-Z0-9_-]/g, "-"));
+  await clipVideoQueue.add(
+    "transcode-hls",
+    { postId: String(postId), mediaId: String(mediaId), version: String(version) },
+    {
+      jobId: broadcastJobId("clip-hls", ...normalized),
+      attempts: env.CLIP_HLS_JOB_ATTEMPTS,
+      backoff: { type: "exponential", delay: 30000 },
+      removeOnComplete: 2000,
+      removeOnFail: 5000
+    }
+  );
+};
+
 /**
  * Enqueue an email to be sent in the background.
  */
@@ -513,6 +566,39 @@ export const removeBroadcastJobs = async (broadcastId: string): Promise<void> =>
 };
 
 let broadcastRecoveryTimer: NodeJS.Timeout | null = null;
+let clipRecoveryTimer: NodeJS.Timeout | null = null;
+
+const recoverPendingClipTranscodes = async (): Promise<void> => {
+  if (!env.CLIP_HLS_ENABLED) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Post = require(path.join(backendRootPath, "models", "Post.js"));
+    const now = new Date();
+    const posts = await Post.find({
+      "content.media": {
+        $elemMatch: {
+          type: "video",
+          "playback.status": "processing",
+          $or: [
+            { "playback.leaseExpiresAt": { $exists: false } },
+            { "playback.leaseExpiresAt": null },
+            { "playback.leaseExpiresAt": { $lte: now } }
+          ]
+        }
+      }
+    }).select("content.media").limit(100).lean();
+    for (const post of posts) {
+      for (const media of post.content?.media || []) {
+        if (media.type !== "video" || media.playback?.status !== "processing" || !media.playback?.version) continue;
+        const leaseExpiresAt = media.playback?.leaseExpiresAt ? new Date(media.playback.leaseExpiresAt) : null;
+        if (leaseExpiresAt && leaseExpiresAt > now) continue;
+        await enqueueClipTranscode(String(post._id), String(media._id), String(media.playback.version));
+      }
+    }
+  } catch (error) {
+    logger.error("Clip HLS recovery scan failed", { error: String(error) });
+  }
+};
 
 const recoverDueBroadcasts = async (): Promise<void> => {
   try {
@@ -743,6 +829,18 @@ export const startBroadcastScheduler = (): void => {
   broadcastRecoveryTimer.unref();
 };
 
+export const startClipTranscodeScheduler = (): void => {
+  if (clipRecoveryTimer || !env.CLIP_HLS_ENABLED) return;
+  void recoverPendingClipTranscodes();
+  clipRecoveryTimer = setInterval(() => void recoverPendingClipTranscodes(), 60000);
+  clipRecoveryTimer.unref();
+};
+
+export const stopClipTranscodeScheduler = (): void => {
+  if (clipRecoveryTimer) clearInterval(clipRecoveryTimer);
+  clipRecoveryTimer = null;
+};
+
 export const stopBroadcastScheduler = (): void => {
   if (broadcastRecoveryTimer) clearInterval(broadcastRecoveryTimer);
   broadcastRecoveryTimer = null;
@@ -766,4 +864,14 @@ broadcastWorker.on("failed", (job, err) => {
       .markBroadcastWorkerFailure({ ...job.data, jobName: job.name }, err)
       .catch((error) => logger.error("Failed to persist terminal broadcast failure", { error: String(error) }));
   }
+});
+
+clipVideoWorker.on("failed", (job, err) => {
+  logger.error("Clip HLS job failed", {
+    jobId: job?.id,
+    postId: job?.data?.postId,
+    mediaId: job?.data?.mediaId,
+    attemptsMade: job?.attemptsMade,
+    error: String(err)
+  });
 });

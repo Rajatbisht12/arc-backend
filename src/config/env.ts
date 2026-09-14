@@ -82,6 +82,12 @@ const envSchema = z.object({
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
 
+  // Asynchronous Clip HLS/CMAF processing
+  CLIP_HLS_ENABLED: z.string().default("true").transform((v) => v !== "false"),
+  CLIP_HLS_WORKER_ENABLED: z.string().default("true").transform((v) => v !== "false"),
+  CLIP_HLS_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
+  CLIP_HLS_JOB_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+
   // Razorpay
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),

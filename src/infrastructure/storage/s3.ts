@@ -1,5 +1,16 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+} from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
+import { createReadStream, createWriteStream } from "fs";
+import { stat } from "fs/promises";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import sharp from "sharp";
 import { v4 as uuidv4 } from "uuid";
 import { env } from "../../config/env";
@@ -51,7 +62,7 @@ async function readBodyWithLimit(response: Response, maxBytes: number): Promise<
   return Buffer.concat(chunks, total);
 }
 
-function publicUrl(key: string): string {
+export function publicUrl(key: string): string {
   if (env.AWS_S3_CDN_URL) return `${env.AWS_S3_CDN_URL}/${key}`;
   return `https://${BUCKET}.s3.${env.AWS_REGION}.amazonaws.com/${key}`;
 }
@@ -218,6 +229,69 @@ export async function uploadAudio(
 export async function deleteFile(publicId: string): Promise<void> {
   assertBucket();
   await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: publicId }));
+}
+
+const IMMUTABLE_MEDIA_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+export function contentTypeForMediaPath(filePath: string): string {
+  const extension = filePath.toLowerCase().split(".").pop();
+  if (extension === "m3u8") return "application/vnd.apple.mpegurl";
+  if (extension === "m4s") return "video/iso.segment";
+  if (extension === "mp4") return "video/mp4";
+  return "application/octet-stream";
+}
+
+/** Stream a private worker input from S3 without buffering the full video in Node memory. */
+export async function downloadFile(publicId: string, destinationPath: string): Promise<void> {
+  assertBucket();
+  const response = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: publicId }));
+  if (!response.Body) throw new Error("Storage object body is empty");
+  await pipeline(response.Body as Readable, createWriteStream(destinationPath, { flags: "wx" }));
+}
+
+/** Upload one immutable, versioned HLS asset from disk using a bounded stream. */
+export async function uploadMediaFile(sourcePath: string, publicId: string): Promise<UploadResult> {
+  assertBucket();
+  const fileStat = await stat(sourcePath);
+  const upload = new Upload({
+    client: s3,
+    params: {
+      Bucket: BUCKET,
+      Key: publicId,
+      Body: createReadStream(sourcePath),
+      ContentLength: fileStat.size,
+      ContentType: contentTypeForMediaPath(sourcePath),
+      CacheControl: IMMUTABLE_MEDIA_CACHE_CONTROL,
+    },
+    queueSize: 2,
+    partSize: 8 * 1024 * 1024,
+  });
+  await upload.done();
+  return { url: publicUrl(publicId), publicId };
+}
+
+/** Remove a deterministic HLS version before a retry or after a failed upload. */
+export async function deletePrefix(prefix: string): Promise<number> {
+  assertBucket();
+  let continuationToken: string | undefined;
+  let deleted = 0;
+  do {
+    const listed = await s3.send(new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    }));
+    const keys = (listed.Contents || []).map((entry) => entry.Key).filter((key): key is string => Boolean(key));
+    if (keys.length) {
+      await s3.send(new DeleteObjectsCommand({
+        Bucket: BUCKET,
+        Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },
+      }));
+      deleted += keys.length;
+    }
+    continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return deleted;
 }
 
 export async function uploadMultipleFiles(

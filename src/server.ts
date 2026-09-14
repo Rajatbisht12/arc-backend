@@ -14,7 +14,10 @@ import {
   enqueueBroadcastReceipts,
   removeBroadcastJobs,
   startBroadcastScheduler,
-  stopBroadcastScheduler
+  stopBroadcastScheduler,
+  enqueueClipTranscode,
+  startClipTranscodeScheduler,
+  stopClipTranscodeScheduler
 } from "./infrastructure/jobs/queue";
 import path from "path";
 import { backendControllerPath, backendRootPath } from "./modules/legacy/legacy.paths";
@@ -80,9 +83,11 @@ const bootstrap = async () => {
     enqueuePushSend,
     enqueueBroadcast,
     enqueueBroadcastReceipts,
-    removeBroadcastJobs
+    removeBroadcastJobs,
+    enqueueClipTranscode
   });
   startBroadcastScheduler();
+  startClipTranscodeScheduler();
 
   const app = createApp();
   const httpServer = createServer(app);
@@ -163,13 +168,14 @@ const bootstrap = async () => {
     // 3. Close BullMQ workers
     try {
       stopBroadcastScheduler();
+      stopClipTranscodeScheduler();
       stopLegacyBackgroundJobs();
       callSessionService?.stopCallSessionSweeper?.();
       apnsVoipPushService?.stopApnsVoipPushSweeper?.();
       premiumMembershipCron?.stopPremiumMembershipCron?.();
       storyMediaCleanupCron?.stopStoryMediaCleanupCron?.();
-      const { emailWorker, notificationWorker, broadcastWorker } = await import("./infrastructure/jobs/queue");
-      await Promise.allSettled([emailWorker.close(), notificationWorker.close(), broadcastWorker.close()]);
+      const { emailWorker, notificationWorker, broadcastWorker, clipVideoWorker } = await import("./infrastructure/jobs/queue");
+      await Promise.allSettled([emailWorker.close(), notificationWorker.close(), broadcastWorker.close(), clipVideoWorker.close()]);
     } catch { /* queue may not be initialized */ }
 
     // 4. Disconnect Redis + Mongo

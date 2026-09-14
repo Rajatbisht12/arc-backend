@@ -54,6 +54,40 @@ const postSchema = new mongoose.Schema({
         type: Number,
         min: 0
       },
+      // Additive playback contract for Clips. `url` remains the always-playable
+      // progressive MP4 so older clients continue to work while HLS is queued,
+      // retried, backfilled, or unavailable.
+      playback: {
+        status: {
+          type: String,
+          enum: ['processing', 'ready', 'failed']
+        },
+        version: String,
+        hlsUrl: String,
+        hlsPublicId: String,
+        fallbackMp4Url: String,
+        fallbackPublicId: String,
+        duration: { type: Number, min: 0 },
+        width: { type: Number, min: 1 },
+        height: { type: Number, min: 1 },
+        renditions: [{
+          _id: false,
+          name: String,
+          width: { type: Number, min: 1 },
+          height: { type: Number, min: 1 },
+          bandwidth: { type: Number, min: 1 },
+          averageBandwidth: { type: Number, min: 1 },
+          playlistUrl: String,
+          playlistPublicId: String
+        }],
+        attempts: { type: Number, min: 0 },
+        processingStartedAt: Date,
+        completedAt: Date,
+        failedAt: Date,
+        failureCode: String,
+        leaseToken: { type: String, select: false },
+        leaseExpiresAt: { type: Date, select: false }
+      },
       coverUrl: {
         type: String,
         default: ''
@@ -303,6 +337,9 @@ postSchema.index({ 'comments.user': 1, createdAt: -1 });
 postSchema.index({ 'comments.rootComment': 1 });
 postSchema.index({ 'boostMeta.status': 1, 'boostMeta.endTime': 1, 'boostMeta.remainingReach': 1 });
 postSchema.index({ 'metrics.organicViews': -1, createdAt: -1 });
+// The recovery worker only scans unfinished Clip renditions. This multikey
+// index bounds that scan as the media library grows.
+postSchema.index({ 'content.media.playback.status': 1, 'content.media.playback.leaseExpiresAt': 1 });
 
 // Virtual for like count
 postSchema.virtual('likeCount').get(function() {
