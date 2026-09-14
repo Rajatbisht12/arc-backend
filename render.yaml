@@ -87,3 +87,63 @@ services:
         sync: false
       - key: ZEGOCLOUD_SERVER_SECRET
         sync: false
+      # HTTP nodes enqueue work and run the recovery scan; CPU-heavy FFmpeg
+      # runs only in the isolated Docker worker below.
+      - key: CLIP_HLS_ENABLED
+        value: true
+      - key: CLIP_HLS_WORKER_ENABLED
+        value: false
+
+  - type: worker
+    name: arc-clip-hls-worker
+    runtime: docker
+    rootDir: arc_-main/modular-backend
+    dockerfilePath: ./Dockerfile
+    dockerCommand: npm run start:clip-worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLIP_HLS_ENABLED
+        value: true
+      - key: CLIP_HLS_WORKER_ENABLED
+        value: true
+      - key: CLIP_HLS_WORKER_CONCURRENCY
+        value: 1
+      - key: CLIP_HLS_JOB_ATTEMPTS
+        value: 3
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_TLS
+        sync: false
+      - key: MONGODB_TLS_CA_FILE
+        value: /app/rds-ca-bundle.pem
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        sync: false
+      - key: REDIS_USERNAME
+        sync: false
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: REDIS_TLS
+        sync: false
+      # The shared environment schema validates these production secrets even
+      # though the worker never reads authentication or payout data itself.
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: ADMIN_JWT_SECRET
+        sync: false
+      - key: BANK_DETAILS_ENCRYPTION_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: AWS_S3_BUCKET
+        sync: false
+      - key: AWS_S3_CDN_URL
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false

@@ -25,11 +25,12 @@ let _enqueuePushSend = null;
 let _enqueueBroadcast = null;
 let _enqueueBroadcastReceipts = null;
 let _removeBroadcastJobs = null;
+let _enqueueClipTranscode = null;
 
 /**
  * Inject the queue functions from TypeScript land.
  */
-const setQueueFunctions = ({ enqueueEmail, enqueueBulkNotifications, enqueuePushReceipts, enqueuePushSend, enqueueBroadcast, enqueueBroadcastReceipts, removeBroadcastJobs }) => {
+const setQueueFunctions = ({ enqueueEmail, enqueueBulkNotifications, enqueuePushReceipts, enqueuePushSend, enqueueBroadcast, enqueueBroadcastReceipts, removeBroadcastJobs, enqueueClipTranscode }) => {
   _enqueueEmail = enqueueEmail;
   _enqueueBulkNotifications = enqueueBulkNotifications;
   _enqueuePushReceipts = enqueuePushReceipts;
@@ -37,6 +38,17 @@ const setQueueFunctions = ({ enqueueEmail, enqueueBulkNotifications, enqueuePush
   _enqueueBroadcast = enqueueBroadcast;
   _enqueueBroadcastReceipts = enqueueBroadcastReceipts;
   _removeBroadcastJobs = removeBroadcastJobs;
+  _enqueueClipTranscode = enqueueClipTranscode;
+};
+
+/** HLS transcoding must never fall back to the HTTP request process. */
+const enqueueClipTranscode = async (postId, mediaId, version) => {
+  if (!_enqueueClipTranscode) {
+    const error = new Error('Clip video queue is not available');
+    error.statusCode = 503;
+    throw error;
+  }
+  return _enqueueClipTranscode(postId, mediaId, version);
 };
 
 const enqueuePushSend = async (attemptIds, runAt, retryKey) => {
@@ -234,5 +246,6 @@ module.exports = {
   enqueuePushSend,
   enqueueBroadcast,
   enqueueBroadcastReceipts,
-  removeBroadcastJobs
+  removeBroadcastJobs,
+  enqueueClipTranscode
 };
