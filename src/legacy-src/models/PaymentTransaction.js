@@ -55,7 +55,7 @@ const paymentTransactionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     default: {}
   },
-  provider: { type: String, enum: ['razorpay', 'manual', 'migration', 'unknown'], default: 'unknown', index: true },
+  provider: { type: String, enum: ['razorpay', 'apple', 'manual', 'migration', 'unknown'], default: 'unknown', index: true },
   membership: { type: mongoose.Schema.Types.ObjectId, ref: 'PremiumMembership', default: null, index: true },
   providerCustomerId: { type: String, trim: true, default: undefined },
   providerSubscriptionId: { type: String, trim: true, default: undefined },

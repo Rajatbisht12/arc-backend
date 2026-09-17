@@ -3,6 +3,7 @@ const {
   decodeCursor,
   encodeCursor,
   parseExcludedIds,
+  preserveTargetClipInExclusions,
   scorePost,
   selectDiversePosts,
   buildAudienceFilter
@@ -43,6 +44,21 @@ assert.strictEqual(decodeCursor(cursor).id, basePost._id);
 assert.strictEqual(decodeCursor('not-valid'), null);
 
 assert.deepStrictEqual(parseExcludedIds(`${basePost._id},bad-id`), [basePost._id]);
+assert.deepStrictEqual(
+  preserveTargetClipInExclusions([basePost._id, '507f1f77bcf86cd799439022'], basePost._id, 'clips'),
+  ['507f1f77bcf86cd799439022'],
+  'a canonical Home Feed target remains eligible at its normal Clips rank'
+);
+assert.deepStrictEqual(
+  preserveTargetClipInExclusions([basePost._id], basePost._id, 'feed'),
+  [basePost._id],
+  'the target exception is scoped to the Clips feed'
+);
+assert.deepStrictEqual(
+  preserveTargetClipInExclusions([basePost._id], 'invalid', 'clips'),
+  [basePost._id],
+  'invalid target ids cannot alter exclusions'
+);
 
 const highEngagementScore = scorePost({
   ...basePost,

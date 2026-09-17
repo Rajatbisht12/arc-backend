@@ -248,6 +248,9 @@ async function createPendingBoostCampaign({
   targetPlayers,
   targetTeams,
   razorpayOrderId,
+  paymentProvider = 'razorpay',
+  providerOrderId,
+  apple,
   currency = 'INR'
 }) {
   const normalizedFrequency = normalizeFrequency(frequency);
@@ -278,13 +281,16 @@ async function createPendingBoostCampaign({
     totalSpend: 0,
     targetAudience: audience,
     razorpayOrderId,
+    paymentProvider,
+    providerOrderId,
+    apple,
     metadata: {
       requestedReach
     }
   });
 }
 
-async function activateBoostCampaign({ campaign, paymentId, paymentAmount }) {
+async function activateBoostCampaign({ campaign, paymentId, paymentAmount, paymentProvider = 'razorpay', apple }) {
   const now = new Date();
   const durationHours = FREQUENCY_HOURS[normalizeFrequency(campaign.frequency)];
   const endTime = new Date(now.getTime() + durationHours * 60 * 60 * 1000);
@@ -294,6 +300,13 @@ async function activateBoostCampaign({ campaign, paymentId, paymentAmount }) {
     ? post.content.media.some((media) => media?.type === 'video')
     : post?.postType === 'clip';
 
+  const providerFields = paymentProvider === 'razorpay'
+    ? { razorpayPaymentId: paymentId }
+    : {
+        providerPaymentId: paymentId,
+        paymentProvider,
+        ...(apple ? { apple } : {})
+      };
   const updatedCampaign = await BoostCampaign.findByIdAndUpdate(
     campaign._id,
     {
@@ -304,7 +317,7 @@ async function activateBoostCampaign({ campaign, paymentId, paymentAmount }) {
       startTime: now,
       endTime,
       totalSpend,
-      razorpayPaymentId: paymentId,
+      ...providerFields,
       remainingReach: Math.max(0, campaign.remainingReach ?? campaign.purchasedReach ?? 0)
     },
     { new: true }
@@ -329,6 +342,37 @@ async function activateBoostCampaign({ campaign, paymentId, paymentAmount }) {
   });
 
   return updatedCampaign;
+}
+
+async function revokeBoostCampaign({ campaignId, paymentStatus = 'refunded', reason = '' }) {
+  const now = new Date();
+  const campaign = await BoostCampaign.findByIdAndUpdate(
+    campaignId,
+    {
+      $set: {
+        status: 'cancelled',
+        paymentStatus,
+        remainingReach: 0,
+        'metadata.revokedAt': now,
+        ...(reason ? { 'metadata.revocationReason': String(reason).slice(0, 200) } : {})
+      }
+    },
+    { new: true }
+  );
+  if (!campaign) return null;
+
+  await Post.updateOne(
+    { _id: campaign.post, 'boostMeta.activeCampaign': campaign._id },
+    {
+      $set: {
+        'boostMeta.status': 'cancelled',
+        'boostMeta.remainingReach': 0,
+        'boostMeta.endTime': now,
+        boostExpiresAt: now
+      }
+    }
+  );
+  return campaign;
 }
 
 async function recordBoostDelivery(posts, context = 'feed', viewerId = null) {
@@ -603,6 +647,7 @@ module.exports = {
   calculateManualDeliveryBatch,
   createPendingBoostCampaign,
   activateBoostCampaign,
+  revokeBoostCampaign,
   recordBoostDelivery,
   processSingleManualBoostCampaign,
   processDueManualBoostDeliveries,

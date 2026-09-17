@@ -13,6 +13,7 @@ const loadModule = <T>(modulePath: string): T => {
 };
 
 export const paymentController = loadModule<PaymentController>(path.join(backendControllerPath, "paymentController.js"));
+export const appleIapController = loadModule<PaymentController>(path.join(backendControllerPath, "appleIapController.js"));
 export const premiumWebhookController = loadModule<WebhookController>(path.join(backendControllerPath, "premiumWebhookController.js"));
 export const { protect } = loadModule<AuthMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
 export const { handleValidationErrors } = loadModule<ValidationMiddleware>(path.join(backendMiddlewarePath, "validation.js"));

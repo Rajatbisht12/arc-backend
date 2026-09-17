@@ -108,6 +108,16 @@ function parseExcludedIds(raw) {
     .slice(0, MAX_EXCLUDED_IDS);
 }
 
+// A Clip opened from Home may already be in the viewer's watched set because
+// Home and Clips share the same canonical Post id. Keep that one id eligible
+// while building the normal Clips recommendation pages; the client still has
+// to find it at its ranked position and never inserts or moves it locally.
+function preserveTargetClipInExclusions(excludedIds, rawTargetClipId, mode) {
+  if (mode !== 'clips' || !isValidObjectId(rawTargetClipId)) return excludedIds;
+  const targetClipId = String(rawTargetClipId);
+  return excludedIds.filter((id) => String(id) !== targetClipId);
+}
+
 function encodeCursor(post) {
   if (!post?.createdAt || !post?._id) return null;
   return Buffer.from(JSON.stringify({
@@ -809,10 +819,15 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     ? await findWatchedClipIds(relationship.currentUserId)
     : new Set();
 
-  const effectiveExcludedIds = [...new Set([
-    ...excludedIds,
+  const requestedExcludedIds = preserveTargetClipInExclusions(
+    excludedIds,
+    query.targetClipId,
+    mode
+  );
+  const effectiveExcludedIds = preserveTargetClipInExclusions([...new Set([
+    ...requestedExcludedIds,
     ...(mode === 'clips' ? Array.from(watchedClipIds) : [])
-  ])];
+  ])], query.targetClipId, mode);
 
   let filter = applyCursorAndExclusions(baseFilter, {
     cursor: query.cursor,
@@ -828,7 +843,11 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     const freshIds = new Set(freshCandidates.map((post) => normalizeId(post._id)));
     filter = applyCursorAndExclusions(baseFilter, {
       cursor: query.cursor,
-      excludedIds: [...excludedIds, ...Array.from(freshIds)]
+      excludedIds: preserveTargetClipInExclusions(
+        [...requestedExcludedIds, ...Array.from(freshIds)],
+        query.targetClipId,
+        mode
+      )
     });
     const fallbackCandidates = await fetchCandidates(filter, { limit, page, cursor: query.cursor });
     candidates = [...freshCandidates, ...fallbackCandidates];
@@ -1092,6 +1111,7 @@ module.exports = {
   encodeCursor,
   decodeCursor,
   parseExcludedIds,
+  preserveTargetClipInExclusions,
   buildAudienceFilter,
   buildViewEngagementUpdate,
   normalizeEngagementContext,

@@ -265,8 +265,9 @@ async function getMembership(req, res) {
         cancelAtCycleEnd: canonical?.cancelAtCycleEnd === true,
         currentPeriodStart: canonical?.currentPeriodStart || null,
         currentPeriodEnd: canonical?.currentPeriodEnd || validUntil,
-        providerSubscriptionId: canonical?.razorpay?.subscriptionId || null,
-        providerControlsAvailable: Boolean(canonical?.razorpay?.subscriptionId),
+        provider: canonical?.source?.startsWith('apple_') ? 'apple' : canonical?.source?.startsWith('razorpay_') ? 'razorpay' : null,
+        providerSubscriptionId: canonical?.apple?.originalTransactionId || canonical?.razorpay?.subscriptionId || null,
+        providerControlsAvailable: Boolean(canonical?.apple?.originalTransactionId || canonical?.razorpay?.subscriptionId),
         entitlements: {
           playerPremium: buildPlayerPremiumEntitlement(premiumEntitlement),
           teamPremium: buildTeamPremiumEntitlement(premiumEntitlement)

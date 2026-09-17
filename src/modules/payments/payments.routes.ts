@@ -1,7 +1,7 @@
 import { Router } from "express";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { body } from "express-validator";
-import { handleValidationErrors, paymentController, premiumWebhookController, protect } from "./payments.legacy-adapters";
+import { appleIapController, handleValidationErrors, paymentController, premiumWebhookController, protect } from "./payments.legacy-adapters";
 
 const router = Router();
 const webhookLimiter = rateLimit({
@@ -91,7 +91,61 @@ const verifyBoostPaymentValidation = [
   body("postId").optional().isString().isMongoId().withMessage("Invalid post identifier")
 ];
 
+const appleSignedTransactionValidation = body("signedTransaction")
+  .isString()
+  .isLength({ min: 100, max: 200_000 })
+  .withMessage("Invalid Apple signed transaction");
+const appleEnvironmentValidation = body("environment")
+  .optional()
+  .isString()
+  .isIn(["Sandbox", "Production", "Xcode"])
+  .withMessage("Invalid Apple environment");
+
 router.post("/razorpay/webhook", webhookLimiter, premiumWebhookController.handleRazorpayWebhook);
+router.post(
+  "/apple/notifications",
+  webhookLimiter,
+  body("signedPayload").isString().isLength({ min: 100, max: 500_000 }).withMessage("Invalid Apple notification"),
+  handleValidationErrors,
+  appleIapController.handleNotification
+);
+
+router.get("/apple/catalog", protect, appleIapController.getCatalog);
+router.post(
+  "/apple/intents/subscription",
+  protect,
+  customerCreateLimiter,
+  body("planKey").isString().trim().isLength({ min: 1, max: 80 }).withMessage("Invalid plan"),
+  billingPeriodValidation(),
+  handleValidationErrors,
+  appleIapController.createSubscriptionIntent
+);
+router.post(
+  "/apple/intents/boost",
+  protect,
+  customerCreateLimiter,
+  createBoostOrderValidation,
+  handleValidationErrors,
+  appleIapController.createBoostIntent
+);
+router.post(
+  "/apple/transactions/verify",
+  protect,
+  customerPaymentLimiter,
+  appleSignedTransactionValidation,
+  appleEnvironmentValidation,
+  handleValidationErrors,
+  appleIapController.verifyTransaction
+);
+router.post(
+  "/apple/restore",
+  protect,
+  customerPaymentLimiter,
+  body("signedTransactions").isArray({ min: 0, max: 100 }).withMessage("Invalid Apple transaction list"),
+  body("signedTransactions.*").isString().isLength({ min: 100, max: 200_000 }).withMessage("Invalid Apple signed transaction"),
+  handleValidationErrors,
+  appleIapController.restoreSubscriptions
+);
 
 router.get("/history", protect, paymentController.getPaymentHistory);
 

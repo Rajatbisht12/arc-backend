@@ -16,6 +16,9 @@ const modelNames = [
   'PremiumMutationClaim',
   'RazorpayWebhookEvent',
   'PaymentTransaction',
+  'ApplePurchaseIntent',
+  'AppleNotificationReceipt',
+  'BoostCampaign',
   'AdminAuditLog',
   'UserLoginEvent'
 ];

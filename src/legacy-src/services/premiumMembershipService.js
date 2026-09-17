@@ -193,6 +193,12 @@ const serializeMembership = (membership) => {
       orderId: value.razorpay?.orderId || '',
       invoiceId: value.razorpay?.invoiceId || ''
     },
+    apple: {
+      originalTransactionId: value.apple?.originalTransactionId || '',
+      latestTransactionId: value.apple?.latestTransactionId || '',
+      productId: value.apple?.productId || '',
+      environment: value.apple?.environment || ''
+    },
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     premiumPlan: {
@@ -202,7 +208,7 @@ const serializeMembership = (membership) => {
       label: `${String(value.planKey || '').replace(/_/g, ' ')} · ${value.billingPeriod}`
     },
     displayAccountType: value.accountType === 'team' ? 'Team' : 'User',
-    providerControlsAvailable: Boolean(value.razorpay?.subscriptionId),
+    providerControlsAvailable: Boolean(value.razorpay?.subscriptionId || value.apple?.originalTransactionId),
     scheduledChange: value.scheduledChange?.planKey ? value.scheduledChange : null
   };
 };
@@ -227,10 +233,14 @@ const transactionOwnsCurrentProviderEntitlement = (membership, transaction) => {
     const currentPaymentId = safeString(membership.razorpay?.paymentId, 200);
     return Boolean(currentPaymentId && [transaction.providerPaymentId, transaction.paymentId].includes(currentPaymentId));
   }
+  if (membership.source === 'apple_subscription') {
+    const originalTransactionId = safeString(membership.apple?.originalTransactionId, 200);
+    return Boolean(originalTransactionId && transaction.providerSubscriptionId === originalTransactionId);
+  }
   return false;
 };
 
-const appendEvent = async ({ membership, action, source, actor, previousState, reason, amount, currency, correlationId, dedupeKey, metadata, timestamp, razorpay }) => {
+const appendEvent = async ({ membership, action, source, actor, previousState, reason, amount, currency, correlationId, dedupeKey, metadata, timestamp, razorpay, apple }) => {
   const current = membership.toObject ? membership.toObject() : membership;
   try {
     return await PremiumMembershipEvent.create({
@@ -248,6 +258,7 @@ const appendEvent = async ({ membership, action, source, actor, previousState, r
       amount: amount === undefined ? null : amount,
       currency: currency || current.currency || 'INR',
       razorpay: razorpay || current.razorpay || {},
+      apple: apple || current.apple || {},
       reason: safeString(reason, 1000),
       ip: safeString(actor?.ip, 200),
       userAgent: safeString(actor?.userAgent, 1000),
@@ -1203,6 +1214,13 @@ const changePlan = async ({ membershipId, planKey, billingPeriod, expiresAt, sch
 
 const cancelMembership = async ({ membershipId, mode = 'cycle_end', reason, actor, source = 'admin' }) => {
   const membership = await getMembershipOrThrow(membershipId);
+  if (membership.source === 'apple_subscription') {
+    throw fail(
+      'Apple subscriptions must be managed through the App Store. Entitlement changes are synchronized from Apple.',
+      409,
+      'APPLE_SUBSCRIPTION_MANAGED_BY_APP_STORE'
+    );
+  }
   if (!['immediate', 'cycle_end'].includes(mode)) throw fail('Cancellation mode must be immediate or cycle_end');
   if (['cancelled', 'expired', 'removed', 'refunded'].includes(membership.membershipStatus)) {
     await projectEntitlement(membership);
@@ -2357,6 +2375,7 @@ module.exports = {
   completeMutation,
   failMutation,
   projectEntitlement,
+  grantPeriodCredits,
   verifyOneTimePurchase,
   activateOneTimeWebhookPayment,
   recordFailedWebhookPayment,

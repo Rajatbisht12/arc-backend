@@ -107,6 +107,14 @@ async function createOrder(req, res) {
     const platform = ['web', 'android', 'ios'].includes(req.body?.platform) ? req.body.platform : 'unknown';
     const userId = req.user._id;
 
+    if (platform === 'ios') {
+      return res.status(400).json({
+        success: false,
+        code: 'APPLE_IAP_REQUIRED',
+        message: 'iOS digital purchases must use the App Store.'
+      });
+    }
+
     if (!planId || !billingPeriod) {
       return res.status(400).json({
         success: false,
@@ -191,6 +199,13 @@ async function createOrder(req, res) {
  */
 async function verifyPayment(req, res) {
   try {
+    if (req.body?.platform === 'ios') {
+      return res.status(400).json({
+        success: false,
+        code: 'APPLE_IAP_REQUIRED',
+        message: 'iOS digital purchases must be verified through the App Store.'
+      });
+    }
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({
@@ -318,6 +333,13 @@ async function verifyTournamentPayment(req, res) {
  */
 async function createBoostOrder(req, res) {
   try {
+    if (req.body?.platform === 'ios') {
+      return res.status(400).json({
+        success: false,
+        code: 'APPLE_IAP_REQUIRED',
+        message: 'iOS Boost purchases must use the App Store.'
+      });
+    }
     const { postId, amount, frequency, targetReach, targetPlayers, targetTeams } = req.body;
     if (!postId || !frequency) {
       return res.status(400).json({ success: false, message: 'postId and frequency are required' });
@@ -410,6 +432,13 @@ async function createBoostOrder(req, res) {
  */
 async function verifyBoostPayment(req, res) {
   try {
+    if (req.body?.platform === 'ios') {
+      return res.status(400).json({
+        success: false,
+        code: 'APPLE_IAP_REQUIRED',
+        message: 'iOS Boost purchases must be verified through the App Store.'
+      });
+    }
     const crypto = require('crypto');
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, postId, frequency, targetReach, targetPlayers, targetTeams } = req.body;
 
