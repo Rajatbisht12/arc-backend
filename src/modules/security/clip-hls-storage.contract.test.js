@@ -13,6 +13,8 @@ assert.match(storage, /createReadStream\(sourcePath\)/);
 assert.match(storage, /pipeline\(response\.Body as Readable/);
 assert.match(cors, /AllowedMethods: \['GET', 'HEAD'\]/);
 assert.match(cors, /'Content-Range'/);
+assert.match(cors, /'https:\/\/squadhunt\.com'/);
+assert.match(cors, /'https:\/\/www\.squadhunt\.com'/);
 assert.match(cors, /rules\.filter\(rule => rule\.ID !== ruleId\)/);
 
 console.log('Clip HLS storage and CORS contracts passed');

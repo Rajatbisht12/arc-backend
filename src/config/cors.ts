@@ -3,6 +3,8 @@ import { env } from "./env";
 const OFFICIAL_FRONTEND_ORIGINS = Object.freeze([
   "https://squadhunt.in",
   "https://www.squadhunt.in",
+  "https://squadhunt.com",
+  "https://www.squadhunt.com",
   "https://admin.squadhunt.in"
 ]);
 
