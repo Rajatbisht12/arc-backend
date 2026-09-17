@@ -17,7 +17,7 @@ const premiumMembershipSchema = new mongoose.Schema({
   billingPeriod: { type: String, enum: BILLING_PERIODS, required: true, index: true },
   source: {
     type: String,
-    enum: ['razorpay_subscription', 'razorpay_order', 'manual', 'migration'],
+    enum: ['razorpay_subscription', 'razorpay_order', 'apple_subscription', 'manual', 'migration'],
     required: true,
     index: true
   },
@@ -42,6 +42,15 @@ const premiumMembershipSchema = new mongoose.Schema({
     paymentId: { type: String, trim: true, default: undefined },
     orderId: { type: String, trim: true, default: undefined },
     invoiceId: { type: String, trim: true, default: '' }
+  },
+  apple: {
+    originalTransactionId: { type: String, trim: true, default: undefined },
+    latestTransactionId: { type: String, trim: true, default: undefined },
+    productId: { type: String, trim: true, default: undefined },
+    appAccountToken: { type: String, trim: true, default: undefined },
+    subscriptionGroupIdentifier: { type: String, trim: true, default: undefined },
+    webOrderLineItemId: { type: String, trim: true, default: undefined },
+    environment: { type: String, enum: ['Sandbox', 'Production', 'Xcode'], default: undefined }
   },
   manual: {
     actorKey: { type: String, trim: true, maxlength: 200, default: '' },
@@ -88,6 +97,14 @@ premiumMembershipSchema.index(
 premiumMembershipSchema.index(
   { 'razorpay.orderId': 1 },
   { unique: true, partialFilterExpression: { 'razorpay.orderId': { $type: 'string', $gt: '' } } }
+);
+premiumMembershipSchema.index(
+  { 'apple.originalTransactionId': 1 },
+  { unique: true, partialFilterExpression: { 'apple.originalTransactionId': { $type: 'string', $gt: '' } } }
+);
+premiumMembershipSchema.index(
+  { 'apple.latestTransactionId': 1 },
+  { unique: true, partialFilterExpression: { 'apple.latestTransactionId': { $type: 'string', $gt: '' } } }
 );
 
 premiumMembershipSchema.pre('save', function(next) {

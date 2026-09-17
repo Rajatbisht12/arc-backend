@@ -14,7 +14,7 @@ const premiumMembershipEventSchema = new mongoose.Schema({
   action: { type: String, enum: ACTIONS, required: true, index: true },
   source: {
     type: String,
-    enum: ['razorpay_subscription', 'razorpay_order', 'webhook', 'admin', 'customer', 'lifecycle_job', 'migration', 'system'],
+    enum: ['razorpay_subscription', 'razorpay_order', 'apple_transaction', 'apple_notification', 'webhook', 'admin', 'customer', 'lifecycle_job', 'migration', 'system'],
     required: true,
     index: true
   },
@@ -41,6 +41,13 @@ const premiumMembershipEventSchema = new mongoose.Schema({
     orderId: { type: String, default: '' },
     invoiceId: { type: String, default: '' },
     refundId: { type: String, default: '' }
+  },
+  apple: {
+    originalTransactionId: { type: String, default: '' },
+    transactionId: { type: String, default: '' },
+    productId: { type: String, default: '' },
+    environment: { type: String, default: '' },
+    notificationUUID: { type: String, default: '' }
   },
   reason: { type: String, trim: true, maxlength: 1000, default: '' },
   ip: { type: String, maxlength: 200, default: '' },

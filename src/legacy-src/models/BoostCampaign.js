@@ -150,6 +150,30 @@ const boostCampaignSchema = new mongoose.Schema({
     unique: true,
     sparse: true
   },
+  paymentProvider: {
+    type: String,
+    enum: ['razorpay', 'apple', 'manual', 'unknown'],
+    default: 'unknown',
+    index: true
+  },
+  providerOrderId: {
+    type: String,
+    index: true,
+    unique: true,
+    sparse: true
+  },
+  providerPaymentId: {
+    type: String,
+    index: true,
+    unique: true,
+    sparse: true
+  },
+  apple: {
+    productId: { type: String, trim: true, default: undefined },
+    transactionId: { type: String, trim: true, default: undefined },
+    appAccountToken: { type: String, trim: true, default: undefined },
+    environment: { type: String, enum: ['Sandbox', 'Production', 'Xcode'], default: undefined }
+  },
   analytics: {
     organicViews: { type: Number, default: 0 },
     boostViews: { type: Number, default: 0 },
