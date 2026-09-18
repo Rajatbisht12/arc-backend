@@ -99,6 +99,7 @@ router.delete("/tournaments/:tournamentId", auditLog("DELETE_TOURNAMENT"), requi
 router.get("/scrims", auditLog("VIEW_SCRIMS"), requireAdminPermission("tournaments:manage"), adminController.getScrims);
 router.delete("/scrims/:scrimId", auditLog("DELETE_SCRIM"), requireAdminPermission("tournaments:manage"), adminController.deleteScrim);
 router.get("/reports", auditLog("VIEW_REPORTS"), requireAdminPermission("reports:manage"), adminController.getReports);
+router.get("/reports/:reportId/target", auditLog("VIEW_REPORT_TARGET"), requireAdminPermission("reports:manage"), adminController.getReportTarget);
 router.put("/reports/:reportId", auditLog("UPDATE_REPORT"), requireAdminPermission("reports:manage"), adminController.updateReport);
 router.get("/boost-campaigns", auditLog("VIEW_BOOST_CAMPAIGNS"), requireAdminPermission("boost_delivery:read"), adminController.getBoostCampaigns);
 router.get("/boost-delivery", auditLog("VIEW_BOOST_DELIVERY"), requireAdminPermission("boost_delivery:read"), adminController.getBoostCampaigns);

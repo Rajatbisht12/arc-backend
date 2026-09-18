@@ -912,7 +912,7 @@ const getPosts = async (req, res) => {
 
     const posts = await Post.find(query)
       .populate('author', 'username email profile.displayName profile.avatar userType')
-      .select('content images postType achievementInfo visibility likes comments createdAt updatedAt isActive author')
+      .select('content images postType achievementInfo visibility likes comments createdAt updatedAt isActive hiddenByAdmin author')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -1202,6 +1202,52 @@ const getReports = async (req, res) => {
   } catch (error) {
     log.error('Get reports error:', { error: String(error) });
     res.status(500).json({ success: false, message: 'Failed to fetch reports' });
+  }
+};
+
+// Reports: resolve one report target lazily for the moderation detail view.
+// Keeping this separate from getReports avoids loading post media for every row,
+// while the report-scoped lookup also lets reports-only admin views inspect
+// hidden posts without relying on the public post endpoint.
+const getReportTarget = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(reportId)) {
+      return res.status(400).json({ success: false, message: 'Invalid report ID' });
+    }
+
+    const report = await Report.findById(reportId)
+      .select('targetType targetId')
+      .lean();
+    if (!report) {
+      return res.status(404).json({ success: false, message: 'Report not found' });
+    }
+    if (report.targetType !== 'post') {
+      return res.status(400).json({
+        success: false,
+        code: 'UNSUPPORTED_REPORT_TARGET',
+        message: 'Only post report targets can be previewed'
+      });
+    }
+
+    const post = await Post.findById(report.targetId)
+      .populate('author', 'username profile.displayName profile.avatar userType')
+      .select('content images postType achievementInfo visibility likes comments createdAt updatedAt isActive hiddenByAdmin author')
+      .lean();
+
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    return res.json({
+      success: true,
+      data: {
+        targetType: report.targetType,
+        targetId: String(report.targetId),
+        availability: post ? 'available' : 'unavailable',
+        post: post || null
+      }
+    });
+  } catch (error) {
+    log.error('Get report target error:', { error: String(error) });
+    return res.status(500).json({ success: false, message: 'Failed to load reported content' });
   }
 };
 
@@ -4068,6 +4114,7 @@ module.exports = {
   deleteScrim,
   resetUserPassword,
   getReports,
+  getReportTarget,
   updateReport,
   getMonetizationSummary,
   getMonetizationApplications,
