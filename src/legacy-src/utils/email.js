@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const log = require('./logger');
 const { EMAIL_INTENTS, evaluateEmailPolicy } = require('./notificationChannelPolicy');
+const { canonicalizePublicWebUrl } = require('./publicWebUrl');
 const {
   buildEmailAuditContext,
   captureEmailCallStack,
@@ -11,7 +12,7 @@ const {
 let transporter = null;
 
 const EMAIL_BRAND = 'Squadhunt';
-const DEFAULT_FROM_ADDRESS = 'noreply@squadhunt.in';
+const DEFAULT_FROM_ADDRESS = 'noreply@squadhunt.com';
 
 const resolveEmailFrom = () => {
   const configured = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
@@ -175,7 +176,7 @@ async function sendOTPEmail(to, otp, purpose = 'login') {
               Need help? Email
               <a href="mailto:support@squadhunt.com" style="color:#9ca3af;text-decoration:none;"> support@squadhunt.com</a>
               or visit
-              <a href="https://squadhunt.in" style="color:#9ca3af;text-decoration:none;"> squadhunt.in</a>.
+              <a href="https://www.squadhunt.com" style="color:#9ca3af;text-decoration:none;"> squadhunt.com</a>.
             </p>
             <p style="margin:0;font-size:11px;color:#6b7280;">— Squadhunt</p>
           </td>
@@ -211,7 +212,9 @@ const sanitizeEmailLink = (value) => {
   if (typeof value !== 'string' || !value.trim()) return '';
   try {
     const url = new URL(value.trim());
-    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
+    return ['http:', 'https:'].includes(url.protocol)
+      ? canonicalizePublicWebUrl(url.toString())
+      : '';
   } catch {
     return '';
   }

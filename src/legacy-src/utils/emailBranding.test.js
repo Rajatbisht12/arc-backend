@@ -74,6 +74,8 @@ const assertSquadhuntDelivery = (delivery) => {
   const notificationDelivery = deliveries.at(-1);
   assert.match(notificationDelivery.text, /View in Squadhunt/);
   assert.match(notificationDelivery.html, />View in Squadhunt</);
+  assert.match(notificationDelivery.text, /https:\/\/www\.squadhunt\.com\/settings\/security/);
+  assert.doesNotMatch(notificationDelivery.text, /squadhunt\.in/);
   assert.match(notificationDelivery.text, /— Squadhunt/);
   assert.match(notificationDelivery.html, /— Squadhunt/);
 

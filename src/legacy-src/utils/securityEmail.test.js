@@ -48,6 +48,8 @@ const previousSmtpPass = process.env.SMTP_PASS;
   const previousClientUrl = process.env.CLIENT_URL;
   process.env.CLIENT_URL = 'https://arc.example.test/app/';
   assert.equal(securitySettingsUrl(), 'https://arc.example.test/app/settings/security');
+  process.env.CLIENT_URL = 'https://www.squadhunt.in';
+  assert.equal(securitySettingsUrl(), 'https://www.squadhunt.com/settings/security');
   process.env.CLIENT_URL = 'javascript:alert(1)';
   assert.equal(securitySettingsUrl(), '');
 

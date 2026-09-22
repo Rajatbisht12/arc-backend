@@ -12,6 +12,7 @@ import {
   recordSuccessfulLogin,
   uploadSingle
 } from "./auth.legacy-adapters";
+import { resolvePublicWebOrigin } from "../../legacy-src/utils/publicWebUrl";
 
 const router = Router();
 
@@ -202,7 +203,7 @@ router.get("/google", passport.authenticate("google", { scope: ["profile", "emai
 router.get("/google/mobile", passport.authenticate("google", { scope: ["profile", "email"], state: "mobile" } as object));
 router.get(
   "/google/callback",
-  passport.authenticate("google", { session: false, failureRedirect: `${process.env.CLIENT_URL}/login?error=google_auth_failed` }),
+  passport.authenticate("google", { session: false, failureRedirect: `${resolvePublicWebOrigin(process.env.CLIENT_URL)}/login?error=google_auth_failed` }),
   async (req, res) => {
     try {
       const authReq = req as unknown as { user?: { token?: string; user?: { _id?: unknown } } };
@@ -216,10 +217,10 @@ router.get(
       if (isMobile) {
         return res.redirect(`arcmobile://google-auth?token=${encodeURIComponent(token)}`);
       }
-      return res.redirect(`${process.env.CLIENT_URL}/login#token=${encodeURIComponent(token)}`);
+      return res.redirect(`${resolvePublicWebOrigin(process.env.CLIENT_URL)}/login#token=${encodeURIComponent(token)}`);
     } catch (err) {
       console.error("Google OAuth callback error:", err);
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=google_auth_failed`);
+      return res.redirect(`${resolvePublicWebOrigin(process.env.CLIENT_URL)}/login?error=google_auth_failed`);
     }
   }
 );

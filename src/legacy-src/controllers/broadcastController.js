@@ -24,6 +24,7 @@ const {
   createOccurrenceKey,
   fail
 } = require('../services/broadcastService');
+const { canonicalizePublicWebUrl } = require('../utils/publicWebUrl');
 
 const BROADCAST_FILTER_STATUSES = new Set([
   'draft', 'scheduled', 'queued', 'processing', 'sending', 'sent', 'cancelled', 'failed'
@@ -245,6 +246,11 @@ const serializeBroadcast = (document) => {
   const metrics = { ...(value.metrics || {}), ...deliveryRates(value.metrics || {}) };
   return {
     ...value,
+    cta: {
+      ...(value.cta || {}),
+      url: canonicalizePublicWebUrl(value.cta?.url || ''),
+      deepLink: canonicalizePublicWebUrl(value.cta?.deepLink || '')
+    },
     id: String(value._id),
     status: value.status === 'processing' ? 'sending' : value.status,
     audience: {
@@ -1162,7 +1168,15 @@ const normalizeTemplate = (body, { partial = false } = {}) => {
 
 const serializeTemplate = (template) => {
   const value = template?.toObject ? template.toObject() : template;
-  return { ...value, id: String(value._id), ...(value.content || {}) };
+  const content = {
+    ...(value.content || {}),
+    cta: {
+      ...(value.content?.cta || {}),
+      url: canonicalizePublicWebUrl(value.content?.cta?.url || ''),
+      deepLink: canonicalizePublicWebUrl(value.content?.cta?.deepLink || '')
+    }
+  };
+  return { ...value, content, id: String(value._id), ...content };
 };
 
 const listTemplates = asyncRoute(async (req, res) => {
