@@ -5,6 +5,7 @@ const { uploadSingle } = require('../middleware/upload');
 const passport = require('passport');
 const rateLimit = require('express-rate-limit');
 const { recordSuccessfulLogin } = require('../utils/userLoginAudit');
+const { resolvePublicWebOrigin } = require('../utils/publicWebUrl');
 const {
   progressiveLoginLimiter,
   progressiveOtpLoginLimiter
@@ -169,18 +170,18 @@ router.get('/google',
 );
 
 router.get('/google/callback',
-  passport.authenticate('google', { session: false, failureRedirect: `${process.env.CLIENT_URL}/login?error=google_auth_failed` }),
+  passport.authenticate('google', { session: false, failureRedirect: `${resolvePublicWebOrigin(process.env.CLIENT_URL)}/login?error=google_auth_failed` }),
   async (req, res) => {
     try {
       const { token, user } = req.user;
       void recordSuccessfulLogin({ user, authMethod: 'google_passport', request: req });
 
       // Redirect to frontend with token in URL hash
-      const redirectUrl = `${process.env.CLIENT_URL}/login#token=${encodeURIComponent(token)}`;
+      const redirectUrl = `${resolvePublicWebOrigin(process.env.CLIENT_URL)}/login#token=${encodeURIComponent(token)}`;
       return res.redirect(redirectUrl);
     } catch (err) {
       console.error('Google OAuth callback error:', err);
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=google_auth_failed`);
+      return res.redirect(`${resolvePublicWebOrigin(process.env.CLIENT_URL)}/login?error=google_auth_failed`);
     }
   }
 );

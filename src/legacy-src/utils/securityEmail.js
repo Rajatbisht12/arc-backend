@@ -1,5 +1,6 @@
 const { enqueueEmail } = require('./jobQueue');
 const { EMAIL_INTENTS } = require('./notificationChannelPolicy');
+const { resolvePublicWebOrigin } = require('./publicWebUrl');
 
 const PASSWORD_SECURITY_EVENTS = Object.freeze({
   password_reset: Object.freeze({
@@ -17,12 +18,12 @@ const PASSWORD_SECURITY_EVENTS = Object.freeze({
 });
 
 const securitySettingsUrl = () => {
-  const configured = String(process.env.CLIENT_URL || '').trim().replace(/\/+$/, '');
+  const configured = String(process.env.CLIENT_URL || '').trim();
   if (!configured) return '';
   try {
     const parsed = new URL(configured);
     if (!['http:', 'https:'].includes(parsed.protocol)) return '';
-    return `${parsed.toString().replace(/\/+$/, '')}/settings/security`;
+    return `${resolvePublicWebOrigin(configured)}/settings/security`;
   } catch {
     return '';
   }
