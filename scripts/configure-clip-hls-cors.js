@@ -14,10 +14,11 @@ const bucket = process.env.AWS_S3_BUCKET;
 if (!bucket) throw new Error('AWS_S3_BUCKET is required');
 
 const officialWebOrigins = [
-  'https://squadhunt.in',
-  'https://www.squadhunt.in',
   'https://squadhunt.com',
   'https://www.squadhunt.com',
+  // Retained temporarily for media requested by the legacy Web origin.
+  'https://squadhunt.in',
+  'https://www.squadhunt.in',
 ];
 const originSource = process.env.CLIP_HLS_CORS_ORIGINS || process.env.CORS_ORIGIN || '';
 const configuredOrigins = originSource.split(',').map(item => item.trim()).filter(item => /^https?:\/\//.test(item));

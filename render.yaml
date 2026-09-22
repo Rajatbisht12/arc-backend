@@ -50,7 +50,7 @@ services:
       - key: MAX_CALL_DURATION_SECONDS
         value: 14400
       - key: CORS_ORIGIN
-        value: https://arc.squadhunt.com
+        value: https://www.squadhunt.com,https://admin.squadhunt.com
       - key: CLOUDINARY_CLOUD_NAME
         sync: false
       - key: CLOUDINARY_API_KEY
@@ -70,7 +70,7 @@ services:
       - key: GOOGLE_CALLBACK_URL
         value: https://arc-backend-1.onrender.com/api/auth/google/callback
       - key: CLIENT_URL
-        value: https://arc.squadhunt.com
+        value: https://www.squadhunt.com
       - key: SMTP_HOST
         value: smtp.hostinger.com
       - key: SMTP_PORT

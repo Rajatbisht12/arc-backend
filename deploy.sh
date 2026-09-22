@@ -479,4 +479,5 @@ restore_autoscaling
 echo ""
 rm -f "$TASK_DEF_FILE"
 echo "Done! Image=$IMAGE  TaskDef=$TASK_FAMILY:$NEW_REV"
+# API remains on .in until api.squadhunt.com has valid production DNS/TLS.
 echo "Health: https://api.squadhunt.in/health"

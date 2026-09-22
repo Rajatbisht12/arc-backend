@@ -10,6 +10,7 @@ const NotificationFailure = require('../models/NotificationFailure');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const log = require('../utils/logger');
+const { canonicalizePublicWebUrl } = require('../utils/publicWebUrl');
 
 const DELIVERY_TYPES = new Set(['push', 'in_app', 'both']);
 const PRIORITIES = new Set(['normal', 'high', 'critical']);
@@ -457,8 +458,8 @@ const normalizeBroadcastPayload = (raw = {}, { partial = false, allowIncomplete 
     assertStringLength(cta.deepLink, 2048, 'CTA deep link');
     assertStringLength(cta.text, 60, 'CTA text');
     assertStringLength(cta.buttonText, 60, 'CTA button text');
-    const explicitUrl = safeString(cta.url, 2048);
-    const explicitDeepLink = safeString(cta.deepLink, 2048);
+    const explicitUrl = canonicalizePublicWebUrl(safeString(cta.url, 2048));
+    const explicitDeepLink = canonicalizePublicWebUrl(safeString(cta.deepLink, 2048));
     if (!isSafeNavigationUrl(explicitUrl)) throw fail('CTA URL is invalid');
     if (!isSafeNavigationUrl(explicitDeepLink)) throw fail('CTA deep link is invalid');
     // Keep the legacy single-destination contract working while allowing Web
@@ -771,8 +772,8 @@ const resolvePushDeliveryStatus = (result = {}) => {
 };
 
 const resolveBroadcastDeepLink = (cta = {}) => {
-  if (cta.deepLink) return cta.deepLink;
-  if (cta.url) return cta.url;
+  if (cta.deepLink) return canonicalizePublicWebUrl(cta.deepLink);
+  if (cta.url) return canonicalizePublicWebUrl(cta.url);
   const destinations = {
     home: '/',
     random_connect: '/random-connect',
@@ -783,7 +784,7 @@ const resolveBroadcastDeepLink = (cta = {}) => {
   return destinations[cta.type] || '/notifications';
 };
 
-const resolveBroadcastWebUrl = (cta = {}) => cta.url || cta.deepLink || resolveBroadcastDeepLink(cta);
+const resolveBroadcastWebUrl = (cta = {}) => canonicalizePublicWebUrl(cta.url || cta.deepLink || resolveBroadcastDeepLink(cta));
 
 const buildNotificationData = (broadcast, recipientLog, effectiveDeliveryType = broadcast.deliveryType) => ({
   broadcastId: broadcast._id,
@@ -800,8 +801,8 @@ const buildNotificationData = (broadcast, recipientLog, effectiveDeliveryType = 
   thumbnail: broadcast.thumbnail || '',
   cta: {
     text: broadcast.cta?.text || '',
-    url: broadcast.cta?.url || '',
-    deepLink: broadcast.cta?.deepLink || broadcast.cta?.url || '',
+    url: canonicalizePublicWebUrl(broadcast.cta?.url || ''),
+    deepLink: canonicalizePublicWebUrl(broadcast.cta?.deepLink || broadcast.cta?.url || ''),
     type: broadcast.cta?.type || 'none'
   },
   customData: {

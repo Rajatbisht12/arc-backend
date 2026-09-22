@@ -1,10 +1,14 @@
 import { env } from "./env";
 
 const OFFICIAL_FRONTEND_ORIGINS = Object.freeze([
-  "https://squadhunt.in",
-  "https://www.squadhunt.in",
+  // Canonical production Web/Admin origins.
   "https://squadhunt.com",
   "https://www.squadhunt.com",
+  "https://admin.squadhunt.com",
+  // Temporary compatibility for the legacy public/admin deployments. Remove
+  // only after the .in hosts are permanent redirects and no longer run the app.
+  "https://squadhunt.in",
+  "https://www.squadhunt.in",
   "https://admin.squadhunt.in"
 ]);
 

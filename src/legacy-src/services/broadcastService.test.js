@@ -243,9 +243,13 @@ test('CTA and media validators allow production schemes only', () => {
     () => normalizeBroadcastPayload({ ...validPayload, deliveryType: 'email' }),
     /deliveryType/
   );
-  for (const url of ['/premium', 'https://squadhunt.in/premium', 'arcmobile://premium', 'com.arcsquadhunt://premium']) {
+  for (const url of ['/premium', 'https://www.squadhunt.com/premium', 'arcmobile://premium', 'com.arcsquadhunt://premium']) {
     assert.strictEqual(normalizeBroadcastPayload({ ...validPayload, cta: { type: 'custom', url } }).cta.url, url);
   }
+  assert.strictEqual(
+    normalizeBroadcastPayload({ ...validPayload, cta: { type: 'custom', url: 'https://squadhunt.in/premium' } }).cta.url,
+    'https://www.squadhunt.com/premium'
+  );
   assert.throws(
     () => normalizeBroadcastPayload({ ...validPayload, cta: { type: 'custom', url: 'javascript:alert(1)' } }),
     /invalid/
@@ -266,9 +270,9 @@ test('CTA and media validators allow production schemes only', () => {
   assert.strictEqual(deepLinkOnly.deepLink, 'arc://premium');
   const splitDestination = normalizeBroadcastPayload({
     ...validPayload,
-    cta: { type: 'custom', url: 'https://squadhunt.in/premium', deepLink: 'arc://premium' }
+    cta: { type: 'custom', url: 'https://www.squadhunt.com/premium', deepLink: 'arc://premium' }
   }).cta;
-  assert.strictEqual(splitDestination.url, 'https://squadhunt.in/premium');
+  assert.strictEqual(splitDestination.url, 'https://www.squadhunt.com/premium');
   assert.strictEqual(splitDestination.deepLink, 'arc://premium');
   assert.throws(
     () => normalizeBroadcastPayload({ ...validPayload, cta: { type: 'tournament', text: '' } }),
@@ -384,6 +388,7 @@ test('admin serializer matches the Web contract', () => {
     title: 'Test',
     message: 'Test body',
     status: 'processing',
+    cta: { url: 'https://www.squadhunt.in/tournament/cup-1', deepLink: 'arc://tournament/cup-1' },
     audience: { allUsers: false, userTypes: ['player'], creatorMonetizationStatuses: ['approved'] },
     schedule: {
       mode: 'scheduled',
@@ -403,6 +408,8 @@ test('admin serializer matches the Web contract', () => {
   assert.strictEqual(serialized.schedule.recurrence.interval, 2);
   assert.strictEqual(serialized.recipientCount, 10);
   assert.strictEqual(serialized.analytics.recipients, 10);
+  assert.strictEqual(serialized.cta.url, 'https://www.squadhunt.com/tournament/cup-1');
+  assert.strictEqual(serialized.cta.deepLink, 'arc://tournament/cup-1');
 });
 
 test('preference fallback and provider receipts resolve delivery status safely', () => {

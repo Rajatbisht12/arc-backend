@@ -1,6 +1,7 @@
 const log = require('./logger');
 const { randomUUID } = require('crypto');
 const { evaluateNotificationEmailPolicy } = require('./notificationChannelPolicy');
+const { resolvePublicWebOrigin } = require('./publicWebUrl');
 
 let io;
 
@@ -319,7 +320,7 @@ const createAndEmitNotification = async (notificationData) => {
     if (emailPolicy.allowed && shouldEnqueueEmail && user?.email && process.env.SMTP_USER && process.env.SMTP_PASS) {
       try {
         const { enqueueEmail } = require('./jobQueue');
-        const link = process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/notifications` : '';
+        const link = process.env.CLIENT_URL ? `${resolvePublicWebOrigin(process.env.CLIENT_URL)}/notifications` : '';
         await enqueueEmail(
           user.email,
           notificationData.title,

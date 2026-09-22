@@ -29,6 +29,7 @@ const run = async () => {
   assert(getAllowedOrigins().includes('https://www.squadhunt.in'));
   assert(getAllowedOrigins().includes('https://squadhunt.com'));
   assert(getAllowedOrigins().includes('https://www.squadhunt.com'));
+  assert(getAllowedOrigins().includes('https://admin.squadhunt.com'));
   assert(getAllowedOrigins().includes('https://admin.squadhunt.in'));
 
   const knowledgeRouter = unwrapDefault(await import('../knowledge/knowledge.routes.ts'));

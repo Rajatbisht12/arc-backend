@@ -9,6 +9,7 @@ const Report = require('../models/Report');
 const UserLoginEvent = require('../models/UserLoginEvent');
 const provider = require('./razorpayPremiumProvider');
 const log = require('../utils/logger');
+const { resolvePublicWebOrigin } = require('../utils/publicWebUrl');
 const { invalidateUserCache } = require('../middleware/auth');
 const {
   isPremiumMembershipEntitled: isEntitled,
@@ -450,7 +451,7 @@ const notifyLifecycle = async (membership, { title, message, action, source = 's
         user.email,
         title,
         message,
-        process.env.CLIENT_URL ? `${process.env.CLIENT_URL.replace(/\/+$/, '')}/premium` : '',
+        process.env.CLIENT_URL ? `${resolvePublicWebOrigin(process.env.CLIENT_URL)}/premium` : '',
         {
           intent: EMAIL_INTENTS.PREMIUM_LIFECYCLE,
           eventType: action,
