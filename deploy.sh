@@ -17,8 +17,59 @@ QUIESCED=0
 MUTATING_PREFLIGHT_STARTED=0
 AUTOSCALING_SUSPENDED=0
 RECOVERY_MODE=0
+ECR_PUSH_ATTEMPTS="${ECR_PUSH_ATTEMPTS:-4}"
 SCALABLE_RESOURCE_ID="service/$CLUSTER/$SERVICE"
 ORIGINAL_SCALING_STATE='{"DynamicScalingInSuspended":false,"DynamicScalingOutSuspended":false,"ScheduledScalingSuspended":false}'
+
+ecr_login() {
+  aws ecr get-login-password --region "$REGION" | \
+    docker login --username AWS --password-stdin "$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
+}
+
+push_image_with_retry() {
+  local attempt=1
+  local delay=5
+
+  if [[ ! "$ECR_PUSH_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ECR_PUSH_ATTEMPTS must be a positive integer" >&2
+    return 1
+  fi
+
+  while (( attempt <= ECR_PUSH_ATTEMPTS )); do
+    echo "==> Pushing to ECR (attempt $attempt/$ECR_PUSH_ATTEMPTS)..."
+    if docker push "$IMAGE"; then
+      return 0
+    fi
+
+    if (( attempt == ECR_PUSH_ATTEMPTS )); then
+      echo "ECR push failed after $ECR_PUSH_ATTEMPTS attempts" >&2
+      return 1
+    fi
+
+    echo "ECR push was interrupted; refreshing login and retrying in ${delay}s..." >&2
+    sleep "$delay"
+    ecr_login
+    delay=$((delay * 2))
+    attempt=$((attempt + 1))
+  done
+}
+
+build_typescript() {
+  local status
+
+  if npm run build; then
+    return 0
+  else
+    status=$?
+  fi
+  if [[ "$status" == "134" || "$status" == "139" ]]; then
+    echo "Node crashed while compiling (exit $status); retrying the clean compiler process once..." >&2
+    npm run build
+    return
+  fi
+
+  return "$status"
+}
 
 ORIGINAL_TASK_DEF=$(aws ecs describe-services \
   --cluster "$CLUSTER" --services "$SERVICE" \
@@ -202,22 +253,22 @@ npm run test:notification-policy
 npm run test:notification-producers
 npm run test:bank-details
 npm run test:monetization
-npm run typecheck
-npm run build
+# The build runs tsc with type checking and emits dist. Running a separate
+# no-emit typecheck immediately beforehand doubles compiler memory pressure on
+# Windows and has caused the Git Bash Node process to terminate with exit 139.
+build_typescript
 npm run verify:email-policy-release
 
 # 2. ECR login
 echo "==> ECR login..."
-aws ecr get-login-password --region "$REGION" | \
-  docker login --username AWS --password-stdin "$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
+ecr_login
 
 # 3. Build
 echo "==> Building image..."
 docker build --platform linux/amd64 -t "$IMAGE" .
 
 # 4. Push
-echo "==> Pushing to ECR..."
-docker push "$IMAGE"
+push_image_with_retry
 
 # 5. Fetch latest task definition, swap image, strip read-only fields
 echo "==> Registering new task definition..."

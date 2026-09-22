@@ -46,6 +46,8 @@ const lifecycleFunctions = [
   ['CPM', cpmSource]
 ];
 
+const hasSessionArgument = (source) => /(?:^|\r?\n)\s*session\s*,?\r?\n/.test(source);
+
 for (const [name, source] of lifecycleFunctions) {
   assert.ok(source.includes('session = await startFinancialSession()'), `${name} must start a financial session`);
   assert.ok(source.includes('await session.withTransaction(async () => {'), `${name} must use a transaction`);
@@ -53,7 +55,7 @@ for (const [name, source] of lifecycleFunctions) {
   assert.ok(source.includes('await user.save({ session })'), `${name} user mutation must share the transaction session`);
   assert.ok(source.includes('await application.save({ session })'), `${name} application mutation must share the transaction session`);
   assert.ok(source.includes('recordMonetizationTimeline({'), `${name} must append lifecycle history`);
-  assert.ok(source.includes('session\n'), `${name} timeline call must carry the same session`);
+  assert.ok(hasSessionArgument(source), `${name} timeline call must carry the same session`);
   assert.ok(source.includes('if (session) await session.endSession()'), `${name} must always release its session`);
 
   const transactionCommit = source.indexOf('}, FINANCIAL_TRANSACTION_OPTIONS)');
@@ -71,7 +73,7 @@ for (const [name, source] of [
   assert.ok(source.includes('isActive: true'), `${name} must reject inactive/deleted accounts`);
   assert.ok(source.includes('.session(session)'), `${name} user lookup must be transaction-bound`);
   assert.ok(source.includes('getOrCreateLatestMonetizationApplication({'), `${name} must update/create the latest application`);
-  assert.ok(source.includes('session\n'), `${name} application helper must receive the transaction session`);
+  assert.ok(hasSessionArgument(source), `${name} application helper must receive the transaction session`);
 }
 
 assert.ok(helperSource.includes("MonetizationApplication.findOne({ user: userId })"));
