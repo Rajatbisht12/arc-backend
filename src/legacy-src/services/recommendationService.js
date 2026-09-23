@@ -803,6 +803,23 @@ async function fetchCandidates(filter, { limit, page, cursor }) {
   return query.exec();
 }
 
+function buildTargetClipFilter(baseFilter, rawTargetClipId, mode) {
+  if (mode !== 'clips' || !isValidObjectId(rawTargetClipId)) return null;
+  return {
+    ...baseFilter,
+    _id: String(rawTargetClipId)
+  };
+}
+
+async function fetchTargetClip(filter) {
+  if (!filter) return null;
+  return Post.findOne(filter)
+    .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType privacySettings isActive')
+    .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
+    .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar')
+    .exec();
+}
+
 async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   const limit = clampLimit(query.limit, mode === 'clips' ? 10 : DEFAULT_LIMIT);
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -815,9 +832,13 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     getBoostDeliveryMap(relationship.currentUserId, mode)
   ]);
   const baseFilter = buildAudienceFilter({ user, mode, relationship, query });
-  const watchedClipIds = mode === 'clips' && query.includeViewed !== 'true'
-    ? await findWatchedClipIds(relationship.currentUserId)
-    : new Set();
+  const targetClipFilter = buildTargetClipFilter(baseFilter, query.targetClipId, mode);
+  const [watchedClipIds, targetClipPost] = await Promise.all([
+    mode === 'clips' && query.includeViewed !== 'true'
+      ? findWatchedClipIds(relationship.currentUserId)
+      : Promise.resolve(new Set()),
+    fetchTargetClip(targetClipFilter)
+  ]);
 
   const requestedExcludedIds = preserveTargetClipInExclusions(
     excludedIds,
@@ -881,9 +902,14 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     log.warn('Failed to record boost delivery', { error: String(error), mode });
     return new Set();
   });
+  // Discover uses the same ranked dataset, but merely rendering search tiles
+  // must not mutate the normal Feed/Clips session's seen history. Otherwise a
+  // Web search can change the immediately following Mobile result set (or vice
+  // versa) even when both clients send identical hashtag parameters.
+  const impressionContext = query.context === 'search' ? 'search' : mode;
   await recordFeedImpressions(selectedPosts, {
     userId: relationship.currentUserId,
-    mode,
+    mode: impressionContext,
     sessionSeed
   });
   const nextCursorPost = pickNextCursorPost({
@@ -906,6 +932,9 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   const scoreById = includeRankingDebug
     ? new Map(selected.map((item) => [normalizeId(item.post._id), item.score]))
     : null;
+  const selectedPositionById = includeRankingDebug
+    ? new Map(selectedPosts.map((post, index) => [normalizeId(post._id), index]))
+    : null;
 
   // Viewer-specific follow-state for each author, so Feed/Clips render the same
   // Follow / Requested / Unfollow / Requests-off CTA as the Profile and user-list
@@ -913,9 +942,12 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   // instead of the client guessing from stripped/absent privacy fields — which is
   // what made every non-followed author wrongly read as "Requests Off".
   const viewerId = relationship.currentUserId;
+  const presentationPosts = targetClipPost
+    ? [targetClipPost, ...selectedPosts.filter((post) => normalizeId(post._id) !== normalizeId(targetClipPost._id))]
+    : selectedPosts;
   let pendingFollowTargetIds = new Set();
   if (viewerId) {
-    const authorIds = [...new Set(selectedPosts
+    const authorIds = [...new Set(presentationPosts
       .map((post) => normalizeId(post.author))
       .filter((id) => id && id !== viewerId))];
     if (authorIds.length > 0) {
@@ -928,7 +960,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     }
   }
 
-  const posts = selectedPosts.map((post, position) => {
+  const formattedPosts = new Map(presentationPosts.map((post) => {
     const dto = formatPostDTO(
       post,
       isGuest,
@@ -965,7 +997,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
         const isBoosted = isActiveBoost(post, rankingNow);
         const isPreviouslySeen = seenMap.has(postId);
         dto._ranking = {
-          position,
+          position: selectedPositionById.get(postId) ?? null,
           rankingScore: scoreById.get(postId) ?? null,
           isBoosted,
           boostWeight: isBoosted ? getDampedBoostScore(post, { mode, now: rankingNow, boostDeliveryMap }) : 0,
@@ -987,8 +1019,12 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
         };
       }
     }
-    return dto;
-  });
+    return [normalizeId(post._id), dto];
+  }));
+  const posts = selectedPosts.map((post) => formattedPosts.get(normalizeId(post._id)) || null);
+  const targetClip = targetClipPost
+    ? formattedPosts.get(normalizeId(targetClipPost._id)) || null
+    : null;
 
   if (includeRankingDebug) {
     log.info('feed-ranking', {
@@ -1006,6 +1042,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
 
   return {
     posts,
+    ...(query.targetClipId ? { targetClip } : {}),
     pagination: {
       current: page,
       total: total !== null ? Math.ceil(total / limit) : undefined,
@@ -1019,6 +1056,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     recommendation: {
       algorithm: 'weighted-v2',
       mode,
+      context: impressionContext,
       sessionSeed,
       signals: [
         'visibility',
@@ -1112,6 +1150,7 @@ module.exports = {
   decodeCursor,
   parseExcludedIds,
   preserveTargetClipInExclusions,
+  buildTargetClipFilter,
   buildAudienceFilter,
   buildViewEngagementUpdate,
   normalizeEngagementContext,

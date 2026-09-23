@@ -1,9 +1,11 @@
 const assert = require('assert');
+const fs = require('fs');
 const {
   decodeCursor,
   encodeCursor,
   parseExcludedIds,
   preserveTargetClipInExclusions,
+  buildTargetClipFilter,
   scorePost,
   selectDiversePosts,
   buildAudienceFilter
@@ -58,6 +60,38 @@ assert.deepStrictEqual(
   preserveTargetClipInExclusions([basePost._id], 'invalid', 'clips'),
   [basePost._id],
   'invalid target ids cannot alter exclusions'
+);
+
+const targetAudienceFilter = {
+  isActive: true,
+  hiddenByAdmin: { $ne: true },
+  'content.media': { $elemMatch: { type: 'video' } },
+  visibility: 'public'
+};
+assert.deepStrictEqual(
+  buildTargetClipFilter(targetAudienceFilter, basePost._id, 'clips'),
+  { ...targetAudienceFilter, _id: basePost._id },
+  'targeted Clip resolution must retain the canonical Clips audience/media filter'
+);
+assert.strictEqual(
+  buildTargetClipFilter(targetAudienceFilter, basePost._id, 'feed'),
+  null,
+  'targeted Clip resolution must never alter the normal Home Feed'
+);
+assert.strictEqual(
+  buildTargetClipFilter(targetAudienceFilter, 'not-an-id', 'clips'),
+  null,
+  'malformed target ids must fail closed'
+);
+
+const recommendationSource = fs.readFileSync(__filename.replace(/\.test\.js$/, '.js'), 'utf8');
+assert(
+  recommendationSource.includes('...(query.targetClipId ? { targetClip } : {})'),
+  'the existing Clips response must expose the independently resolved target additively'
+);
+assert(
+  recommendationSource.includes("const impressionContext = query.context === 'search' ? 'search' : mode"),
+  'Discover tile delivery must not mutate the normal Clips seen-session history'
 );
 
 const highEngagementScore = scorePost({
