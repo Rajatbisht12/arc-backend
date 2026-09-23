@@ -42,6 +42,23 @@ test('mergeTags unions explicit tags with caption hashtags, normalized + deduped
   assert.deepEqual(mergeTags('a,b,#a', 'text #B'), ['a', 'b']);
 });
 
+test('creation matrix indexes every hashtag independently regardless of position', () => {
+  const cases = [
+    ['#viral', ['viral']],
+    ['#sukoon', ['sukoon']],
+    ['#viral #sukoon', ['viral', 'sukoon']],
+    ['#viral #sukoon #meme', ['viral', 'sukoon', 'meme']],
+    ['hello #viral world', ['viral']],
+    ['#viral,#sukoon,#meme', ['viral', 'sukoon', 'meme']],
+    ['#viral #sukoon.', ['viral', 'sukoon']],
+    ['#Viral #Sukoon', ['viral', 'sukoon']],
+  ];
+
+  cases.forEach(([caption, expected]) => {
+    assert.deepEqual(mergeTags([], caption), expected, caption);
+  });
+});
+
 test('DOCUMENTED LIMIT: tag bodies are ASCII [A-Za-z0-9_] on all three clients', () => {
   // The Web/Mobile/Backend tokenizers are intentionally identical ASCII so they
   // never disagree. Unicode/mixed-language hashtags are truncated at the first
