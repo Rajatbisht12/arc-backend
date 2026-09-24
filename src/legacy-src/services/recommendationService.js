@@ -592,6 +592,11 @@ function getRecentTopPositionPenalty(seenEntry, now, currentSessionId) {
 
 function getSeenPenalty(seenEntry, now, currentSessionId) {
   if (!seenEntry?.lastShownAt) return 0;
+  // A retry, pagination request, or silent revalidation inside the same feed
+  // session must be deterministic. The client already excludes delivered ids
+  // while paging, so re-penalizing the current session only makes an identical
+  // request reorder itself.
+  if (currentSessionId && seenEntry.lastSessionId === currentSessionId) return 0;
   const hoursSinceShown = Math.max(0, (now - seenEntry.lastShownAt) / 36e5);
   const topPositionPenalty = getRecentTopPositionPenalty(seenEntry, now, currentSessionId);
   if (hoursSinceShown >= SEEN_COOLDOWN_HOURS) return topPositionPenalty;
@@ -720,6 +725,58 @@ function selectDiversePosts(scoredPosts, limit, mode) {
   }
 
   return selected;
+}
+
+function wasServedInPreviousSession(seenEntry, sessionId, now = Date.now()) {
+  if (!seenEntry?.lastShownAt) return false;
+  if (sessionId && seenEntry.lastSessionId === sessionId) return false;
+  const hoursSinceShown = Math.max(0, (now - seenEntry.lastShownAt) / 36e5);
+  return hoursSinceShown < SEEN_COOLDOWN_HOURS;
+}
+
+// Score penalties alone cannot guarantee useful refresh diversity: a strongly
+// relevant/followed/high-engagement post can still beat an unseen candidate
+// after the penalty and occupy the same slot over and over. For Home Feed
+// refresh sessions, make freshness a selection tier instead:
+//   1. choose from candidates not served in another recent session;
+//   2. preserve the complete recommendation score and diversity rules inside
+//      that tier;
+//   3. fill from ranked seen candidates only when inventory is small.
+//
+// This is deliberately not a random shuffle and does not permanently exclude
+// anything. The existing cooldown expires entries, and the fallback guarantees
+// a full feed for new/small accounts. Clips keep their separate watched-content
+// behavior and are not changed by this Home Feed rule.
+function selectSessionFreshPosts(scoredPosts, limit, mode, {
+  seenMap = new Map(),
+  sessionId,
+  now = Date.now()
+} = {}) {
+  if (mode !== 'feed' || !(seenMap instanceof Map) || seenMap.size === 0) {
+    return selectDiversePosts(scoredPosts, limit, mode);
+  }
+
+  const fresh = [];
+  const recentlyServed = [];
+  scoredPosts.forEach((item) => {
+    const seenEntry = seenMap.get(normalizeId(item.post?._id));
+    if (wasServedInPreviousSession(seenEntry, sessionId, now)) {
+      recentlyServed.push(item);
+    } else {
+      fresh.push(item);
+    }
+  });
+
+  const selectedFresh = selectDiversePosts(fresh, limit, mode);
+  if (selectedFresh.length >= limit) return selectedFresh;
+
+  const selectedIds = new Set(selectedFresh.map((item) => normalizeId(item.post?._id)));
+  const fallback = selectDiversePosts(
+    recentlyServed.filter((item) => !selectedIds.has(normalizeId(item.post?._id))),
+    limit - selectedFresh.length,
+    mode
+  );
+  return [...selectedFresh, ...fallback];
 }
 
 // Boosted posts keep paid distribution but never own a fixed slot:
@@ -896,7 +953,10 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
       return new Date(b.post.createdAt).getTime() - new Date(a.post.createdAt).getTime();
     });
 
-  const selected = applyBoostPlacement(selectDiversePosts(scored, limit, mode), { seed });
+  const selected = applyBoostPlacement(selectSessionFreshPosts(scored, limit, mode, {
+    seenMap,
+    sessionId: sessionSeed
+  }), { seed });
   const selectedPosts = selected.map((item) => item.post);
   const attributedBoostPostIds = await recordBoostDelivery(selectedPosts, mode, relationship.currentUserId).catch((error) => {
     log.warn('Failed to record boost delivery', { error: String(error), mode });
@@ -1070,6 +1130,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
         'diversity',
         'session_exploration',
         'seen_post_cooldown',
+        mode === 'feed' ? 'unseen_session_priority' : 'watched_content_rotation',
         'previous_top_position_penalty',
         'boost_campaign_score',
         'boost_frequency_cap',
@@ -1137,6 +1198,8 @@ module.exports = {
   recordEngagementEvent,
   scorePost,
   selectDiversePosts,
+  selectSessionFreshPosts,
+  wasServedInPreviousSession,
   applyBoostPlacement,
   applyCursorAndExclusions,
   pickNextCursorPost,

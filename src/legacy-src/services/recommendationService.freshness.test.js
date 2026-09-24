@@ -2,6 +2,8 @@ const assert = require('assert');
 const {
   scorePost,
   selectDiversePosts,
+  selectSessionFreshPosts,
+  wasServedInPreviousSession,
   applyBoostPlacement,
   applyCursorAndExclusions,
   pickNextCursorPost,
@@ -17,7 +19,8 @@ const {
   BOOST_FREQUENCY_CAP,
   BOOST_TOP_WINDOW,
   TOP_POSITION_PENALTY_BASE,
-  TOP_POSITION_PENALTY_WINDOW_HOURS
+  TOP_POSITION_PENALTY_WINDOW_HOURS,
+  SEEN_COOLDOWN_HOURS
 } = require('./recommendationService');
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -135,6 +138,29 @@ assert.strictEqual(
   getRecentTopPositionPenalty(priorTopEntry, now, 'session-before-refresh'),
   0,
   'the same session must remain stable for pagination and revalidation'
+);
+assert.strictEqual(
+  getSeenPenalty(priorTopEntry, now, 'session-before-refresh'),
+  0,
+  'same-session retries and revalidation must preserve the original ranking'
+);
+assert.strictEqual(
+  wasServedInPreviousSession(priorTopEntry, 'session-before-refresh', now),
+  false,
+  'the current session is not treated as a previous refresh'
+);
+assert.strictEqual(
+  wasServedInPreviousSession(priorTopEntry, 'session-after-refresh', now),
+  true,
+  'a recent delivery from another session is suppressed on refresh'
+);
+assert.strictEqual(
+  wasServedInPreviousSession({
+    ...priorTopEntry,
+    lastShownAt: now - ((SEEN_COOLDOWN_HOURS + 1) * HOUR_MS)
+  }, 'session-after-refresh', now),
+  false,
+  'old content naturally becomes fresh again after the bounded cooldown'
 );
 assert.strictEqual(
   getRecentTopPositionPenalty({
@@ -339,7 +365,11 @@ function rankPool(seed, seenMap) {
     .sort((a, b) => (b.score !== a.score
       ? b.score - a.score
       : new Date(b.post.createdAt).getTime() - new Date(a.post.createdAt).getTime()));
-  return selectDiversePosts(scored, 5, 'feed').map((item) => String(item.post._id));
+  return selectSessionFreshPosts(scored, 5, 'feed', {
+    seenMap: seenMap || new Map(),
+    sessionId: seed.split(':').at(-1),
+    now
+  }).map((item) => String(item.post._id));
 }
 
 const sessionOne = rankPool(`${USER_ID}:feed:session-1`);
@@ -365,6 +395,90 @@ assert.notStrictEqual(nextSession[0], sessionOne[0],
   'the previous top post must not immediately repeat at position 1');
 assert(nextSession.slice(0, 3).some((id) => !sessionOne.includes(id)),
   'fresh unseen posts must break into the top after a refresh');
+
+// Production regression: 400+ eligible posts existed, yet five device
+// refreshes returned only 18 unique ids because a numeric penalty could not
+// overcome strong relevance scores. With a 60-item candidate window, five
+// ten-item refresh sessions must consume fresh candidates first. Ranking is
+// still score-based within each session; this is not a random shuffle.
+function rankLargeFeed(sessionId, seenMap) {
+  const pool = Array.from({ length: 60 }, (_, index) => makePost(`large-${index}`, {
+    authorId: `large-author-${index % 20}`,
+    tags: [`topic-${index % 12}`],
+    createdAt: new Date(now - ((index + 1) * 20 * 60 * 1000)),
+    likes: new Array(Math.max(0, 40 - index)).fill({ user: 'u' }),
+    views: Math.max(0, 5000 - (index * 70))
+  }));
+  const context = baseContext({
+    seed: `${USER_ID}:feed:${sessionId}`,
+    sessionId,
+    seenMap
+  });
+  const scored = pool
+    .map((post) => ({ post, score: scorePost(post, context) }))
+    .sort((a, b) => b.score - a.score);
+  return selectSessionFreshPosts(scored, 10, 'feed', {
+    seenMap,
+    sessionId,
+    now
+  }).map((item) => String(item.post._id));
+}
+
+const largeSeenMap = new Map();
+const fiveRefreshRows = [];
+for (let refresh = 1; refresh <= 5; refresh += 1) {
+  const sessionId = `large-refresh-${refresh}`;
+  const row = rankLargeFeed(sessionId, largeSeenMap);
+  fiveRefreshRows.push(row);
+  row.forEach((id, position) => largeSeenMap.set(id, {
+    lastShownAt: now,
+    impressionCount: 1,
+    lastPositionShownAt: now,
+    lastPositionShown: position,
+    lastSessionId: sessionId
+  }));
+}
+const fiveRefreshUniqueCount = new Set(fiveRefreshRows.flat()).size;
+const fiveRefreshConsecutiveOverlaps = fiveRefreshRows.slice(1).map((row, index) => {
+  const previous = new Set(fiveRefreshRows[index]);
+  return row.filter((id) => previous.has(id)).length;
+});
+assert.strictEqual(
+  fiveRefreshUniqueCount,
+  50,
+  'five refreshes with sufficient inventory must prefer 50 distinct posts'
+);
+fiveRefreshConsecutiveOverlaps.forEach((overlap) => {
+  assert.strictEqual(overlap, 0,
+    'consecutive refreshes must not repeat posts while fresh candidates remain');
+});
+
+// Small inventories must never produce an empty/short page merely because all
+// posts were recently served; ranked seen content fills the remainder.
+const smallRanked = ['small-1', 'small-2', 'small-3'].map((id, index) => ({
+  post: makePost(id, { authorId: `small-author-${index}` }),
+  score: 100 - index
+}));
+const smallSeenMap = new Map(smallRanked.map(({ post }) => [String(post._id), {
+  lastShownAt: now,
+  impressionCount: 1,
+  lastSessionId: 'small-before'
+}]));
+assert.deepStrictEqual(
+  selectSessionFreshPosts(smallRanked, 10, 'feed', {
+    seenMap: smallSeenMap,
+    sessionId: 'small-after',
+    now
+  }).map((item) => String(item.post._id)),
+  ['small-1', 'small-2', 'small-3'],
+  'recently served posts remain available as the graceful small-pool fallback'
+);
+console.log('five-refresh large-pool verification', {
+  rows: fiveRefreshRows,
+  uniqueCount: fiveRefreshUniqueCount,
+  duplicateCount: fiveRefreshRows.flat().length - fiveRefreshUniqueCount,
+  consecutiveOverlaps: fiveRefreshConsecutiveOverlaps
+});
 
 // Device regression: when the Clips inventory fits entirely on page one,
 // every clip receives the same generic impression penalty. The positional
