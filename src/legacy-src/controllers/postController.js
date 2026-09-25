@@ -1,4 +1,5 @@
 const Post = require('../models/Post');
+const { randomUUID } = require('crypto');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const BoostCampaign = require('../models/BoostCampaign');
@@ -119,9 +120,11 @@ const createPost = async (req, res) => {
 
     const mediaFiles = Array.isArray(req.files) ? req.files : (req.files?.media || []);
     const coverFile = Array.isArray(req.files) ? null : req.files?.cover?.[0];
+    const uploadId = randomUUID();
 
     // Handle media uploads
     let mediaData = [];
+    let mediaUploadAudit = [];
     let coverData = null;
     if (mediaFiles.length > 0 || coverFile) {
       try {
@@ -134,15 +137,30 @@ const createPost = async (req, res) => {
         }
         
         const startupOptimizedMedia = mediaFiles.length > 0
-          ? await Promise.all(mediaFiles.map(file => (
-              String(file?.mimetype || '').toLowerCase() === 'video/mp4'
-                ? processPostVideo(file)
+          ? await Promise.all(mediaFiles.map((file, mediaIndex) => (
+              String(file?.mimetype || '').toLowerCase().startsWith('video/')
+                ? processPostVideo({
+                    ...file,
+                    integrityContext: {
+                      uploadId,
+                      userId: String(authorId),
+                      mediaIndex
+                    }
+                  })
                 : file
             )))
           : [];
         const uploadResults = startupOptimizedMedia.length > 0
           ? await uploadMultipleFiles(startupOptimizedMedia, 'gaming-social/posts')
           : [];
+        mediaUploadAudit = uploadResults
+          .filter(result => result.type === 'video')
+          .map(result => ({
+            publicId: result.publicId,
+            bytes: result.bytes,
+            checksumSha256: result.checksumSha256,
+            etag: result.etag
+          }));
         mediaData = uploadResults.map(toPostMediaItem);
         if (coverFile) {
           const [coverUpload] = await uploadMultipleFiles([coverFile], 'gaming-social/post-covers');
@@ -300,8 +318,18 @@ const createPost = async (req, res) => {
 
     const post = await Post.create(postData);
 
-    // The fallback MP4 is already durable and playable at this point. HLS
-    // rendition work is handed to BullMQ and never blocks the upload request.
+    if (mediaData.some(media => media.type === 'video')) {
+      log.info('Post media published after integrity verification', {
+        uploadId,
+        postId: String(post._id),
+        userId: String(authorId),
+        videos: mediaUploadAudit
+      });
+    }
+
+    // The verified progressive source is already durable and playable at this
+    // point. HLS rendition work is handed to BullMQ and never blocks the
+    // upload request.
     const clipJobs = post.content.media
       .filter(media => media.type === 'video' && media.playback?.status === 'processing')
       .map(media => ({

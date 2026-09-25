@@ -169,6 +169,16 @@ const processClipTranscodeJob = async jobData => {
   }, Math.min(60_000, Math.floor(LEASE_MS / 3)));
   heartbeat.unref();
 
+  log.info('Clip HLS processing started', {
+    postId,
+    mediaId,
+    version,
+    sourceObjectKey: media?.publicId,
+    outputPrefix: prefix,
+    attempt: media?.playback?.attempts,
+    workerId: process.pid
+  });
+
   try {
     if (!media?.publicId) throw new Error('Clip fallback object is unavailable');
     storage = loadStorage();
@@ -218,6 +228,10 @@ const processClipTranscodeJob = async jobData => {
       postId,
       mediaId,
       version,
+      sourceObjectKey: media.publicId,
+      outputPrefix: prefix,
+      attempt: media?.playback?.attempts,
+      workerId: process.pid,
       durationMs: Date.now() - startedAt,
       sourceDurationSeconds: generated.metadata.duration,
       fastStartFallback: Boolean(uploaded.fallback?.url),
@@ -255,6 +269,11 @@ const processClipTranscodeJob = async jobData => {
       version,
       durationMs: Date.now() - startedAt,
       failureCode,
+      sourceObjectKey: media?.publicId,
+      outputPrefix: prefix,
+      attempt: media?.playback?.attempts,
+      workerId: process.pid,
+      ffmpegExitCode: error?.exitCode,
       error: String(error)
     });
     throw error;

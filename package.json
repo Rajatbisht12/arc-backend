@@ -49,6 +49,7 @@
     "migrate:clip-hls-indexes": "node scripts/migrate-clip-hls-indexes.js --apply",
     "verify:clip-hls-indexes": "node scripts/migrate-clip-hls-indexes.js --verify",
     "test:clip-hls": "node --test src/legacy-src/utils/clipHlsProcessing.test.js src/legacy-src/utils/clipHlsProcessing.integration.test.js src/legacy-src/services/clipTranscodingService.test.js src/legacy-src/models/Post.clipPlayback.test.js && node src/modules/security/clip-hls-storage.contract.test.js && node --check scripts/backfill-clip-hls.js && node --check scripts/configure-clip-hls-cors.js && node --check scripts/migrate-clip-hls-indexes.js",
+    "test:media-integrity": "node --test src/legacy-src/utils/videoProcessing.integrity.test.js src/legacy-src/services/clipTranscodingService.test.js && node --import tsx --test src/infrastructure/storage/s3.integrity.test.ts && node src/legacy-src/utils/videoProcessing.security.test.js",
     "audit:clip-hls-cors": "node scripts/configure-clip-hls-cors.js",
     "configure:clip-hls-cors": "node scripts/configure-clip-hls-cors.js --apply",
     "verify:clip-hls-cors": "node scripts/configure-clip-hls-cors.js --verify",
