@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs/promises');
 const path = require('path');
+const { validateVideoFile } = require('./videoProcessing');
 
 const HLS_SEGMENT_SECONDS = 2;
 const MAX_PROCESS_STDERR_BYTES = 128 * 1024;
@@ -99,6 +100,7 @@ const runProcess = (command, args, { timeoutMs = TRANSCODE_TIMEOUT_MS } = {}) =>
     if (code === 0) return settle(resolve, { stdout, stderr });
     const error = new Error(stderr || `${command} exited with code ${code}`);
     error.code = command === 'ffprobe' ? 'CLIP_PROBE_FAILED' : 'CLIP_TRANSCODE_FAILED';
+    error.exitCode = code;
     settle(reject, error);
   });
 });
@@ -182,14 +184,43 @@ const writeMasterPlaylist = async (outputDir, renditions) => {
   await fs.writeFile(path.join(outputDir, 'master.m3u8'), `${lines.join('\n')}\n`, 'utf8');
 };
 
-const validateVariant = async variantDir => {
-  const playlist = await fs.readFile(path.join(variantDir, 'index.m3u8'), 'utf8');
+const validateVariant = async (variantDir, expected) => {
+  const playlistPath = path.join(variantDir, 'index.m3u8');
+  const playlist = await fs.readFile(playlistPath, 'utf8');
   if (!playlist.includes('#EXT-X-MAP:') || !playlist.includes('#EXT-X-ENDLIST')) {
     throw new Error('Generated CMAF playlist is incomplete');
   }
   const files = await fs.readdir(variantDir);
   if (!files.includes('init.mp4') || !files.some(name => name.endsWith('.m4s'))) {
     throw new Error('Generated CMAF initialization or media segments are missing');
+  }
+  const metadata = await probeClipVideo(playlistPath);
+  const durationTolerance = Math.max(0.5, Math.min(2, Number(expected.duration) * 0.02));
+  if (metadata.width !== expected.width || metadata.height !== expected.height) {
+    throw new Error('Generated CMAF rendition dimensions do not match the requested output');
+  }
+  if (Math.abs(metadata.duration - Number(expected.duration)) > durationTolerance) {
+    throw new Error('Generated CMAF rendition duration does not match the source');
+  }
+  // Decode representative media at the beginning and tail. FFmpeg already
+  // wrote all packets; these checks ensure the init segment and referenced
+  // media can actually initialize and decode before publication.
+  await runProcess('ffmpeg', [
+    '-nostdin', '-hide_banner', '-loglevel', 'error', '-xerror',
+    '-i', playlistPath,
+    '-t', '1',
+    '-map', '0:v:0', '-map', '0:a:0?',
+    '-f', 'null', '-',
+  ], { timeoutMs: 30_000 });
+  if (metadata.duration > 2) {
+    await runProcess('ffmpeg', [
+      '-nostdin', '-hide_banner', '-loglevel', 'error', '-xerror',
+      '-ss', String(Math.max(0, metadata.duration - 1)),
+      '-i', playlistPath,
+      '-t', '1',
+      '-map', '0:v:0', '-map', '0:a:0?',
+      '-f', 'null', '-',
+    ], { timeoutMs: 30_000 });
   }
 };
 
@@ -207,7 +238,7 @@ const generateFastStartFallback = async ({ inputPath, outputPath }) => {
 };
 
 const generateClipHls = async ({ inputPath, outputDir }) => {
-  const metadata = await probeClipVideo(inputPath);
+  const metadata = await validateVideoFile(inputPath);
   const ladder = buildRenditionLadder(metadata);
   await fs.mkdir(outputDir, { recursive: true });
   const renditions = [];
@@ -222,7 +253,11 @@ const generateClipHls = async ({ inputPath, outputDir }) => {
       rendition,
       hasAudio: metadata.hasAudio,
     }));
-    await validateVariant(variantDir);
+    await validateVariant(variantDir, {
+      width: rendition.width,
+      height: rendition.height,
+      duration: metadata.duration,
+    });
     renditions.push({ ...rendition, hasAudio: metadata.hasAudio });
   }
   await writeMasterPlaylist(outputDir, renditions);
@@ -232,6 +267,7 @@ const generateClipHls = async ({ inputPath, outputDir }) => {
       inputPath,
       outputPath: path.join(outputDir, 'fallback.mp4'),
     });
+    await validateVideoFile(fallbackPath, { expectedDuration: metadata.duration });
   } catch {
     // The original upload remains a valid progressive fallback. A remux
     // failure must not discard otherwise valid adaptive output.
