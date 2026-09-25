@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { body, param } from "express-validator";
+import rateLimit from "express-rate-limit";
 import { handleValidationErrors, optionalAuth, postController, protect, uploadFields, validateAchievementPostBody } from "./posts.legacy-adapters";
 
 const router = Router();
@@ -49,10 +50,21 @@ const interactionValidation = [
 const reportPostValidation = [
   body("reason").optional().isString().trim().isLength({ min: 1, max: 500 }).withMessage("Report reason must be between 1 and 500 characters")
 ];
+const postAvailabilityLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many post lookup requests. Try again later." }
+});
 
 router.post("/", protect, uploadFields([{ name: "media", maxCount: 5 }, { name: "cover", maxCount: 1 }]), createPostValidation, handleValidationErrors, postController.createPost);
 router.get("/", optionalAuth, postController.getPosts);
 router.get("/clips", optionalAuth, postController.getClips);
+// Anonymous direct-link checks receive only an existence result. The normal
+// post endpoint remains protected by optionalAuth and is the only route that
+// can return post content or viewer-specific authorization information.
+router.get("/:id/availability", postAvailabilityLimiter, postIdValidation, handleValidationErrors, postController.getPostAvailability);
 router.get("/saved", protect, postController.getSavedPosts);
 router.get("/liked", protect, postController.getLikedPosts);
 router.get("/:id", optionalAuth, postIdValidation, handleValidationErrors, postController.getPost);

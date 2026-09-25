@@ -911,6 +911,36 @@ const getUser = async (req, res) => {
   }
 };
 
+// Public direct-link probe. Return only whether an active username resolves;
+// profile data and privacy decisions remain behind the authenticated route.
+const getUserAvailability = async (req, res) => {
+  try {
+    const exists = await User.exists({
+      username: req.params.identifier,
+      isActive: true
+    });
+
+    if (!exists) {
+      return res.status(404).json({
+        success: false,
+        code: 'PROFILE_NOT_FOUND',
+        message: 'Profile not found'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { exists: true }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to verify profile availability',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 const invalidateFollowCaches = async (currentUserId, targetUserId) => {
   const [currentUser, targetUser] = await Promise.all([
     User.findById(currentUserId).select('username').lean(),
@@ -4383,6 +4413,7 @@ const getDmPrivacy = async (req, res) => {
 module.exports = {
   getUsers,
   getUser,
+  getUserAvailability,
   getAvatar,
   blockUser,
   unblockUser,

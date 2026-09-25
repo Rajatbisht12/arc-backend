@@ -164,6 +164,7 @@ const run = (): void => {
   assertRateLimited(messagesRouter, "get", "/join/:inviteToken/preview");
 
   [
+    ["get", "/:identifier/availability"],
     ["post", "/:teamId/roster/add"],
     ["post", "/:teamId/staff/add"],
     ["post", "/:teamId/staff/add-by-username"],
@@ -174,8 +175,10 @@ const run = (): void => {
     ["post", "/roster-invites/:inviteId/decline"],
     ["delete", "/staff-invite/:inviteId"]
   ].forEach(([method, path]) => assertValidationTerminal(usersRouter, method, path));
+  assertRateLimited(usersRouter, "get", "/:identifier/availability");
 
   [
+    ["get", "/:id/availability"],
     ["get", "/:id"],
     ["post", "/:id/view"],
     ["post", "/:id/like"],
@@ -187,6 +190,7 @@ const run = (): void => {
     ["post", "/:id/report"],
     ["post", "/:id/boost"]
   ].forEach(([method, path]) => assertValidationTerminal(postsRouter, method, path));
+  assertRateLimited(postsRouter, "get", "/:id/availability");
 
   [
     ["get", "/user/:userId"],
