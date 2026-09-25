@@ -168,6 +168,28 @@ const boundedString = (value: unknown, maxLength: number): string =>
 const getCallSessionService = (): CallSessionService | null =>
   safeRequire<CallSessionService>(path.join(backendRootPath, "services", "callSessionService.js"));
 
+export const buildRandomMediaStatePayload = ({
+  roomId,
+  fromUserId,
+  video,
+  audio
+}: {
+  roomId: string;
+  fromUserId: string;
+  video?: unknown;
+  audio?: unknown;
+}): { roomId: string; fromUserId: string; video?: boolean; audio?: boolean } | null => {
+  const safeVideo = typeof video === "boolean" ? video : undefined;
+  const safeAudio = typeof audio === "boolean" ? audio : undefined;
+  if (safeVideo === undefined && safeAudio === undefined) return null;
+  return {
+    roomId,
+    fromUserId,
+    video: safeVideo,
+    audio: safeAudio
+  };
+};
+
 export const releaseDisconnectedUserCallSessions = async (
   io: Server,
   userId: string,
@@ -599,7 +621,7 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
   });
 
   socket.on("video-state-change", async (data: { roomId?: string; videoEnabled?: boolean; targetUserId?: string }) => {
-    if (!data?.roomId || !data?.targetUserId) {
+    if (!data?.roomId || !data?.targetUserId || typeof data.videoEnabled !== "boolean") {
       return;
     }
     const targetUserId = String(data.targetUserId);
@@ -607,6 +629,7 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     if (!session) return;
     io.to(`user-${String(data.targetUserId)}`).emit("video-state-change", {
       fromUserId: userIdStr,
+      roomId: String(data.roomId),
       videoEnabled: data.videoEnabled
     });
   });
@@ -615,14 +638,17 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     if (!data?.roomId || !data?.targetUserId) {
       return;
     }
-    const targetUserId = String(data.targetUserId);
-    const session = await findAuthorizedRandomSession(String(data.roomId), userIdStr, targetUserId);
-    if (!session) return;
-    io.to(`user-${String(data.targetUserId)}`).emit("media-state", {
+    const payload = buildRandomMediaStatePayload({
+      roomId: String(data.roomId),
       fromUserId: userIdStr,
       video: data.video,
       audio: data.audio
     });
+    if (!payload) return;
+    const targetUserId = String(data.targetUserId);
+    const session = await findAuthorizedRandomSession(String(data.roomId), userIdStr, targetUserId);
+    if (!session) return;
+    io.to(`user-${String(data.targetUserId)}`).emit("media-state", payload);
   });
 
   socket.on("call-request", async (data: { callId?: string; targetUserId?: string; callType?: "voice" | "video"; fromUsername?: string; fromDisplayName?: string; fromAvatar?: string; randomRoomId?: string }) => {
