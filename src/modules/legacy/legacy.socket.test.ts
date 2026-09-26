@@ -1,9 +1,28 @@
 import assert from "node:assert/strict";
 
 import {
+  buildRandomMediaStatePayload,
   buildIncomingCallNotification,
   releaseDisconnectedUserCallSessions
 } from "./legacy.socket";
+
+assert.deepEqual(buildRandomMediaStatePayload({
+  roomId: "random-room-1",
+  fromUserId: "507f1f77bcf86cd799439011",
+  video: false,
+  audio: true
+}), {
+  roomId: "random-room-1",
+  fromUserId: "507f1f77bcf86cd799439011",
+  video: false,
+  audio: true
+});
+assert.equal(buildRandomMediaStatePayload({
+  roomId: "random-room-1",
+  fromUserId: "507f1f77bcf86cd799439011",
+  video: "false",
+  audio: null
+}), null);
 
 const now = new Date("2026-07-02T12:00:00.000Z");
 const notification = buildIncomingCallNotification({

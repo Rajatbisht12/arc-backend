@@ -20,6 +20,19 @@ const avatarProxyLimiter = rateLimit({
   legacyHeaders: false,
   message: { success: false, message: "Too many avatar requests. Try again later." }
 });
+const profileAvailabilityLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many profile lookup requests. Try again later." }
+});
+const profileAvailabilityValidation = [
+  param("identifier")
+    .isString()
+    .matches(/^[A-Za-z0-9_]{3,20}$/)
+    .withMessage("Invalid username")
+];
 
 const teamIdentifierValidation = [
   param("teamId").custom((value) => {
@@ -98,6 +111,9 @@ router.get("/:userId/dm-privacy", protect, userController.getDmPrivacy);
 router.get("/follow-requests/incoming", protect, userController.getFollowRequests);
 router.post("/follow-requests/:requestId/accept", protect, userController.acceptFollowRequest);
 router.post("/follow-requests/:requestId/reject", protect, userController.rejectFollowRequest);
+// Existence-only direct-link probe. No profile fields or privacy state leave
+// this route; authenticated profile reads continue through /:identifier.
+router.get("/:identifier/availability", profileAvailabilityLimiter, profileAvailabilityValidation, handleValidationErrors, userController.getUserAvailability);
 router.get("/:identifier", optionalAuth, userController.getUser);
 router.post("/:id/follow", protect, userController.toggleFollow);
 router.delete("/:id/follow", protect, userController.toggleFollow);

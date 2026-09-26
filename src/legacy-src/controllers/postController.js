@@ -640,6 +640,38 @@ const getPost = async (req, res) => {
   }
 };
 
+// Public direct-link probe. This intentionally returns no post, author,
+// visibility, or moderation data; it only lets logged-out clients distinguish
+// a real shared URL from a deleted/malformed one before presenting Login.
+const getPostAvailability = async (req, res) => {
+  try {
+    const exists = await Post.exists({
+      _id: req.params.id,
+      isActive: { $ne: false },
+      hiddenByAdmin: { $ne: true }
+    });
+
+    if (!exists) {
+      return res.status(404).json({
+        success: false,
+        code: 'POST_NOT_FOUND',
+        message: 'Post not found'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { exists: true }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to verify post availability',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 // Like/Unlike post
 const toggleLike = async (req, res) => {
   try {
@@ -1624,6 +1656,7 @@ module.exports = {
   getPosts,
   getClips,
   getPost,
+  getPostAvailability,
   getPostComments,
   getPostLikes,
   recordClipView,
