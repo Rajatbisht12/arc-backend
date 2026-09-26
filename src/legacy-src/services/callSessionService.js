@@ -12,6 +12,9 @@ const TERMINAL_STATUSES = new Set(['declined', 'missed', 'cancelled', 'ended']);
 
 const bounded = (value, max = 160) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const toId = (value) => String(value?._id || value || '');
+const isRandomConnectCallSession = (session) => Boolean(
+  session && (session.source === 'random_connect' || bounded(session.randomRoomId))
+);
 
 const serviceError = (message, statusCode = 400, code = 'INVALID_CALL_SESSION') => {
   const error = new Error(message);
@@ -71,6 +74,12 @@ const emitTerminalCallSession = (session, reason = '') => {
     reason: terminalReason
   };
   const serialized = serializeCallSession(session);
+  if (isRandomConnectCallSession(session)) {
+    io.to(`random-room-${bounded(session.randomRoomId)}`).emit('call-end', terminalPayload);
+    io.to(`random-room-${bounded(session.randomRoomId)}`).emit('call-session-updated', serialized);
+    return;
+  }
+
   const participants = [...new Set([toId(session.caller), toId(session.callee)].filter(Boolean))];
 
   for (const participantId of participants) {
@@ -82,6 +91,22 @@ const emitTerminalCallSession = (session, reason = '') => {
 
 const dispatchCallStatePushes = async (session, excludeInstallationId = '') => {
   if (!session?._id) return null;
+  if (isRandomConnectCallSession(session)) {
+    await CallSession.updateOne(
+      { _id: session._id },
+      {
+        $set: {
+          statePushStatus: 'completed',
+          statePushCompletedAt: new Date(),
+          statePushLastError: 'Random Connect is realtime-only',
+          statePushNextAttemptAt: null,
+          statePushLeaseAt: null,
+          statePushLeaseKey: ''
+        }
+      }
+    );
+    return { completed: true, skipped: true, reason: 'random_connect_realtime_only' };
+  }
   const expectedRevision = String(session.statePushRevision || '');
   if (!expectedRevision) return null;
   const staleLease = new Date(Date.now() - CALL_STATE_PUSH_LEASE_MS);
@@ -89,6 +114,8 @@ const dispatchCallStatePushes = async (session, excludeInstallationId = '') => {
   const claimed = await CallSession.findOneAndUpdate(
     {
       _id: session._id,
+      source: { $ne: 'random_connect' },
+      randomRoomId: { $in: ['', null] },
       statePushRevision: expectedRevision,
       statePushAttempts: { $lt: CALL_STATE_PUSH_MAX_ATTEMPTS },
       $or: [
@@ -250,13 +277,13 @@ const createCallSession = async ({
         },
         status: 'ringing',
         expiresAt: deadline,
-        initialVoipPushStatus: 'pending',
+        initialVoipPushStatus: normalizedSource === 'random_connect' ? 'completed' : 'pending',
         initialVoipPushAttempts: 0,
-        initialVoipPushNextAttemptAt: new Date(),
+        initialVoipPushNextAttemptAt: normalizedSource === 'random_connect' ? null : new Date(),
         initialVoipPushLeaseAt: null,
         initialVoipPushLeaseKey: '',
-        initialVoipPushLastError: '',
-        initialVoipPushCompletedAt: null,
+        initialVoipPushLastError: normalizedSource === 'random_connect' ? 'Random Connect is realtime-only' : '',
+        initialVoipPushCompletedAt: normalizedSource === 'random_connect' ? new Date() : null,
         initialVoipFallbackSentAt: null
         }
       },
@@ -298,21 +325,26 @@ const expireCallSession = async (callId, now = new Date()) => {
   );
   if (!session) return null;
 
-  await Notification.findOneAndUpdate(
-    { recipient: session.callee, type: 'call', 'data.customData.callId': session.callId },
-    {
-      $set: {
-        title: `Missed ${session.callType} call`,
-        message: `You missed a call from ${session.callerSnapshot?.displayName || session.callerSnapshot?.username || 'Someone'}`,
-        'data.customData.eventType': 'missed_call',
-        'data.customData.callStatus': 'missed'
-      }
-    },
-    { new: true }
-  ).catch((error) => log.warn('Missed-call inbox reconciliation failed', { callId, error: String(error) }));
+  if (!isRandomConnectCallSession(session)) {
+    await Notification.findOneAndUpdate(
+      { recipient: session.callee, type: 'call', 'data.customData.callId': session.callId },
+      {
+        $set: {
+          title: `Missed ${session.callType} call`,
+          message: `You missed a call from ${session.callerSnapshot?.displayName || session.callerSnapshot?.username || 'Someone'}`,
+          'data.customData.eventType': 'missed_call',
+          'data.customData.callStatus': 'missed'
+        }
+      },
+      { new: true }
+    ).catch((error) => log.warn('Missed-call inbox reconciliation failed', { callId, error: String(error) }));
+  }
 
   const io = global._arcSocketIO;
-  io?.to?.(`user-${toId(session.caller)}`).emit('call-missed', {
+  const missedRoom = isRandomConnectCallSession(session)
+    ? `random-room-${bounded(session.randomRoomId)}`
+    : `user-${toId(session.caller)}`;
+  io?.to?.(missedRoom).emit('call-missed', {
     callId: session.callId,
     nativeCallId: session.nativeCallId,
     targetUserId: toId(session.callee),
@@ -383,7 +415,13 @@ const getCallSessionForParticipant = async (callId, userId) => {
 
 const getPendingCallSession = async (calleeId) => {
   await expireDueCallSessions(100);
-  return CallSession.findOne({ callee: calleeId, status: 'ringing', expiresAt: { $gt: new Date() } })
+  return CallSession.findOne({
+    callee: calleeId,
+    status: 'ringing',
+    expiresAt: { $gt: new Date() },
+    source: { $ne: 'random_connect' },
+    randomRoomId: { $in: ['', null] }
+  })
     .sort({ createdAt: -1 })
     .lean();
 };
@@ -512,6 +550,8 @@ const endAcceptedCallSessionsForUser = async (userId, reason = 'peer_disconnecte
     participantLeaseActive: true,
     status: 'accepted',
     activeUntil: { $gt: now },
+    source: { $ne: 'random_connect' },
+    randomRoomId: { $in: ['', null] },
     $or: [{ caller: actorId }, { callee: actorId }]
   }).select('callId').lean();
 
@@ -542,6 +582,8 @@ const recoverCallStatePushes = async (limit = 200) => {
   const now = new Date();
   const exhausted = await CallSession.updateMany(
     {
+      source: { $ne: 'random_connect' },
+      randomRoomId: { $in: ['', null] },
       statePushAttempts: { $gte: CALL_STATE_PUSH_MAX_ATTEMPTS },
       $or: [
         {
@@ -567,6 +609,8 @@ const recoverCallStatePushes = async (limit = 200) => {
     });
   }
   const candidates = await CallSession.find({
+    source: { $ne: 'random_connect' },
+    randomRoomId: { $in: ['', null] },
     statePushAttempts: { $lt: CALL_STATE_PUSH_MAX_ATTEMPTS },
     $or: [
       {
@@ -630,6 +674,7 @@ module.exports = {
   transitionCallSession,
   endAcceptedCallSessionsForUser,
   recoverCallStatePushes,
+  isRandomConnectCallSession,
   startCallSessionSweeper,
   stopCallSessionSweeper
 };

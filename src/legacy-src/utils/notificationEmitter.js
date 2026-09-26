@@ -1,6 +1,6 @@
 const log = require('./logger');
 const { randomUUID } = require('crypto');
-const { evaluateNotificationEmailPolicy } = require('./notificationChannelPolicy');
+const { evaluateNotificationEmailPolicy, isRandomConnectNotification } = require('./notificationChannelPolicy');
 const { resolvePublicWebOrigin } = require('./publicWebUrl');
 
 let io;
@@ -168,6 +168,13 @@ const getRecipientDeliveryContext = async (notificationData) => {
 const createAndEmitNotification = async (notificationData) => {
   try {
     const normalizedNotificationData = normalizeNotificationPayload(notificationData);
+    if (isRandomConnectNotification(normalizedNotificationData)) {
+      log.warn('Random Connect notification blocked by realtime-only policy', {
+        userId: String(normalizedNotificationData.recipient || ''),
+        eventType: String(normalizedNotificationData?.data?.customData?.eventType || '')
+      });
+      return null;
+    }
     log.debug('Notification dispatch started', {
       userId: String(normalizedNotificationData.recipient || ''),
       type: normalizedNotificationData.type || 'system',

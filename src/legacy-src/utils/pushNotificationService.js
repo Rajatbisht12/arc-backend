@@ -1262,6 +1262,54 @@ const sendPushNotification = async (recipientId, notification) => {
   const resolvedRecipientId = toId(recipientId || notification?.recipient);
   if (!resolvedRecipientId || !notification) return { sent: 0, accepted: 0, failed: 0 };
 
+  // Defense in depth for legacy outbox rows and retry workers. New Random
+  // Connect events are rejected by notificationEmitter before persistence, but
+  // an older queued row must also be terminalized without provider delivery.
+  const { isRandomConnectNotification } = require('./notificationChannelPolicy');
+  if (isRandomConnectNotification(notification)) {
+    const blockedRequestKey = getPushRequestKey(resolvedRecipientId, notification);
+    const PushDeliveryAttempt = require('../models/PushDeliveryAttempt');
+    const PushDeliveryRequest = require('../models/PushDeliveryRequest');
+    await PushDeliveryAttempt.updateMany(
+      { requestKey: blockedRequestKey, ticketStatus: { $in: ['queued', 'sending', 'failed'] } },
+      {
+        $set: {
+          ticketStatus: 'skipped',
+          receiptStatus: 'skipped',
+          deliveryStatus: 'skipped',
+          retryable: false,
+          providerErrorCode: 'RANDOM_CONNECT_PUSH_BLOCKED',
+          providerErrorMessage: 'Random Connect is realtime-only and never sends push notifications'
+        },
+        $unset: { sendLeaseAt: 1, sendLeaseKey: 1, nextSendAt: 1, nextReceiptAt: 1 }
+      }
+    );
+    await PushDeliveryRequest.updateOne(
+      { requestKey: blockedRequestKey },
+      {
+        $set: {
+          status: 'skipped',
+          reasonCode: 'RANDOM_CONNECT_PUSH_BLOCKED',
+          reasonMessage: 'Random Connect is realtime-only and never sends push notifications',
+          completedAt: new Date()
+        }
+      }
+    );
+    log.warn('Random Connect push blocked by realtime-only policy', {
+      recipientId: resolvedRecipientId,
+      requestKey: blockedRequestKey.slice(0, 16)
+    });
+    return {
+      requestKey: blockedRequestKey,
+      sent: 0,
+      submitted: 0,
+      accepted: 0,
+      failed: 0,
+      skipped: 1,
+      reasonCode: 'RANDOM_CONNECT_PUSH_BLOCKED'
+    };
+  }
+
   const requestKey = getPushRequestKey(resolvedRecipientId, notification);
   const PushDeliveryAttempt = require('../models/PushDeliveryAttempt');
   await ensurePushDeliveryRequest(resolvedRecipientId, notification, requestKey);

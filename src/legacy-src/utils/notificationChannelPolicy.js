@@ -294,6 +294,52 @@ const normalizeRoutineEvent = (value) => {
   return normalized;
 };
 
+// Random Connect is a live, explicitly-started session. Its match lifecycle is
+// delivered only over the owner-scoped realtime channel and must never enter
+// the durable notification/push pipeline. Keep this classifier independent of
+// presentation text so localization cannot bypass the policy.
+const isRandomConnectNotification = (input = {}) => {
+  const notification = input.notification || input;
+  const data = notification?.data || {};
+  const customData = data.customData || {};
+  // Older call-signalling code identified Random Connect calls only by the
+  // room identifier. Treat that marker as authoritative too so a legacy or
+  // retried job cannot escape the event-name based policy.
+  if (
+    input.randomRoomId
+    || input.randomConnectionRoomId
+    || notification.randomRoomId
+    || notification.randomConnectionRoomId
+    || data.randomRoomId
+    || data.randomConnectionRoomId
+    || customData.randomRoomId
+    || customData.randomConnectionRoomId
+  ) {
+    return true;
+  }
+  const candidates = [
+    input.type,
+    input.source,
+    input.eventType,
+    input.notificationType,
+    notification.type,
+    notification.source,
+    notification.eventType,
+    notification.notificationType,
+    data.deepLinkType,
+    data.eventType,
+    data.notificationType,
+    customData.deepLinkType,
+    customData.source,
+    customData.eventType,
+    customData.notificationType
+  ];
+  return candidates.some((candidate) => {
+    const normalized = normalizeValue(candidate);
+    return normalized === 'random_connect' || normalized.startsWith('random_connect_');
+  });
+};
+
 const getRoutineEngagementEvent = (input = {}) => {
   const notification = input.notification || input;
   const data = notification?.data || {};
@@ -382,6 +428,7 @@ module.exports = {
   DISABLED_EMAIL_INTENTS,
   ROUTINE_ENGAGEMENT_EVENTS,
   normalizeRoutineEvent,
+  isRandomConnectNotification,
   getRoutineEngagementEvent,
   getEmailIntent,
   getEmailEventType,

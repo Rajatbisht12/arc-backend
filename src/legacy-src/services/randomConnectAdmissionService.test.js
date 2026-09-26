@@ -432,11 +432,19 @@ async function run() {
       json(payload) { activeSessionsPayload = payload; return payload; }
     };
     await randomConnectController.getActiveSessions(
-      { user: { _id: userA } },
+      {
+        user: { _id: userA },
+        get(name) {
+          return String(name).toLowerCase() === 'x-random-connect-session-id'
+            ? 'web-session-1234567890'
+            : undefined;
+        }
+      },
       activeSessionsResponse
     );
     assert.equal(activeSessionsResponse.statusCode, 200);
-    assert.equal(String(activeSessionsFilter['participants.userId']), userA);
+    assert.equal(String(activeSessionsFilter.participants.$elemMatch.userId), userA);
+    assert.equal(activeSessionsFilter.participants.$elemMatch.clientSessionId, 'web-session-1234567890');
     assert.equal(activeSessionsPayload.count, 1);
     assert.equal(activeSessionsPayload.sessions[0].roomId, 'owned-room');
     assert(!JSON.stringify(activeSessionsPayload).includes('global-room-must-not-leak'));

@@ -89,6 +89,14 @@ const disconnectValidation = [
     .withMessage("Room ID is required")
 ];
 
+const heartbeatValidation = [
+  body("roomId")
+    .optional({ values: "null" })
+    .isString()
+    .isLength({ min: 1, max: 160 })
+    .withMessage("Room ID is invalid")
+];
+
 const nextMatchValidation = [
   body("roomId")
     .notEmpty()
@@ -100,6 +108,7 @@ const nextMatchValidation = [
 router.post("/join-queue", protect, joinQueueValidation, handleValidationErrors, randomConnectController.joinQueue);
 router.delete("/leave-queue", protect, randomConnectController.leaveQueue);
 router.get("/current-connection", protect, randomConnectController.getCurrentConnection);
+router.post("/heartbeat", protect, heartbeatValidation, handleValidationErrors, randomConnectController.heartbeatRandomConnectSession);
 router.get("/active-sessions", protect, randomConnectController.getActiveSessions);
 router.post("/disconnect", protect, disconnectValidation, handleValidationErrors, randomConnectController.disconnectConnection);
 router.post("/next", protect, nextMatchValidation, handleValidationErrors, randomConnectController.nextConnection);
@@ -111,6 +120,7 @@ router.post("/cleanup-current", protect, randomConnectController.cleanupCurrentC
 router.post("/v2/join-queue", joinQueueValidation, handleValidationErrors, randomConnectController.joinQueue);
 router.delete("/v2/leave-queue", randomConnectController.leaveQueue);
 router.get("/v2/current-connection", randomConnectController.getCurrentConnection);
+router.post("/v2/heartbeat", heartbeatValidation, handleValidationErrors, randomConnectController.heartbeatRandomConnectSession);
 router.post("/v2/disconnect", disconnectValidation, handleValidationErrors, randomConnectController.disconnectConnection);
 router.post("/v2/cleanup-current", randomConnectController.cleanupCurrentConnection);
 

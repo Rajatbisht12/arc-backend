@@ -91,6 +91,8 @@ const acceptedDisconnectCleanup = service.slice(
 );
 assert(acceptedDisconnectCleanup.includes("status: 'accepted'"));
 assert(!acceptedDisconnectCleanup.includes("status: 'ringing'"));
+assert(acceptedDisconnectCleanup.includes("source: { $ne: 'random_connect' }"), 'account socket disconnects must not end another device\'s Random Connect session');
+assert(acceptedDisconnectCleanup.includes("randomRoomId: { $in: ['', null] }"), 'legacy Random Connect room sessions must be excluded from account socket cleanup');
 const groupCallRequestHandler = socket.slice(
   socket.indexOf('socket.on("group-call-request"'),
   socket.indexOf('socket.on("group-call-join"')
@@ -141,5 +143,17 @@ for (const canonicalEvent of ["'call-request'", "'call-accept'", "'call-reject'"
 assert(callController.includes("emit('call-session-updated'"), 'legacy REST transitions must reconcile every device');
 assert(service.includes("emitTerminalCallSession(session, 'timeout')"), 'ring timeout must end the Web call UI');
 assert(service.includes("emitTerminalCallSession(session, 'max_duration')"), 'max duration must end the Web call UI');
+assert(service.includes('if (!isRandomConnectCallSession(session))'), 'Random Connect timeouts must not create missed-call inbox notifications');
+assert(service.includes('? `random-room-${bounded(session.randomRoomId)}`'), 'Random Connect timeout events must stay in the owned room');
+assert(service.includes("normalizedSource === 'random_connect' ? 'completed' : 'pending'"), 'Random Connect calls must never enter the initial VoIP outbox');
+assert(service.includes("source: { $ne: 'random_connect' }"), 'call-state recovery must exclude Random Connect');
+assert(service.includes("randomRoomId: { $in: ['', null] }"), 'legacy Random Connect room markers must be excluded from call push recovery');
+assert(apnsService.includes("reason: 'random_connect_realtime_only'"), 'PushKit must reject Random Connect sessions at dispatch time');
+assert(apnsService.includes("RANDOM_CONNECT_PUSH_DISABLED"), 'historical Random Connect PushKit attempts must be terminalized');
+const randomCallRequestBlock = socket.slice(
+  socket.indexOf('// Random Connect is an in-session realtime event'),
+  socket.indexOf('const incomingCallNotification')
+);
+assert(randomCallRequestBlock.includes('if (data.randomRoomId)'), 'Random Connect call signaling must return before every push producer');
 
 console.log('Durable call-session contracts passed');

@@ -13,6 +13,11 @@ const CALL_DISCONNECT_GRACE_MS = Math.max(
 );
 const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
 const CALL_ID_PATTERN = /^[A-Za-z0-9:_-]{8,160}$/;
+const RANDOM_CLIENT_SESSION_PATTERN = /^[A-Za-z0-9:_-]{16,128}$/;
+const RANDOM_CONNECT_HEARTBEAT_TTL_MS = Math.max(
+  15_000,
+  Math.min(180_000, Number(process.env.RANDOM_CONNECT_HEARTBEAT_TTL_MS || 60_000))
+);
 const MAX_ACTIVE_GROUP_CALLS = 10_000;
 // Matches the Mobile 1-to-1 ring timeout so an abandoned group call cannot ring
 // forever if the caller's socket dies instead of sending a leave.
@@ -46,7 +51,7 @@ type ActiveCallSession = {
 type LeanRandomSession = {
   roomId: string;
   status: string;
-  participants: Array<{ userId: unknown }>;
+  participants: Array<{ userId: unknown; clientSessionId?: string; lastHeartbeatAt?: Date | string }>;
 };
 
 type RandomConnectionModel = {
@@ -58,8 +63,8 @@ type RandomConnectionModel = {
 };
 
 type RandomConnectController = {
-  markSessionReady?: (roomId: string, userId: string, server: Server) => Promise<unknown>;
-  getSessionTimerState?: (roomId: string, userId: string) => Promise<unknown>;
+  markSessionReady?: (roomId: string, userId: string, clientSessionId: string, server: Server) => Promise<unknown>;
+  getSessionTimerState?: (roomId: string, userId: string, clientSessionId: string) => Promise<unknown>;
 };
 
 type PrivacyPolicy = {
@@ -324,6 +329,19 @@ const getRandomConnectionModel = (): RandomConnectionModel | null =>
 const getRandomConnectController = (): RandomConnectController | null =>
   safeRequire<RandomConnectController>(path.join(backendControllerPath, "randomConnectController.js"));
 
+const randomClientRoom = (userId: string, clientSessionId: string) => (
+  `random-client-${userId}-${clientSessionId}`
+);
+
+const normalizeRandomClientSessionId = (value: unknown) => {
+  const sessionId = boundedString(value, 128);
+  return RANDOM_CLIENT_SESSION_PATTERN.test(sessionId) ? sessionId : "";
+};
+
+const getSocketRandomClientSessionId = (socket: Socket, value: unknown) => (
+  normalizeRandomClientSessionId(value) || normalizeRandomClientSessionId(socket.data.randomConnectSessionId)
+);
+
 const getPrivacyPolicy = (): PrivacyPolicy | null =>
   safeRequire<PrivacyPolicy>(path.join(backendRootPath, "utils", "privacyPolicy.js"));
 
@@ -381,20 +399,33 @@ const getGroupCallRoomInfo = async (
 const findAuthorizedRandomSession = async (
   roomId: string,
   userId: string,
+  clientSessionId: string,
   targetUserId?: string
 ): Promise<LeanRandomSession | null> => {
   const RandomConnection = getRandomConnectionModel();
-  if (!RandomConnection || !roomId || !userId) return null;
+  const normalizedClientSessionId = normalizeRandomClientSessionId(clientSessionId);
+  if (!RandomConnection || !roomId || !userId || !normalizedClientSessionId) return null;
+  const cutoff = new Date(Date.now() - RANDOM_CONNECT_HEARTBEAT_TTL_MS);
 
   const session = await RandomConnection.findOne({
     roomId,
     status: "active",
-    "participants.userId": userId
-  }).select("roomId status participants.userId").lean();
+    participants: {
+      $elemMatch: {
+        userId,
+        clientSessionId: normalizedClientSessionId,
+        lastHeartbeatAt: { $gte: cutoff }
+      }
+    }
+  }).select("roomId status participants.userId participants.clientSessionId participants.lastHeartbeatAt").lean();
 
   if (!session) return null;
   const participantIds = new Set((session.participants || []).map((participant) => getObjectIdString(participant.userId)));
-  if (!participantIds.has(userId)) return null;
+  const owner = (session.participants || []).find((participant) => (
+    getObjectIdString(participant.userId) === userId
+    && participant.clientSessionId === normalizedClientSessionId
+  ));
+  if (!owner || !participantIds.has(userId)) return null;
   if (targetUserId && !participantIds.has(targetUserId)) return null;
   return session;
 };
@@ -528,23 +559,62 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     }
   });
 
-  socket.on("join-random-room", async (roomId: string) => {
-    if (!roomId) {
+  socket.on("bind-random-session", async (data: { clientSessionId?: string }) => {
+    const clientSessionId = normalizeRandomClientSessionId(data?.clientSessionId);
+    if (!clientSessionId) return;
+    const ConnectionQueue = safeRequire<any>(path.join(backendModelPath, "ConnectionQueue.js"));
+    const RandomConnection = getRandomConnectionModel();
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - RANDOM_CONNECT_HEARTBEAT_TTL_MS);
+    const [queueOwned, connectionOwned] = await Promise.all([
+      ConnectionQueue?.exists?.({
+        userId: userIdStr,
+        clientSessionId,
+        status: { $in: ["waiting", "matched"] },
+        lastHeartbeatAt: { $gte: cutoff },
+        expiresAt: { $gt: now }
+      }),
+      RandomConnection?.findOne({
+        status: "active",
+        participants: {
+          $elemMatch: { userId: userIdStr, clientSessionId, lastHeartbeatAt: { $gte: cutoff } }
+        }
+      }).select("roomId status participants.userId participants.clientSessionId participants.lastHeartbeatAt").lean()
+    ]);
+    if (!queueOwned && !connectionOwned) {
+      socket.emit("random-session-error", {
+        code: "RANDOM_CONNECT_SESSION_NOT_OWNED",
+        message: "Random Connect session not found or not owned by this client"
+      });
       return;
     }
-    const roomIdStr = String(roomId);
-    const session = await findAuthorizedRandomSession(roomIdStr, userIdStr);
+    socket.join(randomClientRoom(userIdStr, clientSessionId));
+    socket.data.randomConnectSessionId = clientSessionId;
+    socket.emit("random-session-bound", { clientSessionId });
+  });
+
+  socket.on("join-random-room", async (data: { roomId?: string; clientSessionId?: string } | string) => {
+    const roomIdStr = typeof data === "string" ? data : boundedString(data?.roomId, 160);
+    const clientSessionId = getSocketRandomClientSessionId(socket,
+      typeof data === "string" ? "" : data?.clientSessionId
+    );
+    if (!roomIdStr || !clientSessionId) {
+      return;
+    }
+    const session = await findAuthorizedRandomSession(roomIdStr, userIdStr, clientSessionId);
     if (!session) {
       socket.emit("random-session-error", { roomId: roomIdStr, message: "Random Connect session not found or not authorized" });
       return;
     }
-    const room = `random-room-${String(roomId)}`;
+    const room = `random-room-${roomIdStr}`;
     socket.join(room);
-    socket.emit("room-joined", { roomId: String(roomId) });
-    socket.to(room).emit("user-joined-room", { roomId: String(roomId), userId: userIdStr });
+    socket.join(randomClientRoom(userIdStr, clientSessionId));
+    socket.data.randomConnectSessionId = clientSessionId;
+    socket.emit("room-joined", { roomId: roomIdStr });
+    socket.to(room).emit("user-joined-room", { roomId: roomIdStr, userId: userIdStr });
     const controller = getRandomConnectController();
-    await controller?.markSessionReady?.(roomIdStr, userIdStr, io);
-    const timerState = await controller?.getSessionTimerState?.(roomIdStr, userIdStr);
+    await controller?.markSessionReady?.(roomIdStr, userIdStr, clientSessionId, io);
+    const timerState = await controller?.getSessionTimerState?.(roomIdStr, userIdStr, clientSessionId);
     if (timerState) socket.emit("random-session-timer-sync", timerState);
   });
 
@@ -554,24 +624,27 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     }
   });
 
-  socket.on("random-session-ready", async (data: { roomId?: string }) => {
-    if (!data?.roomId) return;
+  socket.on("random-session-ready", async (data: { roomId?: string; clientSessionId?: string }) => {
+    const clientSessionId = getSocketRandomClientSessionId(socket, data?.clientSessionId);
+    if (!data?.roomId || !clientSessionId) return;
     const roomId = String(data.roomId);
-    const session = await findAuthorizedRandomSession(roomId, userIdStr);
+    const session = await findAuthorizedRandomSession(roomId, userIdStr, clientSessionId);
     if (!session) {
       socket.emit("random-session-error", { roomId, message: "Random Connect session not authorized" });
       return;
     }
     const controller = getRandomConnectController();
-    await controller?.markSessionReady?.(roomId, userIdStr, io);
+    await controller?.markSessionReady?.(roomId, userIdStr, clientSessionId, io);
   });
 
-  socket.on("random-connection-message", async (data: { roomId?: string; message?: string }) => {
+  socket.on("random-connection-message", async (data: { roomId?: string; message?: string; clientSessionId?: string }) => {
     const message = boundedString(data?.message, 2000);
     if (!data?.roomId || !message) {
       return;
     }
-    const session = await findAuthorizedRandomSession(String(data.roomId), userIdStr);
+    const session = await findAuthorizedRandomSession(
+      String(data.roomId), userIdStr, getSocketRandomClientSessionId(socket, data.clientSessionId)
+    );
     if (!session) {
       socket.emit("random-session-error", { roomId: data.roomId, message: "Random Connect session not authorized" });
       return;
@@ -584,7 +657,7 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     });
   });
 
-  socket.on("webrtc-signal", async (data: { roomId?: string; signal?: unknown; targetUserId?: string }) => {
+  socket.on("webrtc-signal", async (data: { roomId?: string; signal?: unknown; targetUserId?: string; clientSessionId?: string }) => {
     if (!data?.roomId || !data?.signal || typeof data.signal !== "object" || !data?.targetUserId) {
       return;
     }
@@ -592,49 +665,55 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     try { serializedSignal = JSON.stringify(data.signal); } catch { return; }
     if (Buffer.byteLength(serializedSignal, "utf8") > 64 * 1024) return;
     const targetUserId = String(data.targetUserId);
-    const session = await findAuthorizedRandomSession(String(data.roomId), userIdStr, targetUserId);
+    const session = await findAuthorizedRandomSession(
+      String(data.roomId), userIdStr, getSocketRandomClientSessionId(socket, data.clientSessionId), targetUserId
+    );
     if (!session) {
       socket.emit("random-session-error", { roomId: data.roomId, message: "Random Connect signal rejected" });
       return;
     }
-    io.to(`user-${String(data.targetUserId)}`).emit("webrtc-signal", {
+    socket.to(`random-room-${String(data.roomId)}`).emit("webrtc-signal", {
       signal: data.signal,
       fromUserId: userIdStr,
       roomId: data.roomId
     });
   });
 
-  socket.on("webrtc-request-offer", async (data: { roomId?: string; targetUserId?: string }) => {
+  socket.on("webrtc-request-offer", async (data: { roomId?: string; targetUserId?: string; clientSessionId?: string }) => {
     if (!data?.roomId || !data?.targetUserId) {
       return;
     }
     const targetUserId = String(data.targetUserId);
-    const session = await findAuthorizedRandomSession(String(data.roomId), userIdStr, targetUserId);
+    const session = await findAuthorizedRandomSession(
+      String(data.roomId), userIdStr, getSocketRandomClientSessionId(socket, data.clientSessionId), targetUserId
+    );
     if (!session) {
       socket.emit("random-session-error", { roomId: data.roomId, message: "Random Connect offer request rejected" });
       return;
     }
-    io.to(`user-${String(data.targetUserId)}`).emit("webrtc-request-offer", {
+    socket.to(`random-room-${String(data.roomId)}`).emit("webrtc-request-offer", {
       roomId: data.roomId,
       fromUserId: userIdStr
     });
   });
 
-  socket.on("video-state-change", async (data: { roomId?: string; videoEnabled?: boolean; targetUserId?: string }) => {
+  socket.on("video-state-change", async (data: { roomId?: string; videoEnabled?: boolean; targetUserId?: string; clientSessionId?: string }) => {
     if (!data?.roomId || !data?.targetUserId || typeof data.videoEnabled !== "boolean") {
       return;
     }
     const targetUserId = String(data.targetUserId);
-    const session = await findAuthorizedRandomSession(String(data.roomId), userIdStr, targetUserId);
+    const session = await findAuthorizedRandomSession(
+      String(data.roomId), userIdStr, getSocketRandomClientSessionId(socket, data.clientSessionId), targetUserId
+    );
     if (!session) return;
-    io.to(`user-${String(data.targetUserId)}`).emit("video-state-change", {
+    socket.to(`random-room-${String(data.roomId)}`).emit("video-state-change", {
       fromUserId: userIdStr,
       roomId: String(data.roomId),
       videoEnabled: data.videoEnabled
     });
   });
 
-  socket.on("media-state", async (data: { roomId?: string; targetUserId?: string; video?: boolean; audio?: boolean }) => {
+  socket.on("media-state", async (data: { roomId?: string; targetUserId?: string; video?: boolean; audio?: boolean; clientSessionId?: string }) => {
     if (!data?.roomId || !data?.targetUserId) {
       return;
     }
@@ -646,12 +725,14 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     });
     if (!payload) return;
     const targetUserId = String(data.targetUserId);
-    const session = await findAuthorizedRandomSession(String(data.roomId), userIdStr, targetUserId);
+    const session = await findAuthorizedRandomSession(
+      String(data.roomId), userIdStr, getSocketRandomClientSessionId(socket, data.clientSessionId), targetUserId
+    );
     if (!session) return;
-    io.to(`user-${String(data.targetUserId)}`).emit("media-state", payload);
+    socket.to(`random-room-${String(data.roomId)}`).emit("media-state", payload);
   });
 
-  socket.on("call-request", async (data: { callId?: string; targetUserId?: string; callType?: "voice" | "video"; fromUsername?: string; fromDisplayName?: string; fromAvatar?: string; randomRoomId?: string }) => {
+  socket.on("call-request", async (data: { callId?: string; targetUserId?: string; callType?: "voice" | "video"; fromUsername?: string; fromDisplayName?: string; fromAvatar?: string; randomRoomId?: string; clientSessionId?: string }) => {
     const callId = boundedString(data?.callId, 160);
     const targetUserId = boundedString(data?.targetUserId, 64);
     if (!callId || !OBJECT_ID_PATTERN.test(targetUserId) || !data?.callType || !["voice", "video"].includes(data.callType) || targetUserId === userIdStr) {
@@ -669,7 +750,12 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       return;
     }
     if (data.randomRoomId) {
-      const session = await findAuthorizedRandomSession(boundedString(data.randomRoomId, 160), userIdStr, targetUserId);
+      const session = await findAuthorizedRandomSession(
+        boundedString(data.randomRoomId, 160),
+        userIdStr,
+        getSocketRandomClientSessionId(socket, data.clientSessionId),
+        targetUserId
+      );
       if (!session) return;
     }
 
@@ -769,7 +855,10 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       return;
     }
     const deadlineAt = new Date(durableSession.expiresAt).toISOString();
-    io.to(`user-${targetUserId}`).emit("call-request", {
+    const targetRoom = data.randomRoomId
+      ? `random-room-${boundedString(data.randomRoomId, 160)}`
+      : `user-${targetUserId}`;
+    socket.to(targetRoom).emit("call-request", {
       callId,
       nativeCallId: durableSession.nativeCallId,
       fromUserId: userIdStr,
@@ -780,6 +869,11 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       randomRoomId: boundedString(data.randomRoomId, 160) || undefined,
       deadlineAt
     });
+    // Random Connect is an in-session realtime event. It must never enter the
+    // durable notification, Expo/FCM/APNs or VoIP-push pipelines.
+    if (data.randomRoomId) {
+      return;
+    }
     const incomingCallNotification = {
       recipient: targetUserId,
       sender: userIdStr,
@@ -839,14 +933,26 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       if (!callSessionService) return;
       try {
         const action = eventName === "call-accept" ? "accept" : eventName === "call-reject" ? "decline" : "end";
-        if (eventName === "call-accept") {
-          const pendingSession = await callSessionService.getCallSessionForParticipant(
-            boundedString(data.callId, 160),
-            userIdStr
+        const currentSession = await callSessionService.getCallSessionForParticipant(
+          boundedString(data.callId, 160),
+          userIdStr
+        );
+        if (currentSession.source === "random_connect" || currentSession.randomRoomId) {
+          const authorizedRandomSession = await findAuthorizedRandomSession(
+            boundedString(currentSession.randomRoomId, 160),
+            userIdStr,
+            getSocketRandomClientSessionId(socket, undefined),
+            boundedString(data.targetUserId, 64)
           );
+          if (!authorizedRandomSession) {
+            socket.emit("call-error", { callId: data.callId, code: "RANDOM_CONNECT_SESSION_NOT_OWNED" });
+            return;
+          }
+        }
+        if (eventName === "call-accept") {
           const callPrivacy = getCallPrivacy();
           if (!callPrivacy) throw new Error("CALL_PRIVACY_UNAVAILABLE");
-          await callPrivacy.assertCallSessionPrivacy(pendingSession);
+          await callPrivacy.assertCallSessionPrivacy(currentSession);
         }
         const session = await callSessionService.transitionCallSession({
           callId: boundedString(data.callId, 160),
@@ -865,15 +971,22 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
           socketId: socket.id,
           status: session.status
         });
-        io.to(`user-${otherUserId}`).emit(eventName, {
+        const targetRoom = session.randomRoomId
+          ? `random-room-${boundedString(session.randomRoomId, 160)}`
+          : `user-${otherUserId}`;
+        socket.to(targetRoom).emit(eventName, {
           callId: session.callId,
           nativeCallId: session.nativeCallId,
           fromUserId: userIdStr,
           reason: boundedString(data.reason, 80) || undefined
         });
         const serialized = callSessionService.serializeCallSession(session);
-        io.to(`user-${callerId}`).emit("call-session-updated", serialized);
-        io.to(`user-${calleeId}`).emit("call-session-updated", serialized);
+        if (session.randomRoomId) {
+          io.to(targetRoom).emit("call-session-updated", serialized);
+        } else {
+          io.to(`user-${callerId}`).emit("call-session-updated", serialized);
+          io.to(`user-${calleeId}`).emit("call-session-updated", serialized);
+        }
       } catch (error) {
         logger.warn("Call state transition rejected", {
           eventName,
@@ -931,7 +1044,22 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
         });
         return;
       }
-      io.to(`user-${authorizedTarget}`).emit("call-signal", {
+      if (session.source === "random_connect" || session.randomRoomId) {
+        const authorizedRandomSession = await findAuthorizedRandomSession(
+          boundedString(session.randomRoomId, 160),
+          userIdStr,
+          getSocketRandomClientSessionId(socket, undefined),
+          authorizedTarget
+        );
+        if (!authorizedRandomSession) {
+          socket.emit("call-error", { callId, code: "RANDOM_CONNECT_SESSION_NOT_OWNED" });
+          return;
+        }
+      }
+      const targetRoom = session.randomRoomId
+        ? `random-room-${boundedString(session.randomRoomId, 160)}`
+        : `user-${authorizedTarget}`;
+      socket.to(targetRoom).emit("call-signal", {
         callId: session.callId,
         nativeCallId: session.nativeCallId,
         fromUserId: userIdStr,

@@ -1,7 +1,6 @@
 const User = require('../models/User');
 const RandomConnection = require('../models/RandomConnection');
 const ConnectionQueue = require('../models/ConnectionQueue');
-const { createAndEmitNotification } = require('../utils/notificationEmitter');
 const {
   FREE_DAILY_GENDER_MATCH_LIMIT,
   isLegacyUserPremium,
@@ -34,8 +33,13 @@ const SESSION_WARNING_SECONDS = 30;
 const TAG_FALLBACK_MS = Number(process.env.RANDOM_CONNECT_TAG_FALLBACK_MS || 20000);
 const RECENT_PARTNER_AVOID_MS = Number(process.env.RANDOM_CONNECT_RECENT_PARTNER_AVOID_MS || 10 * 60 * 1000);
 const MATCH_BATCH_LIMIT = Number(process.env.RANDOM_CONNECT_MATCH_BATCH_LIMIT || 100);
+const RANDOM_CONNECT_HEARTBEAT_TTL_MS = Math.max(
+  15000,
+  Math.min(180000, Number(process.env.RANDOM_CONNECT_HEARTBEAT_TTL_MS || 60000))
+);
 const ACTIVE_SESSION_STATUSES = ['waiting', 'active'];
 const sessionTimerHandles = new Map();
+const CLIENT_SESSION_ID_PATTERN = /^[A-Za-z0-9:_-]{16,128}$/;
 
 const isPremiumUser = isLegacyUserPremium;
 
@@ -59,6 +63,57 @@ const logMatchDebug = (message, meta = {}) => {
 const requestSource = (req) => String(
   req?.get?.('x-client-platform') || req?.get?.('x-app-platform') || 'unspecified'
 ).trim().slice(0, 40) || 'unspecified';
+
+const normalizeClientPlatform = (value) => {
+  const platform = String(value || '').trim().toLowerCase();
+  return ['web', 'android', 'ios'].includes(platform) ? platform : '';
+};
+
+const normalizeClientSessionId = (value) => {
+  const sessionId = String(value || '').trim();
+  return CLIENT_SESSION_ID_PATTERN.test(sessionId) ? sessionId : '';
+};
+
+const getClientSessionId = (req) => normalizeClientSessionId(
+  req?.get?.('x-random-connect-session-id')
+  || req?.headers?.['x-random-connect-session-id']
+  || req?.body?.clientSessionId
+  || req?.query?.clientSessionId
+);
+
+const requireClientSessionId = (req) => {
+  const clientSessionId = getClientSessionId(req);
+  if (!clientSessionId) {
+    throw createHttpError(400, {
+      success: false,
+      code: 'RANDOM_CONNECT_CLIENT_SESSION_REQUIRED',
+      message: 'A valid Random Connect client session is required.'
+    });
+  }
+  return clientSessionId;
+};
+
+const clientPlatformFromRequest = (req) => normalizeClientPlatform(
+  req?.get?.('x-client-platform') || req?.get?.('x-app-platform')
+);
+
+const heartbeatCutoff = (now = Date.now()) => new Date(now - RANDOM_CONNECT_HEARTBEAT_TTL_MS);
+const heartbeatExpiry = (now = Date.now()) => new Date(now + RANDOM_CONNECT_HEARTBEAT_TTL_MS);
+const isHeartbeatFresh = (value, now = Date.now()) => {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) && time >= now - RANDOM_CONNECT_HEARTBEAT_TTL_MS;
+};
+
+const getOwnedParticipant = (connection, userId, clientSessionId) => (
+  (connection?.participants || []).find((participant) => (
+    getUserIdString(participant.userId) === getUserIdString(userId)
+    && normalizeClientSessionId(participant.clientSessionId) === clientSessionId
+  )) || null
+);
+
+const randomClientRoom = (userId, clientSessionId) => (
+  `random-client-${getUserIdString(userId)}-${normalizeClientSessionId(clientSessionId)}`
+);
 
 const setEntitlementNoStore = (res) => {
   res.set('Cache-Control', 'private, no-store');
@@ -154,7 +209,10 @@ const emitToParticipants = (io, connection, eventName, payload) => {
   io.to(`random-room-${connection.roomId}`).emit(eventName, data);
   (connection.participants || []).forEach(participant => {
     const participantId = getUserIdString(participant.userId);
-    if (participantId) io.to(`user-${participantId}`).emit(eventName, data);
+    const clientSessionId = normalizeClientSessionId(participant.clientSessionId);
+    if (participantId && clientSessionId) {
+      io.to(randomClientRoom(participantId, clientSessionId)).emit(eventName, data);
+    }
   });
 };
 
@@ -163,6 +221,74 @@ const clearSessionTimers = (roomId) => {
   if (!handles) return;
   handles.forEach(handle => clearTimeout(handle));
   sessionTimerHandles.delete(roomId);
+};
+
+const expireRandomConnectConnection = async (connection, io, reason = 'heartbeat_timeout') => {
+  if (!connection?.roomId) return null;
+  const now = new Date();
+  const expired = await RandomConnection.findOneAndUpdate(
+    { _id: connection._id, status: { $in: ACTIVE_SESSION_STATUSES } },
+    {
+      $set: {
+        status: 'expired',
+        endTime: now,
+        endReason: reason,
+        duration: Math.max(0, Math.floor((now.getTime() - new Date(
+          connection.connectedAt || connection.startTime || connection.createdAt || now
+        ).getTime()) / 1000))
+      }
+    },
+    { new: true }
+  );
+  if (!expired) return null;
+  clearSessionTimers(expired.roomId);
+  emitToParticipants(io, expired, 'random-session-ended', {
+    reason: reason === 'heartbeat_timeout' ? 'expired' : reason,
+    message: 'Random Connect session expired because a participant is no longer available.',
+    sessionPolicy: buildSessionPolicyPayload(expired)
+  });
+  log.info('Random Connect session expired', {
+    roomId: expired.roomId,
+    reason,
+    participantIds: (expired.participants || []).map((participant) => getUserIdString(participant.userId))
+  });
+  return expired;
+};
+
+const syncStaleRandomConnectState = async (io) => {
+  const now = new Date();
+  const cutoff = heartbeatCutoff(now.getTime());
+  const staleQueueResult = await ConnectionQueue.deleteMany({
+    $or: [
+      { expiresAt: { $lte: now } },
+      { lastHeartbeatAt: { $lt: cutoff } },
+      { lastHeartbeatAt: null },
+      { clientSessionId: { $in: ['', null] } }
+    ]
+  });
+
+  const staleConnections = await RandomConnection.find({
+    status: { $in: ACTIVE_SESSION_STATUSES },
+    $or: [
+      { participants: { $elemMatch: { lastHeartbeatAt: { $lt: cutoff } } } },
+      { participants: { $elemMatch: { lastHeartbeatAt: null } } },
+      { participants: { $elemMatch: { clientSessionId: { $in: ['', null] } } } }
+    ]
+  }).limit(MATCH_BATCH_LIMIT);
+  await Promise.all(staleConnections.map((connection) => (
+    expireRandomConnectConnection(connection, io, 'heartbeat_timeout')
+  )));
+
+  if (Number(staleQueueResult.deletedCount || 0) > 0 || staleConnections.length > 0) {
+    log.info('Random Connect stale state sweep completed', {
+      expiredQueueEntries: Number(staleQueueResult.deletedCount || 0),
+      expiredConnections: staleConnections.length
+    });
+  }
+  return {
+    expiredQueueEntries: Number(staleQueueResult.deletedCount || 0),
+    expiredConnections: staleConnections.length
+  };
 };
 
 const sendTimerWarning = async (roomId, io) => {
@@ -255,10 +381,17 @@ const syncExpiredSessions = async (io) => {
   await Promise.all(expiredSessions.map(session => endExpiredSession(session.roomId, io)));
 };
 
-const getSessionTimerState = async (roomId, userId) => {
+const getSessionTimerState = async (roomId, userId, clientSessionId) => {
   const connection = await RandomConnection.findOne({
     roomId,
-    ...(userId ? { 'participants.userId': userId } : {}),
+    ...(userId ? {
+      participants: {
+        $elemMatch: {
+          userId,
+          ...(clientSessionId ? { clientSessionId } : {})
+        }
+      }
+    } : {}),
     status: { $in: ACTIVE_SESSION_STATUSES }
   });
   if (!connection) return null;
@@ -270,8 +403,8 @@ const getSessionTimerState = async (roomId, userId) => {
   };
 };
 
-const markSessionReady = async (roomId, userId, io) => {
-  if (!roomId || !userId) return null;
+const markSessionReady = async (roomId, userId, clientSessionId, io) => {
+  if (!roomId || !userId || !normalizeClientSessionId(clientSessionId)) return null;
   const userIdStr = userId.toString();
   const now = new Date();
 
@@ -279,11 +412,12 @@ const markSessionReady = async (roomId, userId, io) => {
     {
       roomId,
       status: 'active',
-      'participants.userId': userId
+      participants: { $elemMatch: { userId, clientSessionId } }
     },
     {
       $set: {
-        'participants.$.readyAt': now
+        'participants.$.readyAt': now,
+        'participants.$.lastHeartbeatAt': now
       }
     },
     { new: true }
@@ -332,9 +466,9 @@ const markSessionReady = async (roomId, userId, io) => {
     });
     scheduleSessionTimers(connection, io);
   } else {
-    const state = await getSessionTimerState(roomId, userId);
+    const state = await getSessionTimerState(roomId, userId, clientSessionId);
     if (state && io) {
-      io.to(`user-${userIdStr}`).emit('random-session-timer-sync', state);
+      io.to(randomClientRoom(userIdStr, clientSessionId)).emit('random-session-timer-sync', state);
     }
   }
 
@@ -400,6 +534,8 @@ const queueAndTryMatch = async ({
   body = {},
   io,
   source = 'unspecified',
+  clientSessionId,
+  clientPlatform = '',
   admissionLease,
   assertLease = () => {}
 }) => {
@@ -410,6 +546,13 @@ const queueAndTryMatch = async ({
     throw createHttpError(401, {
       success: false,
       message: 'User not authenticated'
+    });
+  }
+  if (!normalizeClientSessionId(clientSessionId)) {
+    throw createHttpError(400, {
+      success: false,
+      code: 'RANDOM_CONNECT_CLIENT_SESSION_REQUIRED',
+      message: 'A valid Random Connect client session is required.'
     });
   }
 
@@ -469,11 +612,31 @@ const queueAndTryMatch = async ({
     });
   }
 
-  const existingConnection = await RandomConnection.findOne({
+  let existingConnection = await RandomConnection.findOne({
     'participants.userId': userId,
     status: { $in: ACTIVE_SESSION_STATUSES }
   });
   if (existingConnection) {
+    const participant = (existingConnection.participants || []).find(
+      (entry) => getUserIdString(entry.userId) === getUserIdString(userId)
+    );
+    const ownerSessionId = normalizeClientSessionId(participant?.clientSessionId);
+    if (!ownerSessionId || !isHeartbeatFresh(participant?.lastHeartbeatAt)) {
+      await expireRandomConnectConnection(existingConnection, io, 'heartbeat_timeout');
+      existingConnection = null;
+    } else if (ownerSessionId !== clientSessionId) {
+      throw createHttpError(409, {
+        success: false,
+        code: 'RANDOM_CONNECT_ACTIVE_ELSEWHERE',
+        message: 'Random Connect is already active on another device or browser tab.'
+      });
+    }
+  }
+  if (existingConnection) {
+    await RandomConnection.updateOne(
+      { _id: existingConnection._id, participants: { $elemMatch: { userId, clientSessionId } } },
+      { $set: { 'participants.$.lastHeartbeatAt': new Date() } }
+    );
     const connectionData = buildConnectionPayload(existingConnection);
     return {
       success: true,
@@ -520,12 +683,28 @@ const queueAndTryMatch = async ({
   }
 
   assertLease();
-  await cleanupExistingConnections(userId, io);
+  await cleanupExistingConnections(userId, io, clientSessionId);
 
-  const existingInQueue = await ConnectionQueue.findOne({
+  let existingInQueue = await ConnectionQueue.findOne({
     userId,
     status: 'waiting'
   });
+
+  if (existingInQueue && (
+    !normalizeClientSessionId(existingInQueue.clientSessionId)
+    || !isHeartbeatFresh(existingInQueue.lastHeartbeatAt)
+    || new Date(existingInQueue.expiresAt || 0) <= new Date()
+  )) {
+    await ConnectionQueue.deleteOne({ _id: existingInQueue._id, status: 'waiting' });
+    existingInQueue = null;
+  }
+  if (existingInQueue && existingInQueue.clientSessionId !== clientSessionId) {
+    throw createHttpError(409, {
+      success: false,
+      code: 'RANDOM_CONNECT_ACTIVE_ELSEWHERE',
+      message: 'Random Connect is already searching on another device or browser tab.'
+    });
+  }
 
   if (existingInQueue) {
     if (process.env.NODE_ENV === 'development') { console.log(`User ${userId} already in queue, updating preferences`); }
@@ -534,6 +713,10 @@ const queueAndTryMatch = async ({
     existingInQueue.videoEnabled = videoEnabled;
     existingInQueue.gender = userGender;
     existingInQueue.preferredGender = queuePreferredGender;
+    existingInQueue.clientSessionId = clientSessionId;
+    existingInQueue.clientPlatform = normalizeClientPlatform(clientPlatform);
+    existingInQueue.lastHeartbeatAt = new Date();
+    existingInQueue.expiresAt = heartbeatExpiry();
     existingInQueue.updatedAt = new Date();
     await existingInQueue.save();
   } else {
@@ -546,13 +729,28 @@ const queueAndTryMatch = async ({
         selectedGame: selectedGame || null,
         tags: normalizedTags,
         videoEnabled,
+        clientSessionId,
+        clientPlatform: normalizeClientPlatform(clientPlatform),
+        lastHeartbeatAt: new Date(),
+        expiresAt: heartbeatExpiry(),
         gender: userGender,
         preferredGender: queuePreferredGender
       });
     } catch (error) {
       if (error?.code !== 11000) throw error;
-      await ConnectionQueue.updateOne(
-        { userId, status: 'waiting' },
+      const now = new Date();
+      const recoveredEntry = await ConnectionQueue.findOneAndUpdate(
+        {
+          userId,
+          status: 'waiting',
+          $or: [
+            { clientSessionId },
+            { clientSessionId: { $in: ['', null] } },
+            { lastHeartbeatAt: null },
+            { lastHeartbeatAt: { $lt: heartbeatCutoff(now.getTime()) } },
+            { expiresAt: { $lte: now } }
+          ]
+        },
         {
           $set: {
             username: user.username,
@@ -561,18 +759,40 @@ const queueAndTryMatch = async ({
             selectedGame: selectedGame || null,
             tags: normalizedTags,
             videoEnabled,
+            clientSessionId,
+            clientPlatform: normalizeClientPlatform(clientPlatform),
+            lastHeartbeatAt: now,
+            expiresAt: heartbeatExpiry(now.getTime()),
             gender: userGender,
             preferredGender: queuePreferredGender,
             updatedAt: new Date()
           }
         },
-        { upsert: true }
+        { new: true }
       );
+      if (!recoveredEntry) {
+        throw createHttpError(409, {
+          success: false,
+          code: 'RANDOM_CONNECT_ACTIVE_ELSEWHERE',
+          message: 'Random Connect is already searching on another device or browser tab.'
+        });
+      }
     }
     if (process.env.NODE_ENV === 'development') { console.log(`User ${userId} added to queue`); }
   }
 
-  const currentEntry = await ConnectionQueue.findOne({ userId, status: 'waiting' }).lean();
+  const currentEntry = await ConnectionQueue.findOne({
+    userId,
+    clientSessionId,
+    status: 'waiting'
+  }).lean();
+  if (!currentEntry) {
+    throw createHttpError(409, {
+      success: false,
+      code: 'RANDOM_CONNECT_SESSION_OWNERSHIP_LOST',
+      message: 'This client no longer owns the Random Connect search session.'
+    });
+  }
   logMatchDebug('Random Connect queue registration stored', {
     userId: String(userId),
     queueEntryId: String(currentEntry?._id || ''),
@@ -609,7 +829,7 @@ const queueAndTryMatch = async ({
       work: async ({ leases, assertLeases }) => {
         assertLease();
         assertLeases();
-        const claimed = await claimWaitingPair(userId, match.userId);
+        const claimed = await claimWaitingPair(currentEntry, match);
         if (!claimed) {
           return { response: {
             success: true,
@@ -633,6 +853,9 @@ const queueAndTryMatch = async ({
               displayName: user.profile?.displayName,
               avatar: user.profile?.avatar,
               videoEnabled,
+              clientSessionId,
+              clientPlatform: normalizeClientPlatform(clientPlatform),
+              lastHeartbeatAt: currentEntry?.lastHeartbeatAt || new Date(),
               preferredGender: queuePreferredGender
             },
             user2: match,
@@ -646,7 +869,7 @@ const queueAndTryMatch = async ({
           return { connection };
         } catch (error) {
           if (!error?.commitOutcomeUnknown) {
-            await recoverClaimedPair(userId, match.userId, error?.userId);
+            await recoverClaimedPair(currentEntry, match, error?.userId);
           }
           if (error?.commitOutcomeUnknown) throw error;
           if (error?.status && String(error.userId || '') === String(userId)) {
@@ -693,7 +916,7 @@ const queueAndTryMatch = async ({
   const connectionData = buildConnectionPayload(connection);
 
   if (process.env.NODE_ENV === 'development') { console.log('📤 Delivering connection-matched events to both users...'); }
-  await emitConnectionMatched(io, userIdStr, matchUserIdStr, connectionData, connection.roomId);
+  await emitConnectionMatched(io, connection, connectionData);
 
   return {
     success: true,
@@ -709,6 +932,7 @@ const queueAndTryMatch = async ({
 const joinQueue = async (req, res) => {
   setEntitlementNoStore(res);
   try {
+    const clientSessionId = requireClientSessionId(req);
     const result = await withRandomConnectAdmission({
       userId: req.user._id,
       operation: 'join',
@@ -717,6 +941,8 @@ const joinQueue = async (req, res) => {
         body: req.body,
         io: getIo(req),
         source: requestSource(req),
+        clientSessionId,
+        clientPlatform: clientPlatformFromRequest(req),
         admissionLease: lease,
         assertLease
       })
@@ -838,6 +1064,9 @@ const findMatch = async (userId, selectedGame, tags = [], options = {}) => {
     const query = {
       userId: { $ne: userId },
       status: 'waiting',
+      clientSessionId: { $ne: '' },
+      lastHeartbeatAt: { $gte: heartbeatCutoff() },
+      expiresAt: { $gt: new Date() },
       $and: [buildCompatiblePreferenceQuery(normalizedCurrentEntry.gender)]
     };
 
@@ -932,6 +1161,9 @@ const findMatch = async (userId, selectedGame, tags = [], options = {}) => {
         displayName: match.displayName,
         avatar: match.avatar,
         videoEnabled: match.videoEnabled,
+        clientSessionId: match.clientSessionId,
+        clientPlatform: match.clientPlatform || '',
+        lastHeartbeatAt: match.lastHeartbeatAt,
         tags: match.tags || [],
         selectedGame: match.selectedGame,
         gender: normalizeMatchmakingGender(match.gender),
@@ -949,35 +1181,68 @@ const findMatch = async (userId, selectedGame, tags = [], options = {}) => {
   }
 };
 
-const claimWaitingPair = async (userId1, userId2) => {
+const claimWaitingPair = async (entry1, entry2) => {
+  const now = new Date();
+  const cutoff = heartbeatCutoff(now.getTime());
+  const userId1 = entry1?.userId;
+  const userId2 = entry2?.userId;
+  const sessionId1 = normalizeClientSessionId(entry1?.clientSessionId);
+  const sessionId2 = normalizeClientSessionId(entry2?.clientSessionId);
+  if (!userId1 || !userId2 || !sessionId1 || !sessionId2) return false;
   const firstClaim = await ConnectionQueue.updateOne(
-    { userId: userId1, status: 'waiting' },
+    {
+      userId: userId1,
+      clientSessionId: sessionId1,
+      status: 'waiting',
+      lastHeartbeatAt: { $gte: cutoff },
+      expiresAt: { $gt: now }
+    },
     { $set: { status: 'matched', updatedAt: new Date() } }
   );
   if (firstClaim.modifiedCount !== 1) return false;
 
   const secondClaim = await ConnectionQueue.updateOne(
-    { userId: userId2, status: 'waiting' },
+    {
+      userId: userId2,
+      clientSessionId: sessionId2,
+      status: 'waiting',
+      lastHeartbeatAt: { $gte: cutoff },
+      expiresAt: { $gt: now }
+    },
     { $set: { status: 'matched', updatedAt: new Date() } }
   );
   if (secondClaim.modifiedCount !== 1) {
-    await ConnectionQueue.updateOne({ userId: userId1, status: 'matched' }, { $set: { status: 'waiting' } });
+    await ConnectionQueue.updateOne(
+      { userId: userId1, clientSessionId: sessionId1, status: 'matched', expiresAt: { $gt: now } },
+      { $set: { status: 'waiting' } }
+    );
     return false;
   }
 
   return true;
 };
 
-const recoverClaimedPair = async (userId1, userId2, blockedUserId) => {
+const recoverClaimedPair = async (entry1, entry2, blockedUserId) => {
   const blocked = String(blockedUserId || '');
-  await Promise.all([userId1, userId2].map((userId) => (
+  await Promise.all([entry1, entry2].map((entry) => {
+    const userId = entry?.userId;
+    const clientSessionId = normalizeClientSessionId(entry?.clientSessionId);
+    if (!userId || !clientSessionId) return Promise.resolve();
+    return (
     blocked && String(userId) === blocked
-      ? ConnectionQueue.deleteMany({ userId, status: 'matched' })
+      ? ConnectionQueue.deleteMany({ userId, clientSessionId, status: 'matched' })
       : ConnectionQueue.updateOne(
-        { userId, status: 'matched' },
+        {
+          userId,
+          clientSessionId,
+          status: 'matched',
+          lastHeartbeatAt: { $gte: heartbeatCutoff() },
+          expiresAt: { $gt: new Date() }
+        },
         { $set: { status: 'waiting', updatedAt: new Date() } }
       )
-  )));
+    );
+  }));
 };
 
 const buildParticipant = (queueLikeUser, dbUser, videoEnabled, entitlement) => {
@@ -989,7 +1254,13 @@ const buildParticipant = (queueLikeUser, dbUser, videoEnabled, entitlement) => {
     avatar: queueLikeUser.avatar || dbUser.profile?.avatar,
     videoEnabled: videoEnabled !== undefined ? videoEnabled : queueLikeUser.videoEnabled,
     isPremium: premium.isPremium,
-    membershipTier: premium.plan || premium.membershipTier || 'free'
+    membershipTier: premium.plan || premium.membershipTier || 'free',
+    clientSessionId: normalizeClientSessionId(queueLikeUser.clientSessionId),
+    clientPlatform: normalizeClientPlatform(queueLikeUser.clientPlatform),
+    // Pair claiming verifies both queue leases immediately before this build;
+    // start the matched-session lease at commit time rather than carrying an
+    // almost-expired queue timestamp into the new room.
+    lastHeartbeatAt: new Date()
   };
 };
 
@@ -1089,10 +1360,35 @@ const createConnectionForPair = async ({
     endReason: null
   };
 
+  const assertClaimedQueueLeases = async (session) => {
+    const now = new Date();
+    const clientSessionId1 = normalizeClientSessionId(user1.clientSessionId);
+    const clientSessionId2 = normalizeClientSessionId(user2.clientSessionId);
+    const freshClaims = await ConnectionQueue.countDocuments({
+      status: 'matched',
+      lastHeartbeatAt: { $gte: heartbeatCutoff(now.getTime()) },
+      expiresAt: { $gt: now },
+      $or: [
+        { userId: user1Id, clientSessionId: clientSessionId1 },
+        { userId: user2Id, clientSessionId: clientSessionId2 }
+      ]
+    }).session(session);
+    if (freshClaims !== 2) {
+      const error = new Error('A Random Connect participant is no longer available');
+      error.status = 409;
+      error.code = 'RANDOM_CONNECT_PARTICIPANT_OFFLINE';
+      throw error;
+    }
+  };
+
   const connection = await commitRandomConnectMatch({
     leases: admissionLeases,
     userIds: [user1Id, user2Id],
     reserveQuota: async (session) => {
+      // Fence liveness in the same transaction that publishes the match. A
+      // process pause after the earlier pair claim must not turn expired queue
+      // rows into a durable connection.
+      await assertClaimedQueueLeases(session);
       // Each callback retry receives the same roomId. $addToSet plus the
       // transaction rollback makes reservations both atomic and idempotent.
       for (const filteredUserId of genderFilterUserIds) {
@@ -1134,6 +1430,7 @@ const createConnectionForPair = async ({
 const matchUsersFromQueue = async (io) => {
   try {
     await syncExpiredSessions(io);
+    await syncStaleRandomConnectState(io);
     await ConnectionQueue.deleteMany({
       $or: [
         { expiresAt: { $lte: new Date() } },
@@ -1142,7 +1439,12 @@ const matchUsersFromQueue = async (io) => {
     });
 
     // Get all waiting users
-    const waitingUsers = await ConnectionQueue.find({ status: 'waiting' })
+    const waitingUsers = await ConnectionQueue.find({
+      status: 'waiting',
+      clientSessionId: { $ne: '' },
+      lastHeartbeatAt: { $gte: heartbeatCutoff() },
+      expiresAt: { $gt: new Date() }
+    })
       .sort({ joinedAt: 1, createdAt: 1 })
       .limit(MATCH_BATCH_LIMIT)
       .lean();
@@ -1180,7 +1482,7 @@ const matchUsersFromQueue = async (io) => {
             operation: 'join',
             work: async ({ leases, assertLeases }) => {
               assertLeases();
-              const claimed = await claimWaitingPair(user1.userId, match.userId);
+              const claimed = await claimWaitingPair(user1, match);
               if (!claimed) return;
 
               const genderFilterUserIds = buildGenderFilterUserIds(user1, match);
@@ -1199,7 +1501,7 @@ const matchUsersFromQueue = async (io) => {
                 });
               } catch (error) {
                 if (!error?.commitOutcomeUnknown) {
-                  await recoverClaimedPair(user1.userId, match.userId, error?.userId);
+                  await recoverClaimedPair(user1, match, error?.userId);
                 }
                 if (error?.status) return;
                 throw error;
@@ -1208,14 +1510,12 @@ const matchUsersFromQueue = async (io) => {
               if (process.env.NODE_ENV === 'development') {
                 console.log(`✅ Periodic match: Created connection ${connection.roomId} for users ${user1.userId} <-> ${match.userId}`);
               }
-              const userId1Str = user1.userId.toString();
-              const userId2Str = match.userId.toString();
               const connectionData = buildConnectionPayload(connection);
 
-              await emitConnectionMatched(io, userId1Str, userId2Str, connectionData, connection.roomId);
+              await emitConnectionMatched(io, connection, connectionData);
 
-              processedUserIds.add(userId1Str);
-              processedUserIds.add(userId2Str);
+              processedUserIds.add(user1.userId.toString());
+              processedUserIds.add(match.userId.toString());
             }
           });
         } catch (error) {
@@ -1233,59 +1533,32 @@ const matchUsersFromQueue = async (io) => {
   }
 };
 
-const notifyRandomConnectMatch = async (userIds, connectionData, roomId) => {
-  const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
-  const recipients = Array.from(new Set((userIds || []).map(String).filter(Boolean)));
-  await Promise.all(recipients.map(async (recipientId) => {
-    const partner = (connectionData?.participants || []).find((participant) => String(participant.userId) !== String(recipientId));
-    await createAndEmitNotification({
-      recipient: recipientId,
-      type: 'call',
-      title: 'Random Connect match ready',
-      message: partner?.displayName || partner?.username
-        ? `You matched with ${partner.displayName || partner.username}. Tap to join.`
-        : 'Your Random Connect match is ready. Tap to join.',
-      data: {
-        deepLink: '/random-connect',
-        customData: {
-          eventType: 'random_connect_match',
-          notificationDedupeKey: `random-connect-match:${roomId}`,
-          pushRequestId: `random-connect-match:${roomId}`,
-          deepLinkType: 'random_connect',
-          roomId,
-          randomConnectionRoomId: roomId,
-          expiresAt,
-          pushOptions: {
-            ttl: 120,
-            priority: 'high',
-            collapseKey: `random-connect-${roomId}`
-          }
-        }
-      }
-    });
-  }));
-};
-
-// One adapter-backed room emit is sufficient for connected installations.
-// Offline/background installations receive the durable notification fallback,
-// and clients can hydrate the saved session through current-connection.
-const emitConnectionMatched = async (io, userId1Str, userId2Str, connectionData, roomId) => {
+// Match delivery is realtime-only and scoped to the client session that joined
+// the queue. Never emit to the account-wide user room: another logged-in
+// device/tab must not consume or resurrect this match, and no notification row
+// or push fallback is created when that owner is offline.
+const emitConnectionMatched = async (io, connection, connectionData) => {
   try {
-    if (io) {
-      io.to(`user-${userId1Str}`).emit('connection-matched', connectionData);
-      io.to(`user-${userId2Str}`).emit('connection-matched', connectionData);
-    }
-    await notifyRandomConnectMatch([userId1Str, userId2Str], connectionData, roomId);
+    if (!io || !connection) return;
+    (connection.participants || []).forEach((participant) => {
+      const participantId = getUserIdString(participant.userId);
+      const clientSessionId = normalizeClientSessionId(participant.clientSessionId);
+      if (!participantId || !clientSessionId) return;
+      io.to(randomClientRoom(participantId, clientSessionId)).emit('connection-matched', {
+        ...connectionData,
+        ownerSessionId: clientSessionId
+      });
+    });
   } catch (error) {
     log.error('❌ Error delivering connection-matched event:', { error: String(error) });
   }
 };
 
 // Clean up existing connections for a user
-const cleanupExistingConnections = async (userId, io) => {
+const cleanupExistingConnections = async (userId, io, clientSessionId) => {
   try {
     const activeConnection = await RandomConnection.findOne({
-      'participants.userId': userId,
+      participants: { $elemMatch: { userId, clientSessionId } },
       status: { $in: ['waiting', 'active'] }
     });
 
@@ -1311,7 +1584,7 @@ const cleanupExistingConnections = async (userId, io) => {
         const otherParticipants = activeConnection.participants.filter(p => p.userId.toString() !== userIdStr);
         otherParticipants.forEach(participant => {
           const participantUserIdStr = participant.userId.toString();
-          io.to(`user-${participantUserIdStr}`).emit('partner-disconnected', {
+          io.to(randomClientRoom(participantUserIdStr, participant.clientSessionId)).emit('partner-disconnected', {
             roomId: activeConnection.roomId,
             disconnectedUserId: userIdStr,
             reason: 'User left'
@@ -1321,7 +1594,7 @@ const cleanupExistingConnections = async (userId, io) => {
     }
 
     // Remove user from any existing queue entries
-    await ConnectionQueue.deleteMany({ userId });
+    await ConnectionQueue.deleteMany({ userId, clientSessionId });
     
   } catch (error) {
     log.error('Cleanup existing connections error:', { error: String(error) });
@@ -1333,11 +1606,13 @@ const cleanupExistingConnections = async (userId, io) => {
 const leaveQueueUnlocked = async (req, res) => {
   try {
     const userId = req.user._id;
+    const clientSessionId = requireClientSessionId(req);
 
     if (process.env.NODE_ENV === 'development') { console.log(`User ${userId} leaving queue`);
 }
     const result = await ConnectionQueue.deleteOne({
       userId,
+      clientSessionId,
       status: 'waiting'
     });
 
@@ -1356,6 +1631,7 @@ const leaveQueueUnlocked = async (req, res) => {
     });
 
   } catch (error) {
+    if (error?.status) return res.status(error.status).json(error.payload);
     log.error('Leave queue error:', { error: String(error) });
     res.status(500).json({
       success: false,
@@ -1373,17 +1649,161 @@ const leaveQueue = async (req, res) => runAdmissionProtectedController({
   fallbackMessage: 'Failed to leave queue'
 });
 
-// Get current connection - SIMPLE, return 200 with success:false instead of 404
+const heartbeatRandomConnectSession = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const clientSessionId = requireClientSessionId(req);
+    const now = new Date();
+    const queueEntry = await ConnectionQueue.findOneAndUpdate(
+      {
+        userId,
+        clientSessionId,
+        status: { $in: ['waiting', 'matched'] },
+        lastHeartbeatAt: { $gte: heartbeatCutoff(now.getTime()) },
+        expiresAt: { $gt: now }
+      },
+      { $set: { lastHeartbeatAt: now, expiresAt: heartbeatExpiry(now.getTime()) } },
+      { new: true }
+    );
+    if (queueEntry) {
+      return res.status(200).json({
+        success: true,
+        state: 'waiting',
+        clientSessionId,
+        expiresAt: queueEntry.expiresAt,
+        serverTime: now
+      });
+    }
+
+    const ownedConnection = await RandomConnection.findOneAndUpdate(
+      {
+        status: { $in: ACTIVE_SESSION_STATUSES },
+        participants: {
+          $elemMatch: {
+            userId,
+            clientSessionId,
+            lastHeartbeatAt: { $gte: heartbeatCutoff(now.getTime()) }
+          }
+        }
+      },
+      { $set: { 'participants.$.lastHeartbeatAt': now } },
+      { new: true }
+    );
+    if (ownedConnection) {
+      return res.status(200).json({
+        success: true,
+        state: ownedConnection.status === 'active' ? 'matched' : 'waiting',
+        clientSessionId,
+        connection: buildConnectionPayload(ownedConnection),
+        serverTime: now
+      });
+    }
+
+    const staleOwnedConnection = await RandomConnection.findOne({
+      'participants.userId': userId,
+      status: { $in: ACTIVE_SESSION_STATUSES },
+      participants: { $elemMatch: { userId, clientSessionId } }
+    });
+    if (staleOwnedConnection) {
+      await expireRandomConnectConnection(staleOwnedConnection, getIo(req), 'heartbeat_timeout');
+    }
+    await ConnectionQueue.deleteMany({ userId, clientSessionId, status: { $in: ['waiting', 'matched'] } });
+
+    const activeElsewhere = await RandomConnection.exists({
+      status: { $in: ACTIVE_SESSION_STATUSES },
+      participants: {
+        $elemMatch: {
+          userId,
+          clientSessionId: { $nin: ['', null] },
+          lastHeartbeatAt: { $gte: heartbeatCutoff() }
+        }
+      }
+    }) || await ConnectionQueue.exists({
+      userId,
+      status: { $in: ['waiting', 'matched'] },
+      clientSessionId: { $nin: ['', null] },
+      lastHeartbeatAt: { $gte: heartbeatCutoff() },
+      expiresAt: { $gt: new Date() }
+    });
+    if (activeElsewhere) {
+      return res.status(409).json({
+        success: false,
+        code: 'RANDOM_CONNECT_ACTIVE_ELSEWHERE',
+        message: 'Random Connect is active on another device or browser tab.'
+      });
+    }
+    return res.status(410).json({
+      success: false,
+      code: 'RANDOM_CONNECT_SESSION_EXPIRED',
+      message: 'This Random Connect session is no longer active.'
+    });
+  } catch (error) {
+    if (error?.status) return res.status(error.status).json(error.payload);
+    log.error('Random Connect heartbeat error', { error: String(error) });
+    return res.status(500).json({ success: false, message: 'Failed to refresh Random Connect session.' });
+  }
+};
+
+// Restore only the exact live client session that owns the match. Account-wide
+// restoration caused Web and App to hydrate and mutate each other's rooms.
 const getCurrentConnection = async (req, res) => {
   try {
     const userId = req.user._id;
+    const clientSessionId = requireClientSessionId(req);
 
-    const connection = await RandomConnection.findOne({
-      'participants.userId': userId,
+    let connection = await RandomConnection.findOne({
+      participants: { $elemMatch: { userId, clientSessionId } },
       status: { $in: ['waiting', 'active'] }
     }).populate('participants.userId', 'username profile.displayName profile.avatar');
 
+    if (connection) {
+      const owner = getOwnedParticipant(connection, userId, clientSessionId);
+      if (!owner || !isHeartbeatFresh(owner.lastHeartbeatAt)) {
+        await expireRandomConnectConnection(connection, getIo(req), 'heartbeat_timeout');
+        connection = null;
+      }
+    }
+
     if (!connection) {
+      const ownedQueueEntry = await ConnectionQueue.findOne({
+        userId,
+        clientSessionId,
+        status: { $in: ['waiting', 'matched'] },
+        lastHeartbeatAt: { $gte: heartbeatCutoff() },
+        expiresAt: { $gt: new Date() }
+      });
+      if (ownedQueueEntry) {
+        return res.status(200).json({
+          success: true,
+          state: 'waiting',
+          clientSessionId,
+          expiresAt: ownedQueueEntry.expiresAt
+        });
+      }
+      await ConnectionQueue.deleteMany({ userId, clientSessionId, status: { $in: ['waiting', 'matched'] } });
+      const activeElsewhere = await RandomConnection.exists({
+        status: { $in: ACTIVE_SESSION_STATUSES },
+        participants: {
+          $elemMatch: {
+            userId,
+            clientSessionId: { $nin: ['', null] },
+            lastHeartbeatAt: { $gte: heartbeatCutoff() }
+          }
+        }
+      }) || await ConnectionQueue.exists({
+        userId,
+        status: { $in: ['waiting', 'matched'] },
+        clientSessionId: { $nin: ['', null] },
+        lastHeartbeatAt: { $gte: heartbeatCutoff() },
+        expiresAt: { $gt: new Date() }
+      });
+      if (activeElsewhere) {
+        return res.status(409).json({
+          success: false,
+          code: 'RANDOM_CONNECT_ACTIVE_ELSEWHERE',
+          message: 'Random Connect is active on another device or browser tab.'
+        });
+      }
       return res.status(200).json({
         success: false,
         message: 'No active connection found'
@@ -1399,8 +1819,9 @@ const getCurrentConnection = async (req, res) => {
     });
 
   } catch (error) {
+    if (error?.status) return res.status(error.status).json(error.payload);
     log.error('Get current connection error:', { error: String(error) });
-    res.status(200).json({
+    res.status(500).json({
       success: false,
       message: 'Failed to get current connection',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -1412,13 +1833,14 @@ const getCurrentConnection = async (req, res) => {
 const disconnectConnectionUnlocked = async (req, res) => {
   try {
     const userId = req.user._id;
+    const clientSessionId = requireClientSessionId(req);
     const { roomId } = req.body;
 
     if (process.env.NODE_ENV === 'development') { console.log(`User ${userId} disconnecting from room ${roomId}`);
 }
     const connection = await RandomConnection.findOne({
       roomId,
-      'participants.userId': userId,
+      participants: { $elemMatch: { userId, clientSessionId } },
       status: { $in: ['waiting', 'active'] }
     });
 
@@ -1450,7 +1872,7 @@ const disconnectConnectionUnlocked = async (req, res) => {
       const otherParticipants = connection.participants.filter(p => p.userId.toString() !== userIdStr);
       otherParticipants.forEach(participant => {
         const participantUserIdStr = participant.userId.toString();
-        io.to(`user-${participantUserIdStr}`).emit('partner-disconnected', {
+        io.to(randomClientRoom(participantUserIdStr, participant.clientSessionId)).emit('partner-disconnected', {
           roomId,
           disconnectedUserId: userIdStr,
           reason: 'User disconnected'
@@ -1469,6 +1891,7 @@ const disconnectConnectionUnlocked = async (req, res) => {
     });
 
   } catch (error) {
+    if (error?.status) return res.status(error.status).json(error.payload);
     log.error('Disconnect error:', { error: String(error) });
     res.status(500).json({
       success: false,
@@ -1486,12 +1909,12 @@ const disconnectConnection = async (req, res) => runAdmissionProtectedController
   fallbackMessage: 'Failed to disconnect'
 });
 
-const endConnectionForNext = async ({ userId, roomId, io }) => {
+const endConnectionForNext = async ({ userId, clientSessionId, roomId, io }) => {
   if (!roomId) return null;
 
   const connection = await RandomConnection.findOne({
     roomId,
-    'participants.userId': userId,
+    participants: { $elemMatch: { userId, clientSessionId } },
     status: { $in: ['waiting', 'active'] }
   });
 
@@ -1515,7 +1938,7 @@ const endConnectionForNext = async ({ userId, roomId, io }) => {
     const otherParticipants = connection.participants.filter(p => p.userId.toString() !== userIdStr);
     otherParticipants.forEach(participant => {
       const participantUserIdStr = participant.userId.toString();
-      io.to(`user-${participantUserIdStr}`).emit('partner-disconnected', {
+      io.to(randomClientRoom(participantUserIdStr, participant.clientSessionId)).emit('partner-disconnected', {
         roomId: connection.roomId,
         disconnectedUserId: userIdStr,
         reason: 'next',
@@ -1538,6 +1961,7 @@ const nextConnection = async (req, res) => {
   setEntitlementNoStore(res);
   try {
     const userId = req.user._id;
+    const clientSessionId = requireClientSessionId(req);
     const { roomId } = req.body;
     const io = getIo(req);
 
@@ -1546,7 +1970,7 @@ const nextConnection = async (req, res) => {
       operation: 'next',
       work: async ({ lease, assertLease }) => {
         const current = await RandomConnection.findOne({
-          'participants.userId': userId,
+          participants: { $elemMatch: { userId, clientSessionId } },
           status: { $in: ACTIVE_SESSION_STATUSES }
         });
 
@@ -1558,6 +1982,8 @@ const nextConnection = async (req, res) => {
             body: req.body,
             io,
             source: requestSource(req),
+            clientSessionId,
+            clientPlatform: clientPlatformFromRequest(req),
             admissionLease: lease,
             assertLease
           });
@@ -1571,14 +1997,33 @@ const nextConnection = async (req, res) => {
         }
 
         assertLease();
-        const endedConnection = await endConnectionForNext({ userId, roomId, io });
-        await ConnectionQueue.deleteMany({ userId });
+        const activeElsewhere = !current && await RandomConnection.exists({
+          status: { $in: ACTIVE_SESSION_STATUSES },
+          participants: {
+            $elemMatch: {
+              userId,
+              clientSessionId: { $nin: ['', null] },
+              lastHeartbeatAt: { $gte: heartbeatCutoff() }
+            }
+          }
+        });
+        if (activeElsewhere) {
+          throw createHttpError(409, {
+            success: false,
+            code: 'RANDOM_CONNECT_ACTIVE_ELSEWHERE',
+            message: 'Random Connect is active on another device or browser tab.'
+          });
+        }
+        const endedConnection = await endConnectionForNext({ userId, clientSessionId, roomId, io });
+        await ConnectionQueue.deleteMany({ userId, clientSessionId });
         assertLease();
         const result = await queueAndTryMatch({
           user: req.user,
           body: req.body,
           io,
           source: requestSource(req),
+          clientSessionId,
+          clientPlatform: clientPlatformFromRequest(req),
           admissionLease: lease,
           assertLease
         });
@@ -1610,6 +2055,7 @@ const nextConnection = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const userId = req.user._id;
+    const clientSessionId = requireClientSessionId(req);
     const { roomId, message } = req.body;
 
     if (!message || !roomId) {
@@ -1621,7 +2067,7 @@ const sendMessage = async (req, res) => {
 
     const connection = await RandomConnection.findOne({
       roomId,
-      'participants.userId': userId,
+      participants: { $elemMatch: { userId, clientSessionId } },
       status: { $in: ['waiting', 'active'] }
     });
 
@@ -1656,27 +2102,16 @@ const sendMessage = async (req, res) => {
         timestamp: new Date()
       };
 
-      // Method 1: Emit to user rooms (primary)
+      // Session traffic is delivered only to the owning client and the
+      // authenticated Random Connect room, never the account-wide user room.
       otherParticipants.forEach(participant => {
         const participantUserIdStr = getParticipantId(participant);
-        io.to(`user-${participantUserIdStr}`).emit('random-connection-message', messageData);
-        if (process.env.NODE_ENV === 'development') { console.log(`📤 Message emitted to user-${participantUserIdStr}`);}
+        io.to(randomClientRoom(participantUserIdStr, participant.clientSessionId)).emit('random-connection-message', messageData);
       });
 
-      // Method 2: Emit to random room (backup)
       io.to(`random-room-${roomIdStr}`).emit('random-connection-message', messageData);
       if (process.env.NODE_ENV === 'development') { console.log(`📤 Message emitted to random-room-${roomIdStr}`);
 }
-      // Method 3: Direct socket emit (fallback)
-      const allSockets = Array.from(io.sockets.sockets.values());
-      otherParticipants.forEach(participant => {
-        const participantUserIdStr = getParticipantId(participant);
-        const userSockets = allSockets.filter(s => String(s.authUser?.userId ?? '') === participantUserIdStr);
-        userSockets.forEach(sock => {
-          sock.emit('random-connection-message', messageData);
-          if (process.env.NODE_ENV === 'development') { console.log(`📤 Direct message emit to socket ${sock.id}`);}
-        });
-      });
     }
 
     res.status(200).json({
@@ -1685,6 +2120,7 @@ const sendMessage = async (req, res) => {
     });
 
   } catch (error) {
+    if (error?.status) return res.status(error.status).json(error.payload);
     log.error('Send message error:', { error: String(error) });
     res.status(500).json({
       success: false,
@@ -1698,10 +2134,11 @@ const sendMessage = async (req, res) => {
 const cleanupCurrentConnectionUnlocked = async (req, res) => {
   try {
     const userId = req.user._id;
+    const clientSessionId = requireClientSessionId(req);
     if (process.env.NODE_ENV === 'development') { console.log(`Cleaning up current connection for user ${userId}`);
 }
     const activeConnection = await RandomConnection.findOne({
-      'participants.userId': userId,
+      participants: { $elemMatch: { userId, clientSessionId } },
       status: { $in: ['waiting', 'active'] }
     });
 
@@ -1728,7 +2165,7 @@ const cleanupCurrentConnectionUnlocked = async (req, res) => {
         const otherParticipants = activeConnection.participants.filter(p => p.userId.toString() !== userIdStr);
         otherParticipants.forEach(participant => {
           const participantUserIdStr = participant.userId.toString();
-          io.to(`user-${participantUserIdStr}`).emit('partner-disconnected', {
+          io.to(randomClientRoom(participantUserIdStr, participant.clientSessionId)).emit('partner-disconnected', {
             roomId: activeConnection.roomId,
             disconnectedUserId: userIdStr,
             reason: 'User left'
@@ -1745,7 +2182,7 @@ const cleanupCurrentConnectionUnlocked = async (req, res) => {
     }
 
     // Remove user from any queue
-    await ConnectionQueue.deleteMany({ userId });
+    await ConnectionQueue.deleteMany({ userId, clientSessionId });
 
     res.status(200).json({
       success: true,
@@ -1753,6 +2190,7 @@ const cleanupCurrentConnectionUnlocked = async (req, res) => {
     });
 
   } catch (error) {
+    if (error?.status) return res.status(error.status).json(error.payload);
     log.error('Cleanup current connection error:', { error: String(error) });
     res.status(500).json({
       success: false,
@@ -1777,9 +2215,10 @@ const getActiveSessions = async (req, res) => {
   setEntitlementNoStore(res);
   try {
     const requesterId = String(req.user._id);
+    const clientSessionId = requireClientSessionId(req);
     const sessions = await RandomConnection.find({
       status: 'active',
-      'participants.userId': req.user._id
+      participants: { $elemMatch: { userId: req.user._id, clientSessionId } }
     })
       .select('roomId startTime connectedAt expiresAt durationLimitSeconds participants.userId participants.username participants.displayName tags matchQuality matchedTags')
       .lean();
@@ -1807,6 +2246,7 @@ const getActiveSessions = async (req, res) => {
       count: list.length
     });
   } catch (error) {
+    if (error?.status) return res.status(error.status).json(error.payload);
     log.error('Get active sessions error:', { error: String(error) });
     res.status(500).json({
       success: false,
@@ -1863,6 +2303,7 @@ module.exports = {
   joinQueue,
   leaveQueue,
   getCurrentConnection,
+  heartbeatRandomConnectSession,
   getActiveSessions,
   getRandomConnectEntitlements,
   getDailyGenderMatchesRemaining,
@@ -1874,6 +2315,7 @@ module.exports = {
   markSessionReady,
   getSessionTimerState,
   syncExpiredSessions,
+  syncStaleRandomConnectState,
   _private: {
     normalizeTags,
     sanitizePreferredGender,
@@ -1889,6 +2331,11 @@ module.exports = {
     buildGenderFilterUserIds,
     canPrivacyMatchUsers,
     cleanupCommittedPairQueue,
-    getEntitlementStatus
+    getEntitlementStatus,
+    normalizeClientSessionId,
+    randomClientRoom,
+    isHeartbeatFresh,
+    getOwnedParticipant,
+    RANDOM_CONNECT_HEARTBEAT_TTL_MS
   }
 };

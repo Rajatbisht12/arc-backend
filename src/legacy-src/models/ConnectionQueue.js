@@ -10,6 +10,23 @@ const connectionQueueSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  // A Random Connect lease belongs to the explicit client session that created
+  // it, not to every browser/app logged into the same account. Older rows are
+  // intentionally allowed to load so the server sweeper can expire them.
+  clientSessionId: {
+    type: String,
+    default: '',
+    maxlength: 128
+  },
+  clientPlatform: {
+    type: String,
+    enum: ['', 'web', 'android', 'ios'],
+    default: ''
+  },
+  lastHeartbeatAt: {
+    type: Date,
+    default: null
+  },
   username: String,
   displayName: String,
   avatar: String,
@@ -57,7 +74,7 @@ const connectionQueueSchema = new mongoose.Schema({
   },
   expiresAt: {
     type: Date,
-    default: () => new Date(Date.now() + 30 * 60 * 1000) // 30 minutes
+    default: () => new Date(Date.now() + 60 * 1000)
   }
 }, {
   timestamps: true
@@ -74,6 +91,8 @@ connectionQueueSchema.index({ status: 1, tags: 1 }); // For tag-based matching
 connectionQueueSchema.index({ status: 1, selectedGame: 1, tags: 1 }); // Combined matching
 connectionQueueSchema.index({ status: 1, joinedAt: 1 });
 connectionQueueSchema.index({ status: 1, gender: 1, joinedAt: 1 });
+connectionQueueSchema.index({ status: 1, lastHeartbeatAt: 1, expiresAt: 1 });
+connectionQueueSchema.index({ userId: 1, clientSessionId: 1, status: 1 });
 
 // TTL index to automatically remove expired entries
 connectionQueueSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });

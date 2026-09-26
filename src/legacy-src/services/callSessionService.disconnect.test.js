@@ -24,6 +24,8 @@ endAcceptedCallSessionsForUser('507f1f77bcf86cd799439011')
     assert.equal(capturedFilter.status, 'accepted');
     assert.equal(Object.hasOwn(capturedFilter, 'expiresAt'), false);
     assert.equal(JSON.stringify(capturedFilter).includes('ringing'), false);
+    assert.deepEqual(capturedFilter.source, { $ne: 'random_connect' });
+    assert.deepEqual(capturedFilter.randomRoomId, { $in: ['', null] });
     assert.deepEqual(capturedFilter.$or, [
       { caller: '507f1f77bcf86cd799439011' },
       { callee: '507f1f77bcf86cd799439011' }
