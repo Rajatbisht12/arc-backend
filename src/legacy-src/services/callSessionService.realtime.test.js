@@ -48,6 +48,21 @@ try {
     .filter(({ event }) => event === 'call-end')
     .every(({ payload }) => payload.reason === 'max_duration'));
 
+  emissions.length = 0;
+  emitTerminalCallSession({
+    ...session,
+    source: 'random_connect',
+    randomRoomId: 'owned-random-room',
+    status: 'ended',
+    endReason: 'user_left'
+  });
+  assert.deepEqual(
+    [...new Set(emissions.map(({ room }) => room))],
+    ['random-room-owned-random-room'],
+    'Random Connect terminal state must not fan out to account-wide user rooms'
+  );
+  assert.deepEqual(emissions.map(({ event }) => event), ['call-end', 'call-session-updated']);
+
   console.log('Call-session realtime terminal event tests passed');
 } finally {
   if (previousIo === undefined) delete global._arcSocketIO;

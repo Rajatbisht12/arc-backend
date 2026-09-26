@@ -237,7 +237,7 @@ const claimAttempt = (id) => CallVoipPushAttempt.findOneAndUpdate(
 );
 
 const enqueueTerminalIncomingFallback = async (attempt) => {
-  if (attempt?.payload?.eventType === 'call_state_update') return;
+  if (attempt?.payload?.eventType === 'call_state_update' || attempt?.payload?.randomRoomId) return;
   const device = await PushDevice.findOne({
     user: attempt.recipient,
     installationId: attempt.installationId,
@@ -269,7 +269,26 @@ const enqueueTerminalIncomingFallback = async (attempt) => {
 const processVoipAttempt = async (attemptId) => {
   const attempt = await claimAttempt(attemptId);
   if (!attempt) return null;
-  const session = await CallSession.findById(attempt.callSession).select('status expiresAt').lean();
+  const session = await CallSession.findById(attempt.callSession)
+    .select('status expiresAt source randomRoomId')
+    .lean();
+  if (session?.source === 'random_connect' || String(session?.randomRoomId || '').trim() || attempt.payload?.randomRoomId) {
+    await CallVoipPushAttempt.updateOne(
+      { _id: attempt._id, leaseKey: attempt.leaseKey },
+      {
+        $set: {
+          status: 'failed',
+          retryable: false,
+          failedAt: new Date(),
+          errorCode: 'RANDOM_CONNECT_PUSH_DISABLED',
+          errorMessage: 'Random Connect is realtime-only and never sends PushKit notifications'
+        },
+        $unset: { leaseAt: 1, leaseKey: 1, nextAttemptAt: 1 }
+      }
+    );
+    await refreshVoipRequest(attempt.requestKey);
+    return { accepted: false, retryable: false, reason: 'RANDOM_CONNECT_PUSH_DISABLED' };
+  }
   const isStateUpdate = attempt.payload?.eventType === 'call_state_update';
   if (isStateUpdate) {
     // PushKit is reserved for actual incoming calls. iOS 13+ requires every
@@ -427,6 +446,22 @@ const processVoipAttempt = async (attemptId) => {
 
 const sendVoipCallPush = async (recipientId, session, callPayload = {}) => {
   const requestKey = hash(`${session.callId}:${session.nativeCallId}:apns_voip`);
+  if (session?.source === 'random_connect' || String(session?.randomRoomId || '').trim()) {
+    await CallSession.updateOne(
+      { _id: session?._id },
+      {
+        $set: {
+          initialVoipPushStatus: 'completed',
+          initialVoipPushCompletedAt: new Date(),
+          initialVoipPushLastError: 'Random Connect is realtime-only',
+          initialVoipPushNextAttemptAt: null,
+          initialVoipPushLeaseAt: null,
+          initialVoipPushLeaseKey: ''
+        }
+      }
+    ).catch(() => undefined);
+    return { requestKey, submitted: 0, accepted: 0, failed: 0, skipped: 1, reason: 'random_connect_realtime_only' };
+  }
   const [recipient, unreadSummaryResult] = await Promise.all([
     User.findById(recipientId).select('isActive notificationSettings').lean(),
     Notification.aggregate([
@@ -667,6 +702,7 @@ const initialVoipFallbackNotification = (session) => ({
       callerName: String(session.callerSnapshot?.displayName || session.callerSnapshot?.username || 'Someone').slice(0, 120),
       deadlineAt: new Date(session.expiresAt).toISOString(),
       expiresAt: new Date(session.expiresAt).toISOString(),
+      ...(session.randomRoomId ? { randomRoomId: session.randomRoomId } : {}),
       pushRequestId: `incoming-call:${session.callId}`,
       priority: 'high',
       pushOptions: { ttl: 30, priority: 'high', collapseKey: `incoming-call-${session.callId}` }
@@ -676,11 +712,32 @@ const initialVoipFallbackNotification = (session) => ({
 
 const dispatchInitialVoipPush = async (session) => {
   if (!session?._id) return { submitted: 0, reason: 'missing_call_session' };
+  const canonicalSession = await CallSession.findById(session._id)
+    .select('source randomRoomId')
+    .lean();
+  if (canonicalSession?.source === 'random_connect' || String(canonicalSession?.randomRoomId || '').trim()) {
+    await CallSession.updateOne(
+      { _id: session._id },
+      {
+        $set: {
+          initialVoipPushStatus: 'completed',
+          initialVoipPushCompletedAt: new Date(),
+          initialVoipPushLastError: 'Random Connect is realtime-only',
+          initialVoipPushNextAttemptAt: null,
+          initialVoipPushLeaseAt: null,
+          initialVoipPushLeaseKey: ''
+        }
+      }
+    );
+    return { submitted: 0, accepted: 0, failed: 0, skipped: 1, reason: 'random_connect_realtime_only' };
+  }
   const staleLease = new Date(Date.now() - LEASE_MS);
   const leaseKey = `initial-voip-${randomUUID()}`;
   const claimed = await CallSession.findOneAndUpdate(
     {
       _id: session._id,
+      source: { $ne: 'random_connect' },
+      randomRoomId: { $in: ['', null] },
       initialVoipPushAttempts: { $lt: INITIAL_VOIP_OUTBOX_MAX_ATTEMPTS },
       $or: [
         {
@@ -767,6 +824,8 @@ const recoverInitialVoipPushes = async (limit = 200) => {
   const staleLease = new Date(Date.now() - LEASE_MS);
   const now = new Date();
   const exhaustedCandidates = await CallSession.find({
+    source: { $ne: 'random_connect' },
+    randomRoomId: { $in: ['', null] },
     initialVoipPushAttempts: { $gte: INITIAL_VOIP_OUTBOX_MAX_ATTEMPTS },
     $or: [
       {
@@ -780,6 +839,8 @@ const recoverInitialVoipPushes = async (limit = 200) => {
     const terminal = await CallSession.findOneAndUpdate(
       {
         _id: session._id,
+        source: { $ne: 'random_connect' },
+        randomRoomId: { $in: ['', null] },
         initialVoipPushAttempts: { $gte: INITIAL_VOIP_OUTBOX_MAX_ATTEMPTS },
         $or: [
           {
@@ -815,6 +876,8 @@ const recoverInitialVoipPushes = async (limit = 200) => {
     }
   }
   const candidates = await CallSession.find({
+    source: { $ne: 'random_connect' },
+    randomRoomId: { $in: ['', null] },
     initialVoipPushAttempts: { $lt: INITIAL_VOIP_OUTBOX_MAX_ATTEMPTS },
     $or: [
       {
@@ -915,6 +978,14 @@ const recoverInterruptedVoipRequests = async (limit = 200) => {
     const session = terminal.payload?.callId
       ? await CallSession.findOne({ callId: terminal.payload.callId })
       : null;
+    if (session?.source === 'random_connect' || String(session?.randomRoomId || '').trim() || terminal.payload?.randomRoomId) {
+      await skipVoipRequest(
+        terminal.requestKey,
+        'RANDOM_CONNECT_PUSH_DISABLED',
+        'Random Connect is realtime-only and never sends PushKit notifications'
+      );
+      continue;
+    }
     if (!session || session.status !== 'ringing' || new Date(session.expiresAt) <= new Date()) continue;
     await sendExpoFallbackForVoipFailure(
       terminal.recipient,
@@ -954,6 +1025,14 @@ const recoverInterruptedVoipRequests = async (limit = 200) => {
     const session = payload.callId
       ? await CallSession.findOne({ callId: payload.callId })
       : null;
+    if (session?.source === 'random_connect' || String(session?.randomRoomId || '').trim() || payload.randomRoomId) {
+      await skipVoipRequest(
+        request.requestKey,
+        'RANDOM_CONNECT_PUSH_DISABLED',
+        'Random Connect is realtime-only and never sends PushKit notifications'
+      );
+      continue;
+    }
     const stateUpdate = payload.eventType === 'call_state_update';
     if (stateUpdate) {
       await skipVoipRequest(

@@ -254,6 +254,41 @@ const run = async () => {
   assert.equal(outboxCompletions, baselineCount + 3, 'successful submissions must complete their outbox lease');
   existingNotification = null;
 
+  const randomConnectBaseline = {
+    inAppCreates,
+    pushes,
+    emails,
+    outboxClaims
+  };
+  const suppressedRandomConnect = await emitter.createAndEmitNotification({
+    recipient,
+    type: 'call',
+    title: 'Random Connect match ready',
+    message: 'You matched with someone. Tap to join.',
+    data: {
+      customData: {
+        eventType: 'random_connect_match',
+        randomConnectionRoomId: 'room-1',
+        pushRequestId: 'random-connect-match:room-1'
+      }
+    }
+  });
+  assert.equal(suppressedRandomConnect, null);
+  assert.deepEqual(
+    { inAppCreates, pushes, emails, outboxClaims },
+    randomConnectBaseline,
+    'Random Connect must not create an inbox row, outbox claim, push, or email'
+  );
+  const suppressedLegacyRandomCall = await emitter.createAndEmitNotification({
+    recipient,
+    type: 'call',
+    title: 'Incoming video call',
+    message: 'Incoming video call',
+    data: { customData: { eventType: 'incoming_call', randomRoomId: 'room-legacy' } }
+  });
+  assert.equal(suppressedLegacyRandomCall, null);
+  assert.deepEqual({ inAppCreates, pushes, emails, outboxClaims }, randomConnectBaseline);
+
   const emailsBeforePayout = emails;
   const payoutDedupeKey = 'creator-payout-paid:payout-1';
   await emitter.createAndEmitNotification({

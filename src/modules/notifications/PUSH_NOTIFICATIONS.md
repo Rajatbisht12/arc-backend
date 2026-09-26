@@ -119,6 +119,8 @@ delivery is intentionally data-only. Only bounded call fields are copied to
 provider data (`eventType`, `callId`, `nativeCallId`, `roomId`,
 `randomRoomId`, `callType`, `callerId`, `callerName`, `title`, `deadlineAt`,
 and `expiresAt`). Arbitrary native-token or credential data is never copied.
+Random Connect match/call events are realtime-only: producers, the durable
+notification outbox, Expo/FCM delivery, and APNs VoIP delivery all reject them.
 
 Authenticated clients reconcile native call actions through:
 

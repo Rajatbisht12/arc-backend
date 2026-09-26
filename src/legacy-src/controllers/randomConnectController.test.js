@@ -13,7 +13,10 @@ const {
     buildConnectionPayload,
     scoreCandidate,
     buildGenderFilterUserIds,
-    canPrivacyMatchUsers
+    canPrivacyMatchUsers,
+    normalizeClientSessionId,
+    isHeartbeatFresh,
+    randomClientRoom
   }
 } = require('./randomConnectController');
 const RandomConnection = require('../models/RandomConnection');
@@ -60,6 +63,24 @@ const normalizedQueueEntry = new ConnectionQueue({
 });
 assert.strictEqual(normalizedQueueEntry.gender, 'male');
 assert.strictEqual(normalizedQueueEntry.preferredGender, 'female');
+assert.strictEqual(normalizeClientSessionId('web-session-1234567890'), 'web-session-1234567890');
+assert.strictEqual(normalizeClientSessionId('short'), '');
+assert.strictEqual(normalizeClientSessionId('invalid session id with spaces'), '');
+assert.strictEqual(randomClientRoom('user-a', 'web-session-1234567890'), 'random-client-user-a-web-session-1234567890');
+assert.strictEqual(isHeartbeatFresh(new Date()), true);
+assert.strictEqual(isHeartbeatFresh(new Date(0)), false);
+assert(ConnectionQueue.schema.path('clientSessionId'), 'queue entries must be owned by a client session');
+assert(ConnectionQueue.schema.path('lastHeartbeatAt'), 'queue entries must carry a heartbeat lease');
+assert(RandomConnection.schema.path('participants').schema.path('clientSessionId'), 'matched participants must retain client ownership');
+assert(RandomConnection.schema.path('participants').schema.path('lastHeartbeatAt'), 'matched participants must retain liveness');
+
+const controllerSource = fs.readFileSync(require.resolve('./randomConnectController'), 'utf8');
+assert(!controllerSource.includes('notifyRandomConnectMatch'), 'Random Connect must not have a notification producer');
+assert(!controllerSource.includes("title: 'Random Connect match ready'"), 'match creation must remain realtime-only');
+assert(controllerSource.includes("code: 'RANDOM_CONNECT_ACTIVE_ELSEWHERE'"));
+assert(controllerSource.includes("code = 'RANDOM_CONNECT_PARTICIPANT_OFFLINE'"));
+assert(controllerSource.includes('await assertClaimedQueueLeases(session)'));
+assert(controllerSource.includes('lastHeartbeatAt: { $gte: cutoff }'));
 
 const authControllerSource = fs.readFileSync(require.resolve('./authController'), 'utf8');
 const updateProfileStart = authControllerSource.indexOf('const updateProfile = async');

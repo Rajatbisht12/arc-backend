@@ -178,13 +178,11 @@ assert(callController.includes('callerBlockedTarget'));
 assert(callController.includes('targetBlockedCaller'));
 assert(!callController.includes("require('../models/Notification')"));
 
-assert(randomConnectController.includes("eventType: 'random_connect_match'"));
-assert(randomConnectController.includes('notificationDedupeKey: `random-connect-match:${roomId}`'));
-assert(randomConnectController.includes('await Promise.all(recipients.map(async (recipientId) => {'));
-assert(!randomConnectController.includes('Notification.exists('), 'dedupe retries must revisit the stable push attempt instead of returning early');
+assert(!randomConnectController.includes("eventType: 'random_connect_match'"));
+assert(!randomConnectController.includes('notifyRandomConnectMatch'));
+assert(!randomConnectController.includes('createAndEmitNotification'));
 assert(!tournamentController.includes('Notification.create({'), 'tournament notifications must not bypass push delivery');
-assert(randomConnectController.includes("deepLink: '/random-connect'"));
-assert(randomConnectController.includes('await notifyRandomConnectMatch([userId1Str, userId2Str]'));
+assert(randomConnectController.includes('randomClientRoom(participantId, clientSessionId)'));
 assert(!randomConnectController.includes('Retry emit #'), 'random match delivery must not flood sockets with duplicate retries');
 
 console.log('Notification producer contract tests passed');

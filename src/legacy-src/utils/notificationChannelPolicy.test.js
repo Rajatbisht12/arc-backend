@@ -6,8 +6,16 @@ const {
   EMAIL_INTENTS,
   ALLOWED_EMAIL_EVENTS,
   evaluateEmailPolicy,
-  evaluateNotificationEmailPolicy
+  evaluateNotificationEmailPolicy,
+  isRandomConnectNotification
 } = require('./notificationChannelPolicy');
+
+assert.equal(isRandomConnectNotification({ data: { customData: { eventType: 'random_connect_match' } } }), true);
+assert.equal(isRandomConnectNotification({ data: { customData: { randomRoomId: 'room-1' } } }), true);
+assert.equal(isRandomConnectNotification({ type: 'random_connect_match' }), true);
+assert.equal(isRandomConnectNotification({ data: { customData: { randomConnectionRoomId: 'room-1' } } }), true);
+assert.equal(isRandomConnectNotification({ data: { customData: { deepLinkType: 'random_connect' } } }), true);
+assert.equal(isRandomConnectNotification({ data: { customData: { eventType: 'incoming_call' } } }), false);
 const { maskEmailRecipient, buildEmailAuditContext } = require('./emailAudit');
 
 const routineMatrix = {

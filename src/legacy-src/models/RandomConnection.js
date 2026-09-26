@@ -27,6 +27,20 @@ const randomConnectionSchema = new mongoose.Schema({
       type: String,
       default: 'free'
     },
+    clientSessionId: {
+      type: String,
+      default: '',
+      maxlength: 128
+    },
+    clientPlatform: {
+      type: String,
+      enum: ['', 'web', 'android', 'ios'],
+      default: ''
+    },
+    lastHeartbeatAt: {
+      type: Date,
+      default: null
+    },
     joinedAt: {
       type: Date,
       default: Date.now
@@ -44,7 +58,7 @@ const randomConnectionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['waiting', 'active', 'ended', 'disconnected'],
+    enum: ['waiting', 'active', 'ended', 'disconnected', 'expired', 'cancelled'],
     default: 'waiting'
   },
   startTime: {
@@ -63,7 +77,7 @@ const randomConnectionSchema = new mongoose.Schema({
   duration: Number, // in seconds
   endReason: {
     type: String,
-    enum: ['user_left', 'timeout', 'cleanup', 'system', 'partner_left', 'next', null],
+    enum: ['user_left', 'timeout', 'cleanup', 'system', 'partner_left', 'next', 'heartbeat_timeout', 'cancelled', null],
     default: null
   },
   messages: [{
@@ -112,6 +126,8 @@ randomConnectionSchema.index({ 'participants.userId': 1 });
 randomConnectionSchema.index({ status: 1, expiresAt: 1 });
 randomConnectionSchema.index({ status: 1, timerStartedAt: 1 });
 randomConnectionSchema.index({ 'participants.userId': 1, status: 1, createdAt: -1 });
+randomConnectionSchema.index({ 'participants.userId': 1, 'participants.clientSessionId': 1, status: 1 });
+randomConnectionSchema.index({ status: 1, 'participants.lastHeartbeatAt': 1 });
 randomConnectionSchema.index({ genderFilterUserIds: 1, status: 1, startTime: -1 });
 
 module.exports = mongoose.model('RandomConnection', randomConnectionSchema);

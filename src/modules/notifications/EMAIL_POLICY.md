@@ -154,8 +154,9 @@ email producer families:
 - payout and withdrawal outcomes use `payment_transactional`.
 
 Recruitment, creator/host activity, moderation warnings, tournaments, social
-activity, messages, stories, clips, calls and Random Connect remain in-app/push
-only. Some allowlisted product events do not yet have producers. Their presence
+activity, messages, stories, clips and ordinary calls remain in-app/push only.
+Random Connect is realtime-only and is excluded from inbox, push, VoIP push,
+and email delivery. Some allowlisted product events do not yet have producers. Their presence
 in the registry must not be treated as proof that the product flow sends email.
 
 ## AWS ECS rollout and old-work draining
