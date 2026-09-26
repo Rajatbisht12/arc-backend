@@ -329,6 +329,10 @@ run_preflight() {
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--audit-only']}]}))" "$CONTAINER_NAME")
   elif [[ "$mode" == "verify" ]]; then
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--verify-only']}]}))" "$CONTAINER_NAME")
+  elif [[ "$mode" == "random-connect-apply" ]]; then
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-random-connect-indexes.js']}]}))" "$CONTAINER_NAME")
+  elif [[ "$mode" == "random-connect-verify" ]]; then
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-random-connect-indexes.js','--verify']}]}))" "$CONTAINER_NAME")
   else
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js']}]}))" "$CONTAINER_NAME")
   fi
@@ -471,6 +475,19 @@ for digest in $RUNNING_DIGESTS; do
   fi
 done
 echo "==> Verified task revision $TASK_FAMILY:$NEW_REV and digest $EXPECTED_DIGEST"
+
+# The pre-deployment release task creates the required indexes and removes
+# historical Random Connect work before the new revision receives traffic.
+# During a rolling deployment, however, an old task could still create one
+# final legacy match notification after that cleanup. Once every service task
+# is proven to use the new image, rerun the focused idempotent cleanup and its
+# strict verification inside ECS. This uses the production Secrets Manager
+# environment and VPC path; operators must never need a production Mongo URI
+# on their workstation.
+echo "==> Finalizing Random Connect indexes, stale sessions, and push suppression..."
+run_preflight random-connect-apply
+run_preflight random-connect-verify
+echo "==> Random Connect production migration verified"
 
 QUIESCED=0
 MUTATING_PREFLIGHT_STARTED=0
