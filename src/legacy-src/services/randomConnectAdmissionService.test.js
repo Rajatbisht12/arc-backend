@@ -487,6 +487,17 @@ async function run() {
     );
     assert(releasePreflight.includes("run('migrate-random-connect-indexes.js')"));
     assert(releasePreflight.includes("run('migrate-random-connect-indexes.js', ['--verify'])"));
+    const deployScript = fs.readFileSync(
+      path.resolve(__dirname, '..', '..', '..', 'deploy.sh'),
+      'utf8'
+    );
+    assert(deployScript.includes("run_preflight random-connect-apply"));
+    assert(deployScript.includes("run_preflight random-connect-verify"));
+    assert(
+      deployScript.indexOf("run_preflight random-connect-apply")
+        > deployScript.indexOf('Verified task revision'),
+      'the focused cleanup must run after every rolling task has the new image'
+    );
     const indexMigration = fs.readFileSync(
       path.resolve(__dirname, '..', '..', '..', 'scripts', 'migrate-random-connect-indexes.js'),
       'utf8'

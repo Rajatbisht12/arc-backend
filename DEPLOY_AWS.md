@@ -197,6 +197,15 @@ or the `arc/prod/backend` Secrets Manager JSON consumed by the application:
 The script deploys the marked revision only after its audit, migration, and
 verification gates succeed.
 
+Random Connect database preparation is also part of `bash deploy.sh`. The new
+task definition runs `migrate-random-connect-indexes.js` and its verification
+inside ECS, where production Secrets Manager values and VPC database access are
+available. After the rolling deployment is confirmed to contain only the new
+image, the script repeats the focused, idempotent Random Connect cleanup and
+verification. This closes the window in which a retiring legacy task could
+enqueue one final Random Connect notification. Do not run these production
+migrations from a developer workstation after a normal deployment.
+
 The deployment preflight connects to the primary, performs a rollback-only
 transaction probe, audits decryption and financial bank bindings without
 writes to financial records, applies additive migrations, redacts any legacy
