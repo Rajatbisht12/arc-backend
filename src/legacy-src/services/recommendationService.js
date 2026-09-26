@@ -22,6 +22,14 @@ const SEEN_COOLDOWN_HOURS = 36;
 const SEEN_PENALTY_BASE = 85;
 const SEEN_PENALTY_HALF_LIFE_HOURS = 7;
 const SEEN_FETCH_LIMIT = 400;
+// Explicit actions on the exact post must not turn into a positive feedback
+// loop where the author/tag affinity wins and immediately serves that same
+// post again. The affinity still helps discover other posts from that author
+// or topic; this bounded, decaying penalty applies only to the item acted on.
+const INTERACTION_COOLDOWN_HOURS = 7 * 24;
+const INTERACTION_PENALTY_BASE = 180;
+const INTERACTION_PENALTY_HALF_LIFE_HOURS = 24;
+const DIRECT_INTERACTION_TYPES = new Set(['like', 'comment', 'share', 'save']);
 // A generic seen penalty affects every item delivered on a page almost
 // equally. Preserve its long-lived exposure control, but add a short-lived
 // positional penalty so the previous session's first few items do not keep
@@ -384,17 +392,27 @@ function normalizeSessionSeed(raw) {
 async function getRecentlySeenMap(userId, mode) {
   if (!userId) return new Map();
   const since = new Date(Date.now() - SEEN_LOOKBACK_MS);
-  const rows = await PostEngagement.find({
-    user: userId,
-    context: mode,
-    eventType: { $in: ['impression', 'view'] },
-    updatedAt: { $gte: since }
-  })
-    .sort({ updatedAt: -1 })
-    .limit(SEEN_FETCH_LIMIT)
-    .select('post eventType updatedAt impressionCount positionShown sessionId')
-    .lean()
-    .catch(() => []);
+  let rows = [];
+  try {
+    rows = await PostEngagement.find({
+      user: userId,
+      context: mode,
+      eventType: { $in: ['impression', 'view'] },
+      updatedAt: { $gte: since }
+    })
+      .sort({ updatedAt: -1 })
+      .limit(SEEN_FETCH_LIMIT)
+      .select('post eventType updatedAt impressionCount positionShown sessionId')
+      .lean();
+  } catch (error) {
+    // Continue serving a feed, but do not silently hide the reason exposure
+    // suppression became unavailable. This is intentionally metadata-only.
+    log.warn('Failed to load recent feed exposure history', {
+      error: String(error),
+      mode,
+      userId: String(userId)
+    });
+  }
 
   const seenMap = new Map();
   rows.forEach((row) => {
@@ -484,11 +502,35 @@ async function recordFeedImpressions(posts, { userId, mode, sessionSeed }) {
   try {
     await PostEngagement.bulkWrite(ops, { ordered: false });
   } catch (error) {
-    // Duplicate-key races between concurrent first impressions are benign.
-    if (error?.code !== 11000 && !/E11000/.test(String(error))) {
+    // Duplicate-key races between concurrent first impressions are benign,
+    // but an unordered bulk error can contain a mixture of duplicate and real
+    // write failures. Never discard the non-duplicate failures with the race.
+    const writeErrors = Array.isArray(error?.writeErrors) ? error.writeErrors : [];
+    const nonDuplicateWriteErrors = writeErrors.filter((entry) => (
+      entry?.code !== 11000 && !/E11000/.test(String(entry?.errmsg || entry?.message || ''))
+    ));
+    const onlyDuplicateRaces = error?.code === 11000
+      || (/E11000/.test(String(error)) && nonDuplicateWriteErrors.length === 0);
+    if (!onlyDuplicateRaces || nonDuplicateWriteErrors.length > 0) {
       log.warn('Failed to record feed impressions', { error: String(error), mode });
     }
   }
+}
+
+function addInteraction(interactionMap, postId, interactedAt, count = 1) {
+  const normalizedPostId = normalizeId(postId);
+  if (!normalizedPostId) return;
+  const timestamp = new Date(interactedAt || 0).getTime();
+  // Never manufacture a fresh timestamp for legacy rows that lack one: doing
+  // so on every request would suppress them forever instead of allowing decay.
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return;
+  const current = interactionMap.get(normalizedPostId) || {
+    lastInteractedAt: 0,
+    interactionCount: 0
+  };
+  current.lastInteractedAt = Math.max(current.lastInteractedAt, timestamp);
+  current.interactionCount += Math.max(1, Number(count) || 1);
+  interactionMap.set(normalizedPostId, current);
 }
 
 async function getInterestProfile(userId, relationship) {
@@ -497,47 +539,90 @@ async function getInterestProfile(userId, relationship) {
       tagWeights: new Map(),
       authorWeights: new Map(),
       postTypeWeights: new Map(),
-      savedPostIds: new Set()
+      savedPostIds: new Set(),
+      interactionMap: new Map()
     };
   }
 
-  const recentEvents = await PostEngagement.find({
-    user: userId,
-    // Server-side delivery impressions are exposure records, not intent
-    // signals, and must not inflate author affinity.
-    eventType: { $ne: 'impression' }
-  })
-    .sort({ createdAt: -1 })
-    .limit(160)
-    .select('post author eventType')
-    .lean()
-    .catch(() => []);
+  let recentEvents = [];
+  try {
+    recentEvents = await PostEngagement.find({
+      user: userId,
+      // Server-side delivery impressions are exposure records, not intent
+      // signals, and must not inflate author affinity.
+      eventType: { $ne: 'impression' }
+    })
+      .sort({ createdAt: -1 })
+      .limit(160)
+      .select('post author eventType createdAt updatedAt')
+      .lean();
+  } catch (error) {
+    log.warn('Failed to load recent recommendation interactions', {
+      error: String(error),
+      userId: String(userId)
+    });
+  }
 
   const eventPostIds = recentEvents.map((event) => event.post).filter(Boolean);
   const savedUser = await User.findById(userId)
-    .select('savedPosts.post')
+    .select('savedPosts.post savedPosts.savedAt')
     .lean()
     .catch(() => null);
-  const savedPostIds = Array.isArray(savedUser?.savedPosts)
-    ? savedUser.savedPosts.map((item) => item.post).filter(Boolean)
+  const savedPosts = Array.isArray(savedUser?.savedPosts)
+    ? savedUser.savedPosts.filter((item) => item?.post)
     : [];
-  const likedPosts = await Post.find({
-    $or: [
-      { 'likes.user': userId },
-      { 'comments.user': userId },
-      { _id: { $in: [...eventPostIds, ...savedPostIds] } }
-    ],
-    isActive: true
-  })
-    .sort({ createdAt: -1 })
-    .limit(120)
-    .select('author tags postType')
-    .lean()
-    .catch(() => []);
+  const savedPostIds = savedPosts.map((item) => item.post);
+  const interactionUserId = new mongoose.Types.ObjectId(String(userId));
+  const likedPosts = await Post.aggregate([
+    {
+      $match: {
+        $or: [
+          { 'likes.user': interactionUserId },
+          { 'comments.user': interactionUserId },
+          { _id: { $in: [...eventPostIds, ...savedPostIds] } }
+        ],
+        isActive: true
+      }
+    },
+    { $sort: { createdAt: -1 } },
+    { $limit: 120 },
+    {
+      // Return only this viewer's interaction subdocuments. Popular posts can
+      // contain large arrays, so loading every user's likes/comments here
+      // would turn a bounded ranking lookup into an avoidable payload spike.
+      $project: {
+        author: 1,
+        tags: 1,
+        postType: 1,
+        createdAt: 1,
+        likes: {
+          $filter: {
+            input: { $ifNull: ['$likes', []] },
+            as: 'like',
+            cond: { $eq: ['$$like.user', interactionUserId] }
+          }
+        },
+        comments: {
+          $filter: {
+            input: { $ifNull: ['$comments', []] },
+            as: 'comment',
+            cond: { $eq: ['$$comment.user', interactionUserId] }
+          }
+        }
+      }
+    }
+  ]).catch((error) => {
+    log.warn('Failed to load exact-post interaction history', {
+      error: String(error),
+      userId: String(userId)
+    });
+    return [];
+  });
 
   const tagWeights = new Map();
   const authorWeights = new Map();
   const postTypeWeights = new Map();
+  const interactionMap = new Map();
 
   relationship.gamingPreferences.forEach((pref) => {
     tagWeights.set(pref, (tagWeights.get(pref) || 0) + 6);
@@ -551,6 +636,9 @@ async function getInterestProfile(userId, relationship) {
             : 2;
     const authorId = normalizeId(event.author);
     if (authorId) authorWeights.set(authorId, (authorWeights.get(authorId) || 0) + weight);
+    if (DIRECT_INTERACTION_TYPES.has(event.eventType)) {
+      addInteraction(interactionMap, event.post, event.updatedAt || event.createdAt);
+    }
   });
 
   likedPosts.forEach((post) => {
@@ -561,14 +649,45 @@ async function getInterestProfile(userId, relationship) {
       const key = String(tag).toLowerCase();
       tagWeights.set(key, (tagWeights.get(key) || 0) + 3);
     });
+    (post.likes || []).forEach((like) => {
+      if (normalizeId(like.user) === normalizeId(userId)) {
+        addInteraction(interactionMap, post._id, like.likedAt || post.createdAt);
+      }
+    });
+    (post.comments || []).forEach((comment) => {
+      if (normalizeId(comment.user) === normalizeId(userId)) {
+        addInteraction(interactionMap, post._id, comment.createdAt || post.createdAt);
+      }
+    });
   });
+
+  savedPosts.forEach((saved) => addInteraction(interactionMap, saved.post, saved.savedAt));
 
   return {
     tagWeights,
     authorWeights,
     postTypeWeights,
-    savedPostIds: new Set(savedPostIds.map(normalizeId).filter(Boolean))
+    savedPostIds: new Set(savedPostIds.map(normalizeId).filter(Boolean)),
+    interactionMap
   };
+}
+
+function getInteractionPenalty(interactionEntry, now = Date.now()) {
+  if (!interactionEntry?.lastInteractedAt) return 0;
+  const hoursSinceInteraction = Math.max(0, (now - interactionEntry.lastInteractedAt) / 36e5);
+  if (hoursSinceInteraction >= INTERACTION_COOLDOWN_HOURS) return 0;
+  const repeatFactor = Math.min(
+    2,
+    1 + (Math.max(0, (interactionEntry.interactionCount || 1) - 1) * 0.25)
+  );
+  return INTERACTION_PENALTY_BASE
+    * Math.exp(-hoursSinceInteraction / INTERACTION_PENALTY_HALF_LIFE_HOURS)
+    * repeatFactor;
+}
+
+function wasRecentlyInteracted(interactionEntry, now = Date.now()) {
+  if (!interactionEntry?.lastInteractedAt) return false;
+  return (now - interactionEntry.lastInteractedAt) < INTERACTION_COOLDOWN_HOURS * 36e5;
 }
 
 function getRecentTopPositionPenalty(seenEntry, now, currentSessionId) {
@@ -671,6 +790,10 @@ function scorePost(post, {
     ? (mode === 'clips' ? 20 : 26) * Math.exp(-hoursOld / 2.5)
     : 0;
   const seenPenalty = getSeenPenalty(seenMap?.get(normalizeId(post._id)), now, sessionId);
+  const interactionPenalty = getInteractionPenalty(
+    interestProfile.interactionMap?.get(normalizeId(post._id)),
+    now
+  );
 
   const score =
     freshness * (mode === 'clips' ? 85 : 70)
@@ -686,6 +809,7 @@ function scorePost(post, {
     + ownPostPenalty
     + newPostKicker
     - seenPenalty
+    - interactionPenalty
     - qualityPenalty;
 
   return Math.round(score * 100) / 100;
@@ -745,38 +869,55 @@ function wasServedInPreviousSession(seenEntry, sessionId, now = Date.now()) {
 //
 // This is deliberately not a random shuffle and does not permanently exclude
 // anything. The existing cooldown expires entries, and the fallback guarantees
-// a full feed for new/small accounts. Clips keep their separate watched-content
-// behavior and are not changed by this Home Feed rule.
+// a full feed for new/small accounts. Clips retain their watched-content
+// exclusion and additionally share the exact-post interaction tier.
 function selectSessionFreshPosts(scoredPosts, limit, mode, {
   seenMap = new Map(),
+  interactionMap = new Map(),
   sessionId,
   now = Date.now()
 } = {}) {
-  if (mode !== 'feed' || !(seenMap instanceof Map) || seenMap.size === 0) {
+  const hasInteractions = interactionMap instanceof Map && interactionMap.size > 0;
+  const hasSeenHistory = seenMap instanceof Map && seenMap.size > 0;
+  if (!hasInteractions && (mode !== 'feed' || !hasSeenHistory)) {
     return selectDiversePosts(scoredPosts, limit, mode);
   }
 
   const fresh = [];
   const recentlyServed = [];
+  const recentlyInteracted = [];
   scoredPosts.forEach((item) => {
-    const seenEntry = seenMap.get(normalizeId(item.post?._id));
-    if (wasServedInPreviousSession(seenEntry, sessionId, now)) {
+    const postId = normalizeId(item.post?._id);
+    if (wasRecentlyInteracted(interactionMap.get(postId), now)) {
+      recentlyInteracted.push(item);
+    } else if (mode === 'feed' && wasServedInPreviousSession(seenMap.get(postId), sessionId, now)) {
       recentlyServed.push(item);
     } else {
       fresh.push(item);
     }
   });
 
-  const selectedFresh = selectDiversePosts(fresh, limit, mode);
-  if (selectedFresh.length >= limit) return selectedFresh;
+  const selected = selectDiversePosts(fresh, limit, mode);
+  const selectedIds = new Set(selected.map((item) => normalizeId(item.post?._id)));
+  const fillFrom = (items) => {
+    if (selected.length >= limit) return;
+    const fallback = selectDiversePosts(
+      items.filter((item) => !selectedIds.has(normalizeId(item.post?._id))),
+      limit - selected.length,
+      mode
+    );
+    fallback.forEach((item) => {
+      selected.push(item);
+      selectedIds.add(normalizeId(item.post?._id));
+    });
+  };
 
-  const selectedIds = new Set(selectedFresh.map((item) => normalizeId(item.post?._id)));
-  const fallback = selectDiversePosts(
-    recentlyServed.filter((item) => !selectedIds.has(normalizeId(item.post?._id))),
-    limit - selectedFresh.length,
-    mode
-  );
-  return [...selectedFresh, ...fallback];
+  // Seen-but-not-acted-on content is preferable to content the viewer just
+  // liked/commented/shared/saved. The final tier is still a fallback, so small
+  // pools work and older interacted posts naturally re-enter after cooldown.
+  fillFrom(recentlyServed);
+  fillFrom(recentlyInteracted);
+  return selected;
 }
 
 // Boosted posts keep paid distribution but never own a fixed slot:
@@ -845,19 +986,102 @@ async function findWatchedClipIds(userId) {
   ].filter(Boolean));
 }
 
-async function fetchCandidates(filter, { limit, page, cursor }) {
+function getCandidatePoolLimit(limit) {
+  return Math.max(limit * CANDIDATE_MULTIPLIER, limit + 1);
+}
+
+function getCandidateExplorationSkip(total, recentLimit, explorationLimit, sessionSeed) {
+  const normalizedTotal = Math.max(0, Number(total) || 0);
+  const minimumSkip = Math.max(0, recentLimit);
+  const maximumSkip = Math.max(minimumSkip, normalizedTotal - explorationLimit);
+  if (maximumSkip === minimumSkip) return minimumSkip;
+  const availableOffsets = maximumSkip - minimumSkip + 1;
+  return minimumSkip + Math.floor(
+    stableNoise(`${sessionSeed}:candidate-window`, 'feed-exploration') * availableOffsets
+  );
+}
+
+async function fetchCandidates(filter, {
+  limit,
+  page,
+  cursor,
+  candidateLimit = getCandidatePoolLimit(limit),
+  skip = null
+}) {
   const query = Post.find(filter)
     .populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType privacySettings isActive')
     .populate('likes.user', 'username profile.displayName profile.avatar profilePicture avatar')
     .populate('comments.user', 'username profile.displayName profile.avatar profilePicture avatar')
     .sort({ createdAt: -1, _id: -1 })
-    .limit(Math.max(limit * CANDIDATE_MULTIPLIER, limit + 1));
+    .limit(candidateLimit);
 
-  if (!cursor && page > 1) {
+  if (!cursor && Number.isInteger(skip) && skip > 0) {
+    query.skip(skip);
+  } else if (!cursor && page > 1) {
     query.skip((page - 1) * limit);
   }
 
   return query.exec();
+}
+
+async function fetchSessionCandidates(filter, {
+  limit,
+  page,
+  cursor,
+  mode,
+  sessionSeed,
+  total,
+  allowExplorationWindow = true
+}) {
+  const poolLimit = getCandidatePoolLimit(limit);
+  if (
+    !allowExplorationWindow
+    || mode !== 'feed'
+    || cursor
+    || page > 1
+    || !Number.isFinite(total)
+    || total <= poolLimit
+  ) {
+    return fetchCandidates(filter, { limit, page, cursor, candidateLimit: poolLimit });
+  }
+
+  // Page one used to consider only the newest `limit * 8` records. Once a
+  // regular viewer had consumed that fixed window, hundreds of eligible older
+  // posts were unreachable regardless of the seen penalty. Keep half of the
+  // bounded pool recent and use the rotating session seed to seek into a
+  // different older indexed window for the other half. No random collection
+  // scan and no unbounded history/query are introduced.
+  const recentLimit = Math.ceil(poolLimit / 2);
+  const explorationLimit = poolLimit - recentLimit;
+  const explorationSkip = getCandidateExplorationSkip(
+    total,
+    recentLimit,
+    explorationLimit,
+    sessionSeed
+  );
+  const [recent, exploration] = await Promise.all([
+    fetchCandidates(filter, {
+      limit,
+      page: 1,
+      cursor: null,
+      candidateLimit: recentLimit,
+      skip: 0
+    }),
+    fetchCandidates(filter, {
+      limit,
+      page: 1,
+      cursor: null,
+      candidateLimit: explorationLimit,
+      skip: explorationSkip
+    })
+  ]);
+  const seenIds = new Set();
+  return [...recent, ...exploration].filter((post) => {
+    const postId = normalizeId(post?._id);
+    if (!postId || seenIds.has(postId)) return false;
+    seenIds.add(postId);
+    return true;
+  });
 }
 
 function buildTargetClipFilter(baseFilter, rawTargetClipId, mode) {
@@ -890,11 +1114,20 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   ]);
   const baseFilter = buildAudienceFilter({ user, mode, relationship, query });
   const targetClipFilter = buildTargetClipFilter(baseFilter, query.targetClipId, mode);
-  const [watchedClipIds, targetClipPost] = await Promise.all([
+  const [watchedClipIds, targetClipPost, total] = await Promise.all([
     mode === 'clips' && query.includeViewed !== 'true'
       ? findWatchedClipIds(relationship.currentUserId)
       : Promise.resolve(new Set()),
-    fetchTargetClip(targetClipFilter)
+    fetchTargetClip(targetClipFilter),
+    !query.cursor
+      ? Post.countDocuments(baseFilter).catch((error) => {
+        log.warn('Failed to count recommendation candidates', {
+          error: String(error),
+          mode
+        });
+        return null;
+      })
+      : Promise.resolve(null)
   ]);
 
   const requestedExcludedIds = preserveTargetClipInExclusions(
@@ -912,7 +1145,17 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     excludedIds: effectiveExcludedIds
   });
 
-  let candidates = await fetchCandidates(filter, { limit, page, cursor: query.cursor });
+  let candidates = await fetchSessionCandidates(filter, {
+    limit,
+    page,
+    cursor: query.cursor,
+    mode,
+    sessionSeed,
+    total,
+    // Discover/search results retain their chronological candidate contract;
+    // only the recommendation Home Feed rotates the source window.
+    allowExplorationWindow: query.context !== 'search'
+  });
   let exhaustedFreshClips = false;
 
   if (mode === 'clips' && candidates.length < limit && watchedClipIds.size > 0) {
@@ -955,6 +1198,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
 
   const selected = applyBoostPlacement(selectSessionFreshPosts(scored, limit, mode, {
     seenMap,
+    interactionMap: interestProfile.interactionMap,
     sessionId: sessionSeed
   }), { seed });
   const selectedPosts = selected.map((item) => item.post);
@@ -979,9 +1223,6 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     excludedCount: effectiveExcludedIds.length
   });
   const nextCursor = candidates.length >= limit ? encodeCursor(nextCursorPost) : null;
-  const total = !query.cursor
-    ? await Post.countDocuments(baseFilter).catch(() => null)
-    : null;
   const isGuest = user && user.userType === 'guest';
   // Development-only ranking diagnostics (Phase 4 feed contract + Phase 14
   // observability). Never emitted in production so internal scoring stays
@@ -1056,12 +1297,15 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
         const hoursOld = Math.max(0, (rankingNow - new Date(post.createdAt).getTime()) / 36e5);
         const isBoosted = isActiveBoost(post, rankingNow);
         const isPreviouslySeen = seenMap.has(postId);
+        const interactionEntry = interestProfile.interactionMap?.get(postId);
         dto._ranking = {
           position: selectedPositionById.get(postId) ?? null,
           rankingScore: scoreById.get(postId) ?? null,
           isBoosted,
           boostWeight: isBoosted ? getDampedBoostScore(post, { mode, now: rankingNow, boostDeliveryMap }) : 0,
           isPreviouslySeen,
+          isRecentlyInteracted: wasRecentlyInteracted(interactionEntry, rankingNow),
+          interactionPenalty: Math.round(getInteractionPenalty(interactionEntry, rankingNow) * 100) / 100,
           seenPenalty: Math.round(getSeenPenalty(seenMap.get(postId), rankingNow, sessionSeed) * 100) / 100,
           previousPosition: seenMap.get(postId)?.lastPositionShown ?? null,
           previousSessionId: seenMap.get(postId)?.lastSessionId ?? null,
@@ -1069,9 +1313,11 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
           hoursOld: Math.round(hoursOld * 10) / 10,
           newPostKicker: hoursOld < NEW_POST_KICKER_HOURS,
           createdAt: post.createdAt,
-          rankingReason: isBoosted
-            ? 'boost+organic'
-            : isPreviouslySeen
+          rankingReason: wasRecentlyInteracted(interactionEntry, rankingNow)
+            ? 'organic(interaction-suppressed)'
+            : isBoosted
+              ? 'boost+organic'
+              : isPreviouslySeen
               ? 'organic(seen-penalized)'
               : hoursOld < NEW_POST_KICKER_HOURS
                 ? 'fresh'
@@ -1096,6 +1342,9 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
       count: selectedPosts.length,
       boostedCount: selectedPosts.filter((p) => isActiveBoost(p, rankingNow)).length,
       seenCount: selectedPosts.filter((p) => seenMap.has(normalizeId(p._id))).length,
+      interactedCount: selectedPosts.filter((p) => (
+        wasRecentlyInteracted(interestProfile.interactionMap?.get(normalizeId(p._id)), rankingNow)
+      )).length,
       returnedIds: selectedPosts.map((p) => normalizeId(p._id)),
     });
   }
@@ -1129,7 +1378,9 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
         'quality_penalty',
         'diversity',
         'session_exploration',
+        mode === 'feed' ? 'session_candidate_window' : 'watched_candidate_exclusion',
         'seen_post_cooldown',
+        'exact_post_interaction_suppression',
         mode === 'feed' ? 'unseen_session_priority' : 'watched_content_rotation',
         'previous_top_position_penalty',
         'boost_campaign_score',
@@ -1203,8 +1454,12 @@ module.exports = {
   applyBoostPlacement,
   applyCursorAndExclusions,
   pickNextCursorPost,
+  getCandidatePoolLimit,
+  getCandidateExplorationSkip,
   buildImpressionOps,
   getSeenPenalty,
+  getInteractionPenalty,
+  wasRecentlyInteracted,
   getRecentTopPositionPenalty,
   getDampedBoostScore,
   normalizeSessionSeed,
@@ -1221,6 +1476,7 @@ module.exports = {
   normalizeCompletionRate,
   MAX_ENGAGEMENT_DURATION_MS,
   SEEN_COOLDOWN_HOURS,
+  INTERACTION_COOLDOWN_HOURS,
   TOP_POSITION_PENALTY_BASE,
   TOP_POSITION_PENALTY_WINDOW_HOURS,
   BOOST_USER_COOLDOWN_HOURS,

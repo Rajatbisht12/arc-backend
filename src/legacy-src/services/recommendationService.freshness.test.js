@@ -7,8 +7,12 @@ const {
   applyBoostPlacement,
   applyCursorAndExclusions,
   pickNextCursorPost,
+  getCandidatePoolLimit,
+  getCandidateExplorationSkip,
   buildImpressionOps,
   getSeenPenalty,
+  getInteractionPenalty,
+  wasRecentlyInteracted,
   getRecentTopPositionPenalty,
   getDampedBoostScore,
   normalizeSessionSeed,
@@ -20,7 +24,8 @@ const {
   BOOST_TOP_WINDOW,
   TOP_POSITION_PENALTY_BASE,
   TOP_POSITION_PENALTY_WINDOW_HOURS,
-  SEEN_COOLDOWN_HOURS
+  SEEN_COOLDOWN_HOURS,
+  INTERACTION_COOLDOWN_HOURS
 } = require('./recommendationService');
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -67,7 +72,8 @@ function baseContext(overrides = {}) {
     interestProfile: {
       tagWeights: new Map(),
       authorWeights: new Map(),
-      postTypeWeights: new Map()
+      postTypeWeights: new Map(),
+      interactionMap: new Map()
     },
     seed: 'session-a',
     ...overrides
@@ -189,6 +195,77 @@ const seenContext = baseContext({
 const unseenScore = scorePost(makePost('p-new'), seenContext);
 const seenScore = scorePost(makePost('p-seen'), seenContext);
 assert(unseenScore > seenScore, 'recently shown posts must rank below unseen peers');
+
+// ── Exact-post interaction suppression ──────────────────────────────────
+
+const recentInteraction = {
+  lastInteractedAt: now - (5 * 60 * 1000),
+  interactionCount: 2
+};
+const oldInteraction = {
+  lastInteractedAt: now - ((INTERACTION_COOLDOWN_HOURS + 1) * HOUR_MS),
+  interactionCount: 4
+};
+assert(getInteractionPenalty(recentInteraction, now) > getSeenPenalty({
+  lastShownAt: recentInteraction.lastInteractedAt,
+  impressionCount: 1
+}, now), 'a recent explicit interaction must suppress the exact post more strongly than a view');
+assert.strictEqual(getInteractionPenalty(oldInteraction, now), 0,
+  'explicit interaction suppression expires so an older post can resurface');
+assert.strictEqual(wasRecentlyInteracted(recentInteraction, now), true);
+assert.strictEqual(wasRecentlyInteracted(oldInteraction, now), false);
+
+const interactedPost = makePost('p-interacted', {
+  likes: new Array(100).fill({ user: 'u' }),
+  views: 25000
+});
+const interactionMap = new Map([['p-interacted', recentInteraction]]);
+const interactionContext = baseContext({
+  interestProfile: {
+    tagWeights: new Map(),
+    authorWeights: new Map(),
+    postTypeWeights: new Map(),
+    interactionMap
+  }
+});
+assert(
+  scorePost(interactedPost, interactionContext) < scorePost(makePost('p-unseen'), interactionContext),
+  'the exact post acted on must not stay pinned by its engagement score'
+);
+
+const interactionTier = selectSessionFreshPosts([
+  { post: interactedPost, score: 999 },
+  { post: makePost('p-unseen-a'), score: 20 },
+  { post: makePost('p-unseen-b'), score: 10 }
+], 2, 'feed', {
+  interactionMap,
+  sessionId: 'after-interaction',
+  now
+}).map((item) => String(item.post._id));
+assert.deepStrictEqual(interactionTier, ['p-unseen-a', 'p-unseen-b'],
+  'recently interacted content is a last-resort tier even when its relevance score is highest');
+
+const smallInteractionPool = selectSessionFreshPosts([
+  { post: interactedPost, score: 999 },
+  { post: makePost('p-only-fresh'), score: 10 }
+], 5, 'feed', {
+  interactionMap,
+  sessionId: 'small-interaction-pool',
+  now
+}).map((item) => String(item.post._id));
+assert.deepStrictEqual(smallInteractionPool, ['p-only-fresh', 'p-interacted'],
+  'small pools still fall back to interacted content instead of producing a short feed');
+
+const clipInteractionTier = selectSessionFreshPosts([
+  { post: interactedPost, score: 999 },
+  { post: makePost('clip-unseen'), score: 10 }
+], 1, 'clips', {
+  interactionMap,
+  sessionId: 'clips-after-interaction',
+  now
+}).map((item) => String(item.post._id));
+assert.deepStrictEqual(clipInteractionTier, ['clip-unseen'],
+  'Clips also prioritizes a non-interacted candidate without changing its ranking architecture');
 
 // ── New-post freshness kicker ─────────────────────────────────────────────
 
@@ -397,10 +474,10 @@ assert(nextSession.slice(0, 3).some((id) => !sessionOne.includes(id)),
   'fresh unseen posts must break into the top after a refresh');
 
 // Production regression: 400+ eligible posts existed, yet five device
-// refreshes returned only 18 unique ids because a numeric penalty could not
-// overcome strong relevance scores. With a 60-item candidate window, five
-// ten-item refresh sessions must consume fresh candidates first. Ranking is
-// still score-based within each session; this is not a random shuffle.
+// refreshes returned only 32 unique ids because a fixed newest-first candidate
+// window and missing exact-post suppression kept the same high-scoring subset
+// in circulation. Given enough candidates, five ten-item refresh sessions must
+// consume fresh candidates first. Ranking stays score-based inside each tier.
 function rankLargeFeed(sessionId, seenMap) {
   const pool = Array.from({ length: 60 }, (_, index) => makePost(`large-${index}`, {
     authorId: `large-author-${index % 20}`,
@@ -453,6 +530,80 @@ fiveRefreshConsecutiveOverlaps.forEach((overlap) => {
     'consecutive refreshes must not repeat posts while fresh candidates remain');
 });
 
+// Candidate generation must be able to reach beyond the former fixed newest
+// 80 posts without loading all 423 rows or replacing scoring with a shuffle.
+const largeCandidatePoolLimit = getCandidatePoolLimit(10);
+const recentCandidateLimit = Math.ceil(largeCandidatePoolLimit / 2);
+const explorationCandidateLimit = largeCandidatePoolLimit - recentCandidateLimit;
+const candidateWindowSkips = Array.from({ length: 5 }, (_, index) => (
+  getCandidateExplorationSkip(
+    423,
+    recentCandidateLimit,
+    explorationCandidateLimit,
+    `refresh-${index + 1}`
+  )
+));
+assert.strictEqual(largeCandidatePoolLimit, 80,
+  'candidate work remains bounded to the existing 8x page-size budget');
+assert(candidateWindowSkips.every((skip) => skip >= 40 && skip <= 383),
+  'the exploration window must stay after the recent half and inside inventory bounds');
+assert(new Set(candidateWindowSkips).size >= 4,
+  'independent refresh sessions must seek into meaningfully different older candidate windows');
+
+const candidateCatalog = Array.from({ length: 423 }, (_, index) => makePost(`candidate-${index}`, {
+  authorId: `candidate-author-${index % 80}`,
+  tags: [`candidate-topic-${index % 20}`],
+  createdAt: new Date(now - ((index + 1) * 20 * 60 * 1000)),
+  likes: new Array(Math.max(0, 20 - (index % 20))).fill({ user: 'u' }),
+  views: Math.max(0, 1000 - index)
+}));
+const candidateWindowSeenMap = new Map(candidateCatalog.slice(0, recentCandidateLimit).map((post, index) => [
+  String(post._id),
+  {
+    lastShownAt: now,
+    impressionCount: 2,
+    lastPositionShownAt: now,
+    lastPositionShown: index < 10 ? index : null,
+    lastSessionId: 'pre-fix-fixed-window'
+  }
+]));
+const candidateWindowRows = candidateWindowSkips.map((skip, index) => {
+  const sessionId = `candidate-refresh-${index + 1}`;
+  const candidates = [
+    ...candidateCatalog.slice(0, recentCandidateLimit),
+    ...candidateCatalog.slice(skip, skip + explorationCandidateLimit)
+  ];
+  const context = baseContext({
+    seed: `${USER_ID}:feed:${sessionId}`,
+    sessionId,
+    seenMap: candidateWindowSeenMap
+  });
+  const row = selectSessionFreshPosts(candidates
+    .map((post) => ({ post, score: scorePost(post, context) }))
+    .sort((left, right) => right.score - left.score), 10, 'feed', {
+      seenMap: candidateWindowSeenMap,
+      sessionId,
+      now
+    }).map((item) => String(item.post._id));
+  row.forEach((id, position) => candidateWindowSeenMap.set(id, {
+    lastShownAt: now,
+    impressionCount: 1,
+    lastPositionShownAt: now,
+    lastPositionShown: position,
+    lastSessionId: sessionId
+  }));
+  return row;
+});
+const candidateWindowUniqueCount = new Set(candidateWindowRows.flat()).size;
+const candidateWindowOverlaps = candidateWindowRows.slice(1).map((row, index) => {
+  const previous = new Set(candidateWindowRows[index]);
+  return row.filter((id) => previous.has(id)).length;
+});
+assert.strictEqual(candidateWindowUniqueCount, 50,
+  'five seed-derived windows over 423 eligible posts must expose 50 unique top-ten positions');
+assert.deepStrictEqual(candidateWindowOverlaps, [0, 0, 0, 0],
+  'rotating bounded source windows must prevent consecutive top-ten overlap when inventory is ample');
+
 // Small inventories must never produce an empty/short page merely because all
 // posts were recently served; ranked seen content fills the remainder.
 const smallRanked = ['small-1', 'small-2', 'small-3'].map((id, index) => ({
@@ -477,7 +628,12 @@ console.log('five-refresh large-pool verification', {
   rows: fiveRefreshRows,
   uniqueCount: fiveRefreshUniqueCount,
   duplicateCount: fiveRefreshRows.flat().length - fiveRefreshUniqueCount,
-  consecutiveOverlaps: fiveRefreshConsecutiveOverlaps
+  consecutiveOverlaps: fiveRefreshConsecutiveOverlaps,
+  candidateWindowSkips,
+  candidateWindowRows,
+  candidateWindowUniqueCount,
+  candidateWindowDuplicateCount: candidateWindowRows.flat().length - candidateWindowUniqueCount,
+  candidateWindowOverlaps
 });
 
 // Device regression: when the Clips inventory fits entirely on page one,
