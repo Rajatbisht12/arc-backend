@@ -17,6 +17,22 @@ needs the S3 bucket and credentials. Set `AWS_S3_CDN_URL` to the HTTPS base URL
 of the configured distribution when a CDN is available. Leave it unset for
 local development or direct-S3 delivery.
 
+The worker task role must have object Put/Get/Delete access and prefix-scoped
+`s3:ListBucket` access. Retry cleanup calls `ListObjectsV2` before publishing a
+version; without this permission every job fails before FFmpeg starts. Apply
+the checked-in least-privilege policy to the ECS task role, then verify it:
+
+```sh
+aws iam put-role-policy \
+  --role-name arc-ecs-task-role \
+  --policy-name arc-s3-access \
+  --policy-document file://s3policy.json
+
+aws iam get-role-policy \
+  --role-name arc-ecs-task-role \
+  --policy-name arc-s3-access
+```
+
 Required feature values:
 
 ```text
