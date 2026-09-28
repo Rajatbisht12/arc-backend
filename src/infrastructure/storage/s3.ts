@@ -67,7 +67,7 @@ async function readBodyWithLimit(response: Response, maxBytes: number): Promise<
 }
 
 export function publicUrl(key: string): string {
-  if (env.AWS_S3_CDN_URL) return `${env.AWS_S3_CDN_URL}/${key}`;
+  if (env.AWS_S3_CDN_URL) return `${env.AWS_S3_CDN_URL.replace(/\/$/, "")}/${key}`;
   return `https://${BUCKET}.s3.${env.AWS_REGION}.amazonaws.com/${key}`;
 }
 

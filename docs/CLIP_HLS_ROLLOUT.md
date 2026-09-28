@@ -5,6 +5,85 @@ rollout. New clients select `playback.hlsUrl` only when
 `playback.status === "ready"`; processing and failed records use the MP4
 fallback.
 
+## CloudFront media delivery
+
+Clip delivery is configured independently from upload storage. S3 remains the
+upload/source-of-truth origin; the API emits CloudFront URLs only when
+`AWS_S3_CDN_URL` is set. Existing MongoDB URLs are not rewritten. Instead,
+`formatPostDTO` rewrites only public `gaming-social/posts/` and
+`gaming-social/clips/` S3 URLs at response time. Query-bearing (potentially
+signed) URLs, private prefixes, and third-party URLs are deliberately left
+unchanged.
+
+The production distribution uses:
+
+- the existing S3 REST origin and Origin Access Control (SigV4, always sign);
+- AWS managed `CachingOptimized` (one-day default, one-year maximum, no query
+  strings/cookies/headers in the cache key);
+- AWS managed `CORS-S3Origin` to forward only the three CORS negotiation
+  headers to S3;
+- a bounded viewer-response CloudFront Function that emits CORS only for the
+  configured allowlist, exposes Range/cache headers, and prevents one cached
+  origin response from poisoning another origin;
+- HTTP/2 and HTTP/3, HTTPS redirect, byte-range delivery, and the distribution's
+  existing WAF/OAC configuration.
+
+CloudFront Free does not support custom cache or response-header policies. The
+viewer-response function is intentional: it preserves the Free pricing plan,
+keeps one shared immutable media cache, and avoids wildcard CORS. Do not replace
+it with a custom response-header policy without first changing the pricing plan
+and explicitly approving the billing impact.
+
+Run the audit from a shell whose AWS CLI identity is authorized. The script
+intentionally does not load application credentials from `.env`:
+
+```bash
+AWS_S3_BUCKET=arc-gaming-media-906446637180 \
+AWS_REGION=us-east-1 \
+npm run audit:clip-cloudfront
+```
+
+Provision/reconcile the existing distribution, then wait for deployment and
+run strict validation:
+
+```bash
+AWS_S3_BUCKET=arc-gaming-media-906446637180 \
+AWS_REGION=us-east-1 \
+npm run configure:clip-cloudfront
+
+AWS_S3_BUCKET=arc-gaming-media-906446637180 \
+AWS_REGION=us-east-1 \
+npm run verify:clip-cloudfront
+```
+
+Verification performs two real 1 MiB `Range` requests plus alternate-origin,
+blocked-origin, and OPTIONS probes. It fails unless CloudFront returns a valid
+`206`, exact `Content-Range`/length/type, `Accept-Ranges: bytes`, correct CORS,
+and no CORS access for the blocked origin.
+
+Deploy the backend version containing `mediaDelivery.js` before relying on CDN
+rewrites for legacy database records. Activating the variable against an older
+compatible backend is safe, but that older version only uses it for newly
+generated upload URLs. Only after verification succeeds, activate the CDN URL
+in ECS:
+
+```bash
+AWS_S3_BUCKET=arc-gaming-media-906446637180 \
+AWS_REGION=us-east-1 \
+npm run activate:clip-cloudfront
+```
+
+The activation command verifies the distribution again, registers a new task
+definition containing the non-secret `AWS_S3_CDN_URL`, and starts a normal ECS
+rolling deployment. `deploy.sh` copies the active task definition, so later
+application deployments preserve the CDN setting.
+
+Rollback is configuration-only: remove `AWS_S3_CDN_URL` from a new ECS task
+revision and redeploy. Stored object keys and database URLs remain untouched.
+The legacy public bucket policy is retained during this compatibility phase so
+old clients/direct URLs continue to work. Remove public S3 read access only
+after old clients and all non-post media paths have been migrated and verified.
+
 ## Required services and configuration
 
 Deploy the HTTP service and `arc-clip-hls-worker` from `render.yaml` together.
