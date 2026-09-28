@@ -144,12 +144,20 @@ const uniqueLikeCount = (likes) => {
   return ids.length > 0 ? new Set(ids).size : likes.length;
 };
 
+const { rewritePostMediaDeliveryUrls } = require('./mediaDelivery');
+
 const formatPostDTO = (post, isGuest = false, isAuthor = false, viewerId = null) => {
   if (!post) return null;
 
   const dto = typeof post.toObject === 'function'
     ? post.toObject({ virtuals: true })
     : JSON.parse(JSON.stringify(post));
+
+  // Stored URLs remain stable evidence of the uploaded S3 object. At response
+  // time, route only public post/Clip media through the configured CDN. This
+  // also migrates legacy records without rewriting the database and makes
+  // rollback as simple as removing AWS_S3_CDN_URL.
+  rewritePostMediaDeliveryUrls(dto);
 
   const rawViewCount = Number(dto.viewCount) || 0;
   const uniqueViewCount = Array.isArray(dto.viewedBy) ? dto.viewedBy.length : 0;
