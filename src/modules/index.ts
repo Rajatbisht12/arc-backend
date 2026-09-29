@@ -19,9 +19,6 @@ import randomConnectionsRoutes from "./random-connections/random-connections.rou
 import monetizationRoutes from "./monetization/monetization.routes";
 import feedbackRoutes from "./feedback/feedback.routes";
 import reportsRoutes from "./reports/reports.routes";
-import aiCoachRoutes from "./ai-coach/ai-coach.routes";
-import aiRecruitmentRoutes from "./ai-recruitment/ai-recruitment.routes";
-import knowledgeRoutes from "./knowledge/knowledge.routes";
 import membershipRoutes from "./membership/membership.routes";
 import musicRoutes from "./music/music.routes";
 import storiesRoutes from "./stories/stories.routes";
@@ -56,9 +53,6 @@ export const registerModules = (app: Express): void => {
   app.use("/api/monetization", monetizationRoutes);
   app.use("/api/feedback", feedbackRoutes);
   app.use("/api/reports", reportsRoutes);
-  app.use("/api/ai-coach", aiCoachRoutes);
-  app.use("/api/ai-recruitment", aiRecruitmentRoutes);
-  app.use("/api/knowledge", knowledgeRoutes);
   app.use("/api/membership", membershipRoutes);
   app.use("/api/music", musicRoutes);
   app.use("/api/stories", storiesRoutes);

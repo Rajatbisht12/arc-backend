@@ -1,14 +1,14 @@
 {
-  "generatedAt": "2026-07-10T11:11:11.648Z",
-  "endpointCount": 484,
-  "socketEventCount": 185,
+  "generatedAt": "2026-09-29T22:27:00.098Z",
+  "endpointCount": 479,
+  "socketEventCount": 204,
   "byAccess": {
-    "public": 23,
-    "admin": 146,
-    "authenticated": 283,
+    "public": 26,
+    "admin": 139,
+    "authenticated": 280,
     "authenticated-onboarding": 4,
     "public-optional-auth": 15,
-    "user-or-guest": 13
+    "user-or-guest": 15
   },
   "endpoints": [
     {
@@ -51,49 +51,49 @@
       "path": "/api/admin/boost-campaigns",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 103
+      "line": 104
     },
     {
       "method": "PATCH",
       "path": "/api/admin/boost-campaigns/:campaignId/delivery/adjust",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 108
+      "line": 109
     },
     {
       "method": "POST",
       "path": "/api/admin/boost-campaigns/:campaignId/delivery/configure",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 106
+      "line": 107
     },
     {
       "method": "POST",
       "path": "/api/admin/boost-campaigns/:campaignId/delivery/control",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 107
+      "line": 108
     },
     {
       "method": "POST",
       "path": "/api/admin/boost-campaigns/:campaignId/manual-delivery",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 105
+      "line": 106
     },
     {
       "method": "PUT",
       "path": "/api/admin/boost-campaigns/:campaignId/status",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 109
+      "line": 110
     },
     {
       "method": "GET",
       "path": "/api/admin/boost-delivery",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 104
+      "line": 105
     },
     {
       "method": "GET",
@@ -247,304 +247,311 @@
       "path": "/api/admin/host-verification/applications",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 166
+      "line": 167
     },
     {
       "method": "POST",
       "path": "/api/admin/host-verification/applications/:id/approve",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 167
+      "line": 168
     },
     {
       "method": "POST",
       "path": "/api/admin/host-verification/applications/:id/reject",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 173
+      "line": 174
     },
     {
       "method": "POST",
       "path": "/api/admin/host-verification/revoke/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 180
+      "line": 181
     },
     {
       "method": "GET",
       "path": "/api/admin/host-verification/verified-hosts",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 179
+      "line": 180
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/applications",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 127
+      "line": 128
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/applications/:applicationId/approve",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 128
+      "line": 129
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/applications/:applicationId/reject",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 129
+      "line": 130
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/audit-logs",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 117
+      "line": 118
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/bank-details",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 120
+      "line": 121
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/bank-details/:id",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 122
+      "line": 123
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/bank-details/:id/history",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 121
+      "line": 122
     },
     {
       "method": "PATCH",
       "path": "/api/admin/monetization/bank-details/:id/notes",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 125
+      "line": 126
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/bank-details/:id/request-update",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 124
+      "line": 125
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/bank-details/:id/reveal",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 126
+      "line": 127
     },
     {
       "method": "PATCH",
       "path": "/api/admin/monetization/bank-details/:id/verification",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 123
+      "line": 124
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/bank-details/export.csv",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 118
+      "line": 119
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/bank-details/export.xls",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 119
+      "line": 120
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/charts",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 112
+      "line": 113
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/cpm/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 143
+      "line": 144
     },
     {
       "method": "PUT",
       "path": "/api/admin/monetization/cpm/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 142
+      "line": 143
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/creators",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 136
+      "line": 137
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/creators/:userId/analytics",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 134
+      "line": 135
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/creators/:userId/bank-details",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 133
+      "line": 134
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/creators/:userId/overview",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 135
+      "line": 136
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/creators/export.csv",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 132
+      "line": 133
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/dashboard",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 111
+      "line": 112
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/disable/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 141
+      "line": 142
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/grant/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 138
+      "line": 139
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/leaderboards",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 113
+      "line": 114
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payout-hold/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 130
+      "line": 131
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payout-hold/:userId/release",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 131
+      "line": 132
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/payouts",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 157
+      "line": 158
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/payouts/:id",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 156
+      "line": 157
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/approve",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 158
+      "line": 159
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/cancel",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 165
+      "line": 166
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/failed",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 161
+      "line": 162
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/payouts/:id/history",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 153
+      "line": 154
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/hold",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 162
+      "line": 163
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/paid",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 160
+      "line": 161
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/processing",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 159
+      "line": 160
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/reject",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 164
+      "line": 165
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/resume",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 163
+      "line": 164
     },
     {
       "method": "GET",
+      "path": "/api/admin/monetization/payouts/:id/statement",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 156
+    },
+    {
+      "method": "POST",
       "path": "/api/admin/monetization/payouts/:id/statement",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
@@ -552,48 +559,34 @@
     },
     {
       "method": "POST",
-      "path": "/api/admin/monetization/payouts/:id/statement",
-      "access": "admin",
-      "source": "src/modules/admin/admin.routes.ts",
-      "line": 154
-    },
-    {
-      "method": "POST",
       "path": "/api/admin/monetization/payouts/bulk/:action",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 152
+      "line": 153
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/payouts/export.csv",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 150
+      "line": 151
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/payouts/generate",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 151
+      "line": 152
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/reports",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 116
+      "line": 117
     },
     {
       "method": "GET",
-      "path": "/api/admin/monetization/reports/export",
-      "access": "admin",
-      "source": "src/modules/admin/admin.routes.ts",
-      "line": 114
-    },
-    {
-      "method": "POST",
       "path": "/api/admin/monetization/reports/export",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
@@ -601,73 +594,80 @@
     },
     {
       "method": "POST",
+      "path": "/api/admin/monetization/reports/export",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
+      "line": 116
+    },
+    {
+      "method": "POST",
       "path": "/api/admin/monetization/resume/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 140
+      "line": 141
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/revoke/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 137
+      "line": 138
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/summary",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 110
+      "line": 111
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/suspend/:userId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 139
+      "line": 140
     },
     {
       "method": "GET",
       "path": "/api/admin/monetization/withdrawal-requests",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 144
+      "line": 145
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/withdrawal-requests/:id/approve",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 145
+      "line": 146
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/withdrawal-requests/:id/cancel",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 149
+      "line": 150
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/withdrawal-requests/:id/failed",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 148
+      "line": 149
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/withdrawal-requests/:id/paid",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 147
+      "line": 148
     },
     {
       "method": "POST",
       "path": "/api/admin/monetization/withdrawal-requests/:id/reject",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
-      "line": 146
+      "line": 147
     },
     {
       "method": "GET",
@@ -842,6 +842,13 @@
       "path": "/api/admin/reports/:reportId",
       "access": "admin",
       "source": "src/modules/admin/admin.routes.ts",
+      "line": 103
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/reports/:reportId/target",
+      "access": "admin",
+      "source": "src/modules/admin/admin.routes.ts",
       "line": 102
     },
     {
@@ -936,291 +943,172 @@
       "line": 89
     },
     {
-      "method": "GET",
-      "path": "/api/ai-coach/analytics",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 39
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-coach/analyze",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 60
-    },
-    {
-      "method": "GET",
-      "path": "/api/ai-coach/cache/stats",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 57
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-coach/chat",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 8
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/ai-coach/conversation/:conversationId",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 54
-    },
-    {
-      "method": "GET",
-      "path": "/api/ai-coach/conversation/:conversationId",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 45
-    },
-    {
-      "method": "PUT",
-      "path": "/api/ai-coach/conversation/:conversationId/rename",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 46
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-coach/multiple",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 11
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-coach/rate",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 28
-    },
-    {
-      "method": "GET",
-      "path": "/api/ai-coach/status",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 22
-    },
-    {
-      "method": "GET",
-      "path": "/api/ai-coach/suggestions",
-      "access": "authenticated",
-      "source": "src/modules/ai-coach/ai-coach.routes.ts",
-      "line": 25
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-recruitment/analyze-application",
-      "access": "authenticated",
-      "source": "src/modules/ai-recruitment/ai-recruitment.routes.ts",
-      "line": 44
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-recruitment/generate-post",
-      "access": "authenticated",
-      "source": "src/modules/ai-recruitment/ai-recruitment.routes.ts",
-      "line": 53
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-recruitment/generate-questions",
-      "access": "authenticated",
-      "source": "src/modules/ai-recruitment/ai-recruitment.routes.ts",
-      "line": 56
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-recruitment/match-players",
-      "access": "authenticated",
-      "source": "src/modules/ai-recruitment/ai-recruitment.routes.ts",
-      "line": 41
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-recruitment/rank-candidates",
-      "access": "authenticated",
-      "source": "src/modules/ai-recruitment/ai-recruitment.routes.ts",
-      "line": 67
-    },
-    {
-      "method": "POST",
-      "path": "/api/ai-recruitment/smart-search",
-      "access": "authenticated",
-      "source": "src/modules/ai-recruitment/ai-recruitment.routes.ts",
-      "line": 28
-    },
-    {
       "method": "DELETE",
       "path": "/api/auth/account",
       "access": "authenticated",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 177
+      "line": 187
     },
     {
       "method": "POST",
       "path": "/api/auth/apple/mobile",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 183
+      "line": 199
     },
     {
       "method": "PUT",
       "path": "/api/auth/change-password",
       "access": "authenticated",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 176
+      "line": 186
     },
     {
       "method": "GET",
       "path": "/api/auth/check-email",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 156
+      "line": 166
     },
     {
       "method": "POST",
       "path": "/api/auth/check-password-same",
       "access": "authenticated",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 161
+      "line": 171
     },
     {
       "method": "GET",
       "path": "/api/auth/check-username",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 155
+      "line": 165
     },
     {
       "method": "POST",
       "path": "/api/auth/complete-google-profile",
       "access": "authenticated-onboarding",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 180
+      "line": 196
     },
     {
       "method": "POST",
       "path": "/api/auth/complete-profile",
       "access": "authenticated-onboarding",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 179
+      "line": 189
     },
     {
       "method": "GET",
       "path": "/api/auth/google",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 185
+      "line": 201
     },
     {
       "method": "GET",
       "path": "/api/auth/google/callback",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 188
+      "line": 204
     },
     {
       "method": "GET",
       "path": "/api/auth/google/mobile",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 187
+      "line": 203
     },
     {
       "method": "POST",
       "path": "/api/auth/google/token",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 182
+      "line": 198
     },
     {
       "method": "POST",
       "path": "/api/auth/guest-token",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 171
+      "line": 181
     },
     {
       "method": "POST",
       "path": "/api/auth/login",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 170
+      "line": 180
     },
     {
       "method": "POST",
       "path": "/api/auth/logout",
       "access": "authenticated-onboarding",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 178
+      "line": 188
     },
     {
       "method": "GET",
       "path": "/api/auth/me",
       "access": "authenticated-onboarding",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 172
+      "line": 182
     },
     {
       "method": "PUT",
       "path": "/api/auth/profile",
       "access": "authenticated",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 173
+      "line": 183
     },
     {
       "method": "POST",
       "path": "/api/auth/register",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 169
+      "line": 179
     },
     {
       "method": "POST",
       "path": "/api/auth/reset-password-otp",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 160
+      "line": 170
     },
     {
       "method": "POST",
       "path": "/api/auth/send-otp",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 157
+      "line": 167
     },
     {
       "method": "POST",
       "path": "/api/auth/upload-banner",
       "access": "authenticated",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 175
+      "line": 185
     },
     {
       "method": "POST",
       "path": "/api/auth/upload-profile-picture",
       "access": "authenticated",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 174
+      "line": 184
     },
     {
       "method": "POST",
       "path": "/api/auth/verify-otp-login",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 159
+      "line": 169
     },
     {
       "method": "POST",
       "path": "/api/auth/verify-otp-register",
       "access": "public",
       "source": "src/modules/auth/auth.routes.ts",
-      "line": 158
+      "line": 168
     },
     {
       "method": "POST",
@@ -1440,62 +1328,6 @@
       "line": 21
     },
     {
-      "method": "GET",
-      "path": "/api/knowledge",
-      "access": "admin",
-      "source": "src/modules/knowledge/knowledge.routes.ts",
-      "line": 16
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/knowledge/:id",
-      "access": "admin",
-      "source": "src/modules/knowledge/knowledge.routes.ts",
-      "line": 19
-    },
-    {
-      "method": "GET",
-      "path": "/api/knowledge/:id",
-      "access": "admin",
-      "source": "src/modules/knowledge/knowledge.routes.ts",
-      "line": 17
-    },
-    {
-      "method": "PUT",
-      "path": "/api/knowledge/:id",
-      "access": "admin",
-      "source": "src/modules/knowledge/knowledge.routes.ts",
-      "line": 18
-    },
-    {
-      "method": "POST",
-      "path": "/api/knowledge/add",
-      "access": "admin",
-      "source": "src/modules/knowledge/knowledge.routes.ts",
-      "line": 14
-    },
-    {
-      "method": "POST",
-      "path": "/api/knowledge/bulk-add",
-      "access": "admin",
-      "source": "src/modules/knowledge/knowledge.routes.ts",
-      "line": 15
-    },
-    {
-      "method": "GET",
-      "path": "/api/knowledge/stats",
-      "access": "admin",
-      "source": "src/modules/knowledge/knowledge.routes.ts",
-      "line": 11
-    },
-    {
-      "method": "POST",
-      "path": "/api/knowledge/test-retrieval",
-      "access": "admin",
-      "source": "src/modules/knowledge/knowledge.routes.ts",
-      "line": 10
-    },
-    {
       "method": "POST",
       "path": "/api/leave-requests/team/:teamId/leave-request",
       "access": "authenticated",
@@ -1584,224 +1416,245 @@
       "path": "/api/messages/:messageId/invite-response",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 125
+      "line": 145
     },
     {
       "method": "POST",
       "path": "/api/messages/:messageId/reaction",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 124
+      "line": 144
     },
     {
       "method": "POST",
       "path": "/api/messages/call-summary",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 121
+      "line": 141
     },
     {
       "method": "POST",
       "path": "/api/messages/chat/:userId/mute",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 127
+      "line": 147
     },
     {
       "method": "POST",
       "path": "/api/messages/chat/:userId/pin",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 131
+      "line": 151
     },
     {
       "method": "POST",
       "path": "/api/messages/direct",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 88
+      "line": 89
     },
     {
       "method": "DELETE",
       "path": "/api/messages/direct/:userId",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 122
+      "line": 142
     },
     {
       "method": "GET",
       "path": "/api/messages/direct/:userId",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 89
-    },
-    {
-      "method": "POST",
-      "path": "/api/messages/direct/:userId/mute",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 129
-    },
-    {
-      "method": "POST",
-      "path": "/api/messages/group",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 118
-    },
-    {
-      "method": "POST",
-      "path": "/api/messages/group/:chatRoomId/pin",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 132
-    },
-    {
-      "method": "POST",
-      "path": "/api/messages/join/:inviteToken",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 105
-    },
-    {
-      "method": "GET",
-      "path": "/api/messages/join/:inviteToken/preview",
-      "access": "public",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 98
-    },
-    {
-      "method": "POST",
-      "path": "/api/messages/mark-read",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 120
-    },
-    {
-      "method": "POST",
-      "path": "/api/messages/pin",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 136
-    },
-    {
-      "method": "GET",
-      "path": "/api/messages/preferences",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 126
-    },
-    {
-      "method": "GET",
-      "path": "/api/messages/recent",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
       "line": 90
     },
     {
       "method": "POST",
-      "path": "/api/messages/report",
+      "path": "/api/messages/direct/:userId/mute",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 134
-    },
-    {
-      "method": "GET",
-      "path": "/api/messages/rooms",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 92
+      "line": 149
     },
     {
       "method": "POST",
-      "path": "/api/messages/rooms",
+      "path": "/api/messages/group",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 138
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/group/:chatRoomId/pin",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 152
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/join/:inviteToken",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 125
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/join/:inviteToken/preview",
+      "access": "public",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 118
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/mark-read",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 140
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/media-policy",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 88
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/pin",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 156
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/preferences",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 146
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/recent",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
       "line": 91
     },
     {
-      "method": "DELETE",
-      "path": "/api/messages/rooms/:chatRoomId",
+      "method": "POST",
+      "path": "/api/messages/report",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 123
+      "line": 154
     },
     {
       "method": "GET",
-      "path": "/api/messages/rooms/:chatRoomId",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 119
-    },
-    {
-      "method": "PUT",
-      "path": "/api/messages/rooms/:chatRoomId",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 106
-    },
-    {
-      "method": "POST",
-      "path": "/api/messages/rooms/:chatRoomId/invite-dm",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 96
-    },
-    {
-      "method": "GET",
-      "path": "/api/messages/rooms/:chatRoomId/invite-link",
-      "access": "authenticated",
-      "source": "src/modules/messages/messages.routes.ts",
-      "line": 94
-    },
-    {
-      "method": "POST",
-      "path": "/api/messages/rooms/:chatRoomId/leave",
+      "path": "/api/messages/rooms",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
       "line": 93
     },
     {
       "method": "POST",
+      "path": "/api/messages/rooms",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 92
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/messages/rooms/:chatRoomId",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 143
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/rooms/:chatRoomId",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 139
+    },
+    {
+      "method": "PUT",
+      "path": "/api/messages/rooms/:chatRoomId",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 126
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/rooms/:chatRoomId/clear",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 107
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/messages/rooms/:chatRoomId/conversation",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 98
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/rooms/:chatRoomId/invite-dm",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 116
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/rooms/:chatRoomId/invite-link",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 114
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/rooms/:chatRoomId/leave",
+      "access": "authenticated",
+      "source": "src/modules/messages/messages.routes.ts",
+      "line": 94
+    },
+    {
+      "method": "POST",
       "path": "/api/messages/rooms/:chatRoomId/members",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 115
+      "line": 135
     },
     {
       "method": "DELETE",
       "path": "/api/messages/rooms/:chatRoomId/members/:memberId",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 117
+      "line": 137
     },
     {
       "method": "PUT",
       "path": "/api/messages/rooms/:chatRoomId/members/:memberId/role",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 116
+      "line": 136
     },
     {
       "method": "POST",
       "path": "/api/messages/rooms/:chatRoomId/mute",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 130
+      "line": 150
     },
     {
       "method": "PUT",
       "path": "/api/messages/rooms/:chatRoomId/permissions",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 97
+      "line": 117
     },
     {
       "method": "POST",
       "path": "/api/messages/rooms/:chatRoomId/reset-invite-link",
       "access": "authenticated",
       "source": "src/modules/messages/messages.routes.ts",
-      "line": 95
+      "line": 115
     },
     {
       "method": "GET",
@@ -1906,343 +1759,427 @@
       "path": "/api/music/search",
       "access": "user-or-guest",
       "source": "src/modules/music/music.routes.ts",
-      "line": 128
+      "line": 225
+    },
+    {
+      "method": "POST",
+      "path": "/api/music/upload",
+      "access": "authenticated",
+      "source": "src/modules/music/music.routes.ts",
+      "line": 302
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/music/upload/:id",
+      "access": "authenticated",
+      "source": "src/modules/music/music.routes.ts",
+      "line": 304
+    },
+    {
+      "method": "GET",
+      "path": "/api/music/upload/mine",
+      "access": "authenticated",
+      "source": "src/modules/music/music.routes.ts",
+      "line": 303
     },
     {
       "method": "GET",
       "path": "/api/notifications",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 922
+      "line": 937
     },
     {
       "method": "DELETE",
       "path": "/api/notifications/:id",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 1100
+      "line": 1127
     },
     {
       "method": "PUT",
       "path": "/api/notifications/:id/archive",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 1062
+      "line": 1089
     },
     {
       "method": "POST",
       "path": "/api/notifications/:id/click",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 877
+      "line": 892
     },
     {
       "method": "POST",
       "path": "/api/notifications/:id/delivered",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 812
+      "line": 827
     },
     {
       "method": "POST",
       "path": "/api/notifications/:id/open",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 841
+      "line": 856
     },
     {
       "method": "PUT",
       "path": "/api/notifications/:id/read",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 1007
+      "line": 1034
     },
     {
       "method": "PUT",
       "path": "/api/notifications/:id/unarchive",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 1081
+      "line": 1108
     },
     {
       "method": "DELETE",
       "path": "/api/notifications/client-context",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 537
+      "line": 552
     },
     {
       "method": "POST",
       "path": "/api/notifications/client-context",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 427
+      "line": 442
     },
     {
       "method": "GET",
       "path": "/api/notifications/push-deliveries",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 618
+      "line": 633
     },
     {
       "method": "GET",
       "path": "/api/notifications/push-status",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 560
+      "line": 575
     },
     {
       "method": "POST",
       "path": "/api/notifications/push-test",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 646
+      "line": 661
     },
     {
       "method": "DELETE",
       "path": "/api/notifications/push-token",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 493
+      "line": 508
     },
     {
       "method": "POST",
       "path": "/api/notifications/push-token",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 248
+      "line": 263
     },
     {
       "method": "PUT",
       "path": "/api/notifications/read-all",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 1038
+      "line": 1065
     },
     {
       "method": "DELETE",
       "path": "/api/notifications/voip-token",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 395
+      "line": 410
     },
     {
       "method": "POST",
       "path": "/api/notifications/voip-token",
       "access": "authenticated",
       "source": "src/modules/notifications/notifications.routes.ts",
-      "line": 355
+      "line": 370
+    },
+    {
+      "method": "GET",
+      "path": "/api/payments/apple/catalog",
+      "access": "authenticated",
+      "source": "src/modules/payments/payments.routes.ts",
+      "line": 113
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/apple/intents/boost",
+      "access": "authenticated",
+      "source": "src/modules/payments/payments.routes.ts",
+      "line": 123
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/apple/intents/subscription",
+      "access": "authenticated",
+      "source": "src/modules/payments/payments.routes.ts",
+      "line": 114
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/apple/notifications",
+      "access": "public",
+      "source": "src/modules/payments/payments.routes.ts",
+      "line": 105
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/apple/restore",
+      "access": "authenticated",
+      "source": "src/modules/payments/payments.routes.ts",
+      "line": 140
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/apple/transactions/verify",
+      "access": "authenticated",
+      "source": "src/modules/payments/payments.routes.ts",
+      "line": 131
     },
     {
       "method": "GET",
       "path": "/api/payments/boost/campaigns",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 109
+      "line": 163
     },
     {
       "method": "POST",
       "path": "/api/payments/boost/create-order",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 110
+      "line": 164
     },
     {
       "method": "POST",
       "path": "/api/payments/boost/verify",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 111
+      "line": 165
     },
     {
       "method": "GET",
       "path": "/api/payments/history",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 96
+      "line": 150
     },
     {
       "method": "POST",
       "path": "/api/payments/razorpay/webhook",
       "access": "public",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 94
+      "line": 104
     },
     {
       "method": "POST",
       "path": "/api/payments/subscription/create",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 101
+      "line": 155
     },
     {
       "method": "POST",
       "path": "/api/payments/subscription/create-order",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 99
+      "line": 153
     },
     {
       "method": "POST",
       "path": "/api/payments/subscription/verify",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 100
+      "line": 154
     },
     {
       "method": "POST",
       "path": "/api/payments/subscription/verify-recurring",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 102
+      "line": 156
     },
     {
       "method": "POST",
       "path": "/api/payments/tournament/create-order",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 105
+      "line": 159
     },
     {
       "method": "POST",
       "path": "/api/payments/tournament/verify",
       "access": "authenticated",
       "source": "src/modules/payments/payments.routes.ts",
-      "line": 106
+      "line": 160
     },
     {
       "method": "GET",
       "path": "/api/posts",
       "access": "user-or-guest",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 54
+      "line": 62
     },
     {
       "method": "POST",
       "path": "/api/posts",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 53
+      "line": 61
     },
     {
       "method": "DELETE",
       "path": "/api/posts/:id",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 66
+      "line": 80
     },
     {
       "method": "GET",
       "path": "/api/posts/:id",
       "access": "user-or-guest",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 58
+      "line": 70
     },
     {
       "method": "PUT",
       "path": "/api/posts/:id",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 65
+      "line": 79
+    },
+    {
+      "method": "GET",
+      "path": "/api/posts/:id/availability",
+      "access": "public",
+      "source": "src/modules/posts/posts.routes.ts",
+      "line": 67
     },
     {
       "method": "POST",
       "path": "/api/posts/:id/boost",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 68
+      "line": 82
     },
     {
       "method": "POST",
       "path": "/api/posts/:id/comment",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 61
+      "line": 75
+    },
+    {
+      "method": "GET",
+      "path": "/api/posts/:id/comments",
+      "access": "user-or-guest",
+      "source": "src/modules/posts/posts.routes.ts",
+      "line": 71
     },
     {
       "method": "POST",
       "path": "/api/posts/:id/like",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 60
+      "line": 74
+    },
+    {
+      "method": "GET",
+      "path": "/api/posts/:id/likes",
+      "access": "user-or-guest",
+      "source": "src/modules/posts/posts.routes.ts",
+      "line": 72
     },
     {
       "method": "POST",
       "path": "/api/posts/:id/report",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 67
+      "line": 81
     },
     {
       "method": "POST",
       "path": "/api/posts/:id/save",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 63
+      "line": 77
     },
     {
       "method": "POST",
       "path": "/api/posts/:id/share",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 62
+      "line": 76
     },
     {
       "method": "POST",
       "path": "/api/posts/:id/view",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 59
+      "line": 73
     },
     {
       "method": "GET",
       "path": "/api/posts/clips",
       "access": "user-or-guest",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 55
+      "line": 63
     },
     {
       "method": "POST",
       "path": "/api/posts/interaction",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 64
+      "line": 78
     },
     {
       "method": "GET",
       "path": "/api/posts/liked",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 57
+      "line": 69
     },
     {
       "method": "GET",
       "path": "/api/posts/saved",
       "access": "authenticated",
       "source": "src/modules/posts/posts.routes.ts",
-      "line": 56
+      "line": 68
     },
     {
       "method": "GET",
       "path": "/api/random-connections/active-sessions",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 103
+      "line": 112
     },
     {
       "method": "POST",
       "path": "/api/random-connections/cleanup-current",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 107
+      "line": 116
     },
     {
       "method": "GET",
       "path": "/api/random-connections/current-connection",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 102
+      "line": 110
     },
     {
       "method": "GET",
@@ -2256,7 +2193,7 @@
       "path": "/api/random-connections/disconnect",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 104
+      "line": 113
     },
     {
       "method": "GET",
@@ -2267,24 +2204,31 @@
     },
     {
       "method": "POST",
+      "path": "/api/random-connections/heartbeat",
+      "access": "authenticated",
+      "source": "src/modules/random-connections/random-connections.routes.ts",
+      "line": 111
+    },
+    {
+      "method": "POST",
       "path": "/api/random-connections/join-queue",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 100
+      "line": 108
     },
     {
       "method": "DELETE",
       "path": "/api/random-connections/leave-queue",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 101
+      "line": 109
     },
     {
       "method": "POST",
       "path": "/api/random-connections/next",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 105
+      "line": 114
     },
     {
       "method": "GET",
@@ -2298,70 +2242,84 @@
       "path": "/api/random-connections/send-message",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 106
+      "line": 115
     },
     {
       "method": "POST",
       "path": "/api/random-connections/v2/cleanup-current",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 115
+      "line": 125
     },
     {
       "method": "GET",
       "path": "/api/random-connections/v2/current-connection",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 113
+      "line": 122
     },
     {
       "method": "POST",
       "path": "/api/random-connections/v2/disconnect",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 114
+      "line": 124
+    },
+    {
+      "method": "POST",
+      "path": "/api/random-connections/v2/heartbeat",
+      "access": "authenticated",
+      "source": "src/modules/random-connections/random-connections.routes.ts",
+      "line": 123
     },
     {
       "method": "POST",
       "path": "/api/random-connections/v2/join-queue",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 111
+      "line": 120
     },
     {
       "method": "DELETE",
       "path": "/api/random-connections/v2/leave-queue",
       "access": "authenticated",
       "source": "src/modules/random-connections/random-connections.routes.ts",
-      "line": 112
+      "line": 121
     },
     {
       "method": "PUT",
       "path": "/api/recruitment/applications/:applicationId/status",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 49
+      "line": 50
     },
     {
       "method": "GET",
       "path": "/api/recruitment/applications/my",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 46
+      "line": 47
     },
     {
       "method": "GET",
       "path": "/api/recruitment/applications/team",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 47
+      "line": 48
+    },
+    {
+      "method": "GET",
+      "path": "/api/recruitment/entitlements",
+      "access": "authenticated",
+      "source": "src/modules/recruitment/recruitment.routes.ts",
+      "line": 32
     },
     {
       "method": "GET",
       "path": "/api/recruitment/player-profiles",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 32
+      "line": 33
     },
     {
       "method": "POST",
@@ -2375,28 +2333,28 @@
       "path": "/api/recruitment/player-profiles/:id",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 37
+      "line": 38
     },
     {
       "method": "GET",
       "path": "/api/recruitment/player-profiles/:id",
       "access": "public-optional-auth",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 34
+      "line": 35
     },
     {
       "method": "PUT",
       "path": "/api/recruitment/player-profiles/:id",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 36
+      "line": 37
     },
     {
       "method": "POST",
       "path": "/api/recruitment/player-profiles/:profileId/interest",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 44
+      "line": 45
     },
     {
       "method": "GET",
@@ -2410,21 +2368,21 @@
       "path": "/api/recruitment/profile/:code",
       "access": "public-optional-auth",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 35
+      "line": 36
     },
     {
       "method": "GET",
       "path": "/api/recruitment/profile/:code/preview",
       "access": "public-optional-auth",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 33
+      "line": 34
     },
     {
       "method": "POST",
       "path": "/api/recruitment/profile/:profileId/interest",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 45
+      "line": 46
     },
     {
       "method": "GET",
@@ -2445,21 +2403,21 @@
       "path": "/api/recruitment/recruitment/:recruitmentId/apply",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 42
+      "line": 43
     },
     {
       "method": "POST",
       "path": "/api/recruitment/recruitment/:recruitmentId/withdraw",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 43
+      "line": 44
     },
     {
       "method": "GET",
       "path": "/api/recruitment/team-applications",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 48
+      "line": 49
     },
     {
       "method": "GET",
@@ -2515,21 +2473,21 @@
       "path": "/api/recruitment/team-recruitments/:recruitmentId/apply",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 40
+      "line": 41
     },
     {
       "method": "POST",
       "path": "/api/recruitment/team-recruitments/:recruitmentId/apply",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 39
+      "line": 40
     },
     {
       "method": "POST",
       "path": "/api/recruitment/team-recruitments/:recruitmentId/withdraw",
       "access": "authenticated",
       "source": "src/modules/recruitment/recruitment.routes.ts",
-      "line": 41
+      "line": 42
     },
     {
       "method": "POST",
@@ -3068,329 +3026,336 @@
       "path": "/api/users",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 72
+      "line": 85
     },
     {
       "method": "GET",
       "path": "/api/users/:id/clips",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 107
+      "line": 123
     },
     {
       "method": "DELETE",
       "path": "/api/users/:id/follow",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 103
+      "line": 119
     },
     {
       "method": "POST",
       "path": "/api/users/:id/follow",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 102
+      "line": 118
     },
     {
       "method": "GET",
       "path": "/api/users/:id/followers",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 104
+      "line": 120
     },
     {
       "method": "GET",
       "path": "/api/users/:id/following",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 105
+      "line": 121
     },
     {
       "method": "GET",
       "path": "/api/users/:id/posts",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 106
+      "line": 122
     },
     {
       "method": "GET",
       "path": "/api/users/:identifier",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 101
+      "line": 117
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/:identifier/availability",
+      "access": "public",
+      "source": "src/modules/users/users.routes.ts",
+      "line": 116
     },
     {
       "method": "GET",
       "path": "/api/users/:identifier/tournaments",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 91
+      "line": 104
     },
     {
       "method": "POST",
       "path": "/api/users/:teamId/leave-request",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 116
+      "line": 132
     },
     {
       "method": "GET",
       "path": "/api/users/:teamId/leave-requests",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 117
+      "line": 133
     },
     {
       "method": "GET",
       "path": "/api/users/:teamId/pending-invites",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 115
+      "line": 131
     },
     {
       "method": "DELETE",
       "path": "/api/users/:teamId/roster/:game/:playerId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 110
+      "line": 126
     },
     {
       "method": "DELETE",
       "path": "/api/users/:teamId/roster/:game/leave",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 109
+      "line": 125
     },
     {
       "method": "POST",
       "path": "/api/users/:teamId/roster/add",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 108
+      "line": 124
     },
     {
       "method": "DELETE",
       "path": "/api/users/:teamId/staff/:playerId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 114
+      "line": 130
     },
     {
       "method": "POST",
       "path": "/api/users/:teamId/staff/add",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 111
+      "line": 127
     },
     {
       "method": "POST",
       "path": "/api/users/:teamId/staff/add-by-username",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 112
+      "line": 128
     },
     {
       "method": "DELETE",
       "path": "/api/users/:teamId/staff/cancel-by-username",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 113
+      "line": 129
     },
     {
       "method": "GET",
       "path": "/api/users/:userId/dm-privacy",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 97
+      "line": 110
     },
     {
       "method": "GET",
       "path": "/api/users/:username/tournament-history",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 92
+      "line": 105
     },
     {
       "method": "GET",
       "path": "/api/users/avatar/:userId",
       "access": "public",
       "source": "src/modules/users/users.routes.ts",
-      "line": 75
+      "line": 88
     },
     {
       "method": "DELETE",
       "path": "/api/users/block/:username",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 78
+      "line": 91
     },
     {
       "method": "POST",
       "path": "/api/users/block/:username",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 77
+      "line": 90
     },
     {
       "method": "GET",
       "path": "/api/users/blocked",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 76
+      "line": 89
     },
     {
       "method": "POST",
       "path": "/api/users/create-team",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 74
+      "line": 87
     },
     {
       "method": "POST",
       "path": "/api/users/follow-requests/:requestId/accept",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 99
+      "line": 112
     },
     {
       "method": "POST",
       "path": "/api/users/follow-requests/:requestId/reject",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 100
+      "line": 113
     },
     {
       "method": "GET",
       "path": "/api/users/follow-requests/incoming",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 98
+      "line": 111
     },
     {
       "method": "GET",
       "path": "/api/users/gaming-stats",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 85
+      "line": 98
     },
     {
       "method": "POST",
       "path": "/api/users/gaming-stats",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 86
+      "line": 99
     },
     {
       "method": "DELETE",
       "path": "/api/users/gaming-stats/:statId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 88
+      "line": 101
     },
     {
       "method": "PUT",
       "path": "/api/users/gaming-stats/:statId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 87
+      "line": 100
     },
     {
       "method": "POST",
       "path": "/api/users/gaming-stats/sync-coc",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 89
+      "line": 102
     },
     {
       "method": "POST",
       "path": "/api/users/gaming-stats/sync-cr",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 90
+      "line": 103
     },
     {
       "method": "POST",
       "path": "/api/users/leave-requests/:requestId/approve",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 118
+      "line": 134
     },
     {
       "method": "POST",
       "path": "/api/users/leave-requests/:requestId/reject",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 119
+      "line": 135
     },
     {
       "method": "GET",
       "path": "/api/users/notification-settings",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 95
+      "line": 108
     },
     {
       "method": "PUT",
       "path": "/api/users/notification-settings",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 96
+      "line": 109
     },
     {
       "method": "GET",
       "path": "/api/users/privacy-settings",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 93
+      "line": 106
     },
     {
       "method": "PUT",
       "path": "/api/users/privacy-settings",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 94
+      "line": 107
     },
     {
       "method": "DELETE",
       "path": "/api/users/roster-invite/:inviteId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 79
+      "line": 92
     },
     {
       "method": "GET",
       "path": "/api/users/roster-invites",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 81
+      "line": 94
     },
     {
       "method": "POST",
       "path": "/api/users/roster-invites/:inviteId/accept",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 82
+      "line": 95
     },
     {
       "method": "POST",
       "path": "/api/users/roster-invites/:inviteId/decline",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 83
+      "line": 96
     },
     {
       "method": "GET",
       "path": "/api/users/search",
       "access": "user-or-guest",
       "source": "src/modules/users/users.routes.ts",
-      "line": 73
+      "line": 86
     },
     {
       "method": "DELETE",
       "path": "/api/users/staff-invite/:inviteId",
       "access": "authenticated",
       "source": "src/modules/users/users.routes.ts",
-      "line": 84
+      "line": 97
     },
     {
       "method": "GET",
@@ -3402,40 +3367,46 @@
   ],
   "sockets": [
     {
-      "direction": "outbound",
-      "event": "broadcast_message",
-      "source": "src/legacy-src/controllers/tournamentController.js",
-      "line": 879
+      "direction": "inbound",
+      "event": "bind-random-session",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 562
     },
     {
       "direction": "outbound",
       "event": "broadcast_message",
       "source": "src/legacy-src/controllers/tournamentController.js",
-      "line": 888
+      "line": 958
+    },
+    {
+      "direction": "outbound",
+      "event": "broadcast_message",
+      "source": "src/legacy-src/controllers/tournamentController.js",
+      "line": 967
     },
     {
       "direction": "outbound",
       "event": "broadcast-notification",
       "source": "src/legacy-src/utils/notificationEmitter.js",
-      "line": 31
+      "line": 32
     },
     {
       "direction": "outbound",
       "event": "broadcast-push-notification",
       "source": "src/legacy-src/utils/notificationEmitter.js",
-      "line": 44
+      "line": 45
     },
     {
       "direction": "inbound",
       "event": "call-accept",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 668
+      "line": 927
     },
     {
       "direction": "outbound",
       "event": "call-accept",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 668
+      "line": 927
     },
     {
       "direction": "outbound",
@@ -3453,13 +3424,13 @@
       "direction": "inbound",
       "event": "call-end",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 668
+      "line": 927
     },
     {
       "direction": "outbound",
       "event": "call-end",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 668
+      "line": 927
     },
     {
       "direction": "outbound",
@@ -3482,122 +3453,140 @@
     {
       "direction": "outbound",
       "event": "call-end",
+      "source": "src/legacy-src/services/callSessionService.js",
+      "line": 87
+    },
+    {
+      "direction": "outbound",
+      "event": "call-end",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 172
+      "line": 216
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 503
+      "line": 749
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 518
+      "line": 769
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 524
+      "line": 775
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 532
+      "line": 783
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 549
+      "line": 800
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 562
+      "line": 813
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 583
+      "line": 834
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 600
+      "line": 851
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 719
+      "line": 948
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 784
+      "line": 997
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 798
+      "line": 1055
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 802
+      "line": 1077
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 806
+      "line": 1091
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 811
+      "line": 1095
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 858
+      "line": 1099
     },
     {
       "direction": "outbound",
       "event": "call-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 902
+      "line": 1104
+    },
+    {
+      "direction": "outbound",
+      "event": "call-error",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 1178
+    },
+    {
+      "direction": "outbound",
+      "event": "call-error",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 1251
     },
     {
       "direction": "outbound",
       "event": "call-missed",
       "source": "src/legacy-src/services/callSessionService.js",
-      "line": 315
+      "line": 347
     },
     {
       "direction": "inbound",
       "event": "call-reject",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 668
+      "line": 927
     },
     {
       "direction": "outbound",
       "event": "call-reject",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 668
+      "line": 927
     },
     {
       "direction": "outbound",
@@ -3615,7 +3604,7 @@
       "direction": "inbound",
       "event": "call-request",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 489
+      "line": 735
     },
     {
       "direction": "outbound",
@@ -3627,7 +3616,7 @@
       "direction": "outbound",
       "event": "call-request",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 607
+      "line": 861
     },
     {
       "direction": "outbound",
@@ -3656,26 +3645,38 @@
     {
       "direction": "outbound",
       "event": "call-session-updated",
-      "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 710
+      "source": "src/legacy-src/services/callSessionService.js",
+      "line": 88
     },
     {
       "direction": "outbound",
       "event": "call-session-updated",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 711
+      "line": 985
+    },
+    {
+      "direction": "outbound",
+      "event": "call-session-updated",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 987
+    },
+    {
+      "direction": "outbound",
+      "event": "call-session-updated",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 988
     },
     {
       "direction": "inbound",
       "event": "call-signal",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 727
+      "line": 1005
     },
     {
       "direction": "outbound",
       "event": "call-signal",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 769
+      "line": 1062
     },
     {
       "direction": "outbound",
@@ -3723,13 +3724,7 @@
       "direction": "outbound",
       "event": "connection-matched",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1275
-    },
-    {
-      "direction": "outbound",
-      "event": "connection-matched",
-      "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1276
+      "line": 1547
     },
     {
       "direction": "outbound",
@@ -3831,103 +3826,145 @@
       "direction": "inbound",
       "event": "disconnect",
       "source": "src/infrastructure/websocket/socket.ts",
-      "line": 133
+      "line": 175
     },
     {
       "direction": "inbound",
       "event": "disconnect",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 918
+      "line": 1267
+    },
+    {
+      "direction": "outbound",
+      "event": "follow-request-updated",
+      "source": "src/legacy-src/controllers/userController.js",
+      "line": 999
     },
     {
       "direction": "outbound",
       "event": "group-call-ended",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 343
+      "line": 509
+    },
+    {
+      "direction": "outbound",
+      "event": "group-call-ended",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 510
     },
     {
       "direction": "outbound",
       "event": "group-call-incoming",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 840
+      "line": 1153
     },
     {
       "direction": "inbound",
       "event": "group-call-join",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 848
+      "line": 1168
     },
     {
       "direction": "outbound",
       "event": "group-call-joined",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 834
+      "line": 1131
     },
     {
       "direction": "outbound",
       "event": "group-call-joined",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 879
+      "line": 1221
     },
     {
       "direction": "inbound",
       "event": "group-call-leave",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 912
+      "line": 1261
     },
     {
       "direction": "outbound",
       "event": "group-call-not-found",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 854
+      "line": 1174
     },
     {
       "direction": "outbound",
       "event": "group-call-participant-joined",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 885
+      "line": 1228
     },
     {
       "direction": "outbound",
       "event": "group-call-participant-left",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 333
+      "line": 523
     },
     {
       "direction": "outbound",
       "event": "group-call-participant-left",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 339
+      "line": 529
     },
     {
       "direction": "inbound",
       "event": "group-call-request",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 791
+      "line": 1084
     },
     {
       "direction": "inbound",
       "event": "group-call-signal",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 888
+      "line": 1237
     },
     {
       "direction": "outbound",
       "event": "group-call-signal",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 905
+      "line": 1254
     },
     {
       "direction": "outbound",
       "event": "groupInfoUpdated",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 1643
+      "line": 1771
+    },
+    {
+      "direction": "outbound",
+      "event": "groupInfoUpdated",
+      "source": "src/legacy-src/controllers/messageController.js",
+      "line": 1777
+    },
+    {
+      "direction": "outbound",
+      "event": "groupMemberRoleUpdated",
+      "source": "src/legacy-src/controllers/messageController.js",
+      "line": 2204
+    },
+    {
+      "direction": "outbound",
+      "event": "groupMemberRoleUpdated",
+      "source": "src/legacy-src/controllers/messageController.js",
+      "line": 2205
     },
     {
       "direction": "outbound",
       "event": "groupPermissionsUpdated",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2751
+      "line": 3085
+    },
+    {
+      "direction": "outbound",
+      "event": "invite_status_updated",
+      "source": "src/legacy-src/controllers/messageController.js",
+      "line": 2394
+    },
+    {
+      "direction": "outbound",
+      "event": "invite_status_updated",
+      "source": "src/legacy-src/controllers/messageController.js",
+      "line": 2398
     },
     {
       "direction": "inbound",
@@ -3939,19 +3976,19 @@
       "direction": "inbound",
       "event": "join-random-queue",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 354
+      "line": 546
     },
     {
       "direction": "inbound",
       "event": "join-random-room",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 370
+      "line": 596
     },
     {
       "direction": "inbound",
       "event": "join-user-room",
       "source": "src/infrastructure/websocket/socket.ts",
-      "line": 110
+      "line": 152
     },
     {
       "direction": "inbound",
@@ -3963,85 +4000,85 @@
       "direction": "inbound",
       "event": "leave-random-queue",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 363
+      "line": 555
     },
     {
       "direction": "inbound",
       "event": "leave-random-room",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 390
+      "line": 621
     },
     {
       "direction": "inbound",
       "event": "media-state",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 475
+      "line": 716
     },
     {
       "direction": "outbound",
       "event": "media-state",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 482
+      "line": 732
     },
     {
       "direction": "outbound",
       "event": "memberLeft",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2458
+      "line": 2768
     },
     {
       "direction": "outbound",
       "event": "memberRemoved",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 1900
+      "line": 2029
     },
     {
       "direction": "outbound",
       "event": "message_deleted",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2266
+      "line": 2562
     },
     {
       "direction": "outbound",
       "event": "message_deleted",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2267
+      "line": 2563
     },
     {
       "direction": "outbound",
       "event": "message_deleted",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2373
+      "line": 2661
     },
     {
       "direction": "outbound",
       "event": "message_reaction",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 1527
+      "line": 1625
     },
     {
       "direction": "outbound",
       "event": "message_reaction",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 1529
+      "line": 1627
     },
     {
       "direction": "outbound",
       "event": "message_reaction",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 1530
+      "line": 1628
     },
     {
       "direction": "outbound",
       "event": "new-notification",
       "source": "src/legacy-src/utils/notificationEmitter.js",
-      "line": 20
+      "line": 21
     },
     {
       "direction": "outbound",
       "event": "new-notification",
       "source": "src/legacy-src/utils/notificationEmitter.js",
-      "line": 316
+      "line": 366
     },
     {
       "direction": "outbound",
@@ -4053,73 +4090,85 @@
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 350
+      "line": 389
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 1214
+      "line": 1293
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 1640
+      "line": 1755
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 1779
+      "line": 1907
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 1895
+      "line": 2024
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2454
+      "line": 2185
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2591
+      "line": 2373
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2596
+      "line": 2764
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2774
+      "line": 2925
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 2922
+      "line": 2930
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/messageController.js",
-      "line": 3009
+      "line": 3109
+    },
+    {
+      "direction": "outbound",
+      "event": "newMessage",
+      "source": "src/legacy-src/controllers/messageController.js",
+      "line": 3260
+    },
+    {
+      "direction": "outbound",
+      "event": "newMessage",
+      "source": "src/legacy-src/controllers/messageController.js",
+      "line": 3347
     },
     {
       "direction": "outbound",
       "event": "newMessage",
       "source": "src/legacy-src/controllers/recruitmentController.js",
-      "line": 175
+      "line": 189
     },
     {
       "direction": "outbound",
@@ -4129,27 +4178,33 @@
     },
     {
       "direction": "outbound",
-      "event": "partner-disconnected",
-      "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1314
+      "event": "newMessage",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 474
     },
     {
       "direction": "outbound",
       "event": "partner-disconnected",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1453
+      "line": 1587
     },
     {
       "direction": "outbound",
       "event": "partner-disconnected",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1518
+      "line": 1875
     },
     {
       "direction": "outbound",
       "event": "partner-disconnected",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1731
+      "line": 1941
+    },
+    {
+      "direction": "outbound",
+      "event": "partner-disconnected",
+      "source": "src/legacy-src/controllers/randomConnectController.js",
+      "line": 2168
     },
     {
       "direction": "outbound",
@@ -4197,19 +4252,19 @@
       "direction": "inbound",
       "event": "ping",
       "source": "src/infrastructure/websocket/socket.ts",
-      "line": 122
+      "line": 164
     },
     {
       "direction": "outbound",
       "event": "pong",
       "source": "src/infrastructure/websocket/socket.ts",
-      "line": 122
+      "line": 164
     },
     {
       "direction": "outbound",
       "event": "premium-entitlement-changed",
       "source": "src/legacy-src/services/premiumMembershipService.js",
-      "line": 344
+      "line": 356
     },
     {
       "direction": "outbound",
@@ -4269,43 +4324,37 @@
       "direction": "outbound",
       "event": "profile-updated",
       "source": "src/legacy-src/controllers/userController.js",
-      "line": 1811
+      "line": 1905
     },
     {
       "direction": "outbound",
       "event": "profile-updated",
       "source": "src/legacy-src/controllers/userController.js",
-      "line": 1895
+      "line": 1989
     },
     {
       "direction": "outbound",
       "event": "profile-updated",
       "source": "src/legacy-src/controllers/userController.js",
-      "line": 3674
+      "line": 3819
     },
     {
       "direction": "inbound",
       "event": "random-connection-message",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 408
+      "line": 640
     },
     {
       "direction": "outbound",
       "event": "random-connection-message",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1662
+      "line": 2109
     },
     {
       "direction": "outbound",
       "event": "random-connection-message",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1667
-    },
-    {
-      "direction": "outbound",
-      "event": "random-connection-message",
-      "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1676
+      "line": 2112
     },
     {
       "direction": "outbound",
@@ -4317,97 +4366,115 @@
       "direction": "outbound",
       "event": "random-connection-message",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 418
+      "line": 652
+    },
+    {
+      "direction": "outbound",
+      "event": "random-session-bound",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 593
     },
     {
       "direction": "outbound",
       "event": "random-session-ended",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 216
+      "line": 245
     },
     {
       "direction": "outbound",
       "event": "random-session-ended",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1459
+      "line": 342
     },
     {
       "direction": "outbound",
       "event": "random-session-ended",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1526
+      "line": 1881
     },
     {
       "direction": "outbound",
       "event": "random-session-ended",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 1737
+      "line": 1949
+    },
+    {
+      "direction": "outbound",
+      "event": "random-session-ended",
+      "source": "src/legacy-src/controllers/randomConnectController.js",
+      "line": 2174
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 377
+      "line": 585
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 401
+      "line": 606
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 415
+      "line": 633
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 436
+      "line": 649
     },
     {
       "direction": "outbound",
       "event": "random-session-error",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 453
+      "line": 672
+    },
+    {
+      "direction": "outbound",
+      "event": "random-session-error",
+      "source": "src/modules/legacy/legacy.socket.ts",
+      "line": 691
     },
     {
       "direction": "inbound",
       "event": "random-session-ready",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 396
+      "line": 627
     },
     {
       "direction": "outbound",
       "event": "random-session-ready",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 298
+      "line": 432
     },
     {
       "direction": "outbound",
       "event": "random-session-timer-started",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 330
+      "line": 464
     },
     {
       "direction": "outbound",
       "event": "random-session-timer-sync",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 337
+      "line": 471
     },
     {
       "direction": "outbound",
       "event": "random-session-timer-sync",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 387
+      "line": 618
     },
     {
       "direction": "outbound",
       "event": "random-session-timer-warning",
       "source": "src/legacy-src/controllers/randomConnectController.js",
-      "line": 180
+      "line": 306
     },
     {
       "direction": "outbound",
@@ -4425,7 +4492,7 @@
       "direction": "outbound",
       "event": "room-joined",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 382
+      "line": 613
     },
     {
       "direction": "inbound",
@@ -4435,15 +4502,27 @@
     },
     {
       "direction": "outbound",
-      "event": "tournament_updated",
-      "source": "src/legacy-src/controllers/tournamentController.js",
-      "line": 804
+      "event": "team_membership_updated",
+      "source": "src/legacy-src/controllers/messageController.js",
+      "line": 2423
+    },
+    {
+      "direction": "outbound",
+      "event": "team_membership_updated",
+      "source": "src/legacy-src/controllers/messageController.js",
+      "line": 2424
     },
     {
       "direction": "outbound",
       "event": "tournament_updated",
       "source": "src/legacy-src/controllers/tournamentController.js",
-      "line": 841
+      "line": 883
+    },
+    {
+      "direction": "outbound",
+      "event": "tournament_updated",
+      "source": "src/legacy-src/controllers/tournamentController.js",
+      "line": 920
     },
     {
       "direction": "inbound",
@@ -4461,7 +4540,7 @@
       "direction": "outbound",
       "event": "user-joined-room",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 383
+      "line": 614
     },
     {
       "direction": "outbound",
@@ -4479,37 +4558,37 @@
       "direction": "inbound",
       "event": "video-state-change",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 462
+      "line": 700
     },
     {
       "direction": "outbound",
       "event": "video-state-change",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 469
+      "line": 709
     },
     {
       "direction": "inbound",
       "event": "webrtc-request-offer",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 446
+      "line": 682
     },
     {
       "direction": "outbound",
       "event": "webrtc-request-offer",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 456
+      "line": 694
     },
     {
       "direction": "inbound",
       "event": "webrtc-signal",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 426
+      "line": 660
     },
     {
       "direction": "outbound",
       "event": "webrtc-signal",
       "source": "src/modules/legacy/legacy.socket.ts",
-      "line": 439
+      "line": 675
     }
   ]
 }

@@ -17,7 +17,6 @@ const PLAYER_PLANS = [
     creditsPerMonth: 0,
     description: 'Get started with basic limits.',
     features: [
-      'AI Coach – 15 messages/day',
       'Random Connect — 3-minute call duration',
       'Gender Filter — 5 uses/day',
       '2 player cards/month',

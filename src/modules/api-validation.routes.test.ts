@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import type { Request, Response } from "express";
-import aiCoachRouter from "./ai-coach/ai-coach.routes";
-import aiRecruitmentRouter from "./ai-recruitment/ai-recruitment.routes";
 import adminRouter, { rejectStructuredAdminQuery } from "./admin/admin.routes";
 import broadcastRouter from "./admin/broadcast.routes";
 import broadcastTemplateRouter from "./admin/broadcast-template.routes";
@@ -221,19 +219,6 @@ const run = (): void => {
 
   assertValidationTerminal(reportsRouter, "post", "/");
   assertValidationTerminal(hostVerificationRouter, "post", "/apply");
-  [
-    ["post", "/multiple"],
-    ["post", "/rate"],
-    ["get", "/conversation/:conversationId"],
-    ["put", "/conversation/:conversationId/rename"],
-    ["delete", "/conversation/:conversationId"]
-  ].forEach(([method, path]) => assertValidationTerminal(aiCoachRouter, method, path));
-  [
-    ["post", "/smart-search"],
-    ["post", "/match-players"],
-    ["post", "/analyze-application"],
-    ["post", "/rank-candidates"]
-  ].forEach(([method, path]) => assertValidationTerminal(aiRecruitmentRouter, method, path));
   [
     ["post", "/team/:teamId/leave-request"],
     ["get", "/team/:teamId/leave-requests"],

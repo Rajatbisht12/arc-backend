@@ -32,18 +32,7 @@ const run = async () => {
   assert(getAllowedOrigins().includes('https://admin.squadhunt.com'));
   assert(getAllowedOrigins().includes('https://admin.squadhunt.in'));
 
-  const knowledgeRouter = unwrapDefault(await import('../knowledge/knowledge.routes.ts'));
   const feedbackRouter = unwrapDefault(await import('../feedback/feedback.routes.ts'));
-
-  for (const [method, routePath] of [['post', '/test-retrieval'], ['get', '/stats']]) {
-    const route = findRoute(knowledgeRouter, method, routePath);
-    assert(route, `Missing knowledge route ${method.toUpperCase()} ${routePath}`);
-    assert.strictEqual(
-      route.route.stack[0]?.name,
-      'requireHardcodedAdminAuth',
-      `${method.toUpperCase()} ${routePath} must be admin-authenticated`
-    );
-  }
 
   const feedbackSubmission = findRoute(feedbackRouter, 'post', '/');
   assert(feedbackSubmission, 'Missing public feedback submission route');
@@ -93,38 +82,6 @@ const run = async () => {
       )),
       `Payment mutation POST ${routePath} must be rate limited`
     );
-  }
-
-  const knowledgeController = require('../../legacy-src/controllers/knowledgeController');
-  for (const handlerName of ['getKnowledgeById', 'deleteKnowledge']) {
-    const res = responseRecorder();
-    await knowledgeController[handlerName]({ params: { id: 'not-an-object-id' } }, res);
-    assert.strictEqual(res.statusCode, 400, `${handlerName} must reject an invalid ObjectId with 400`);
-  }
-  {
-    const res = responseRecorder();
-    await knowledgeController.updateKnowledge(
-      { params: { id: 'not-an-object-id' }, body: {} },
-      res
-    );
-    assert.strictEqual(res.statusCode, 400, 'updateKnowledge must reject an invalid ObjectId with 400');
-  }
-  {
-    const res = responseRecorder();
-    await knowledgeController.addKnowledge({
-      body: { question: 'Valid?', answer: 'Yes', keywords: { $ne: null }, tags: [] }
-    }, res);
-    assert.strictEqual(res.statusCode, 400, 'addKnowledge must reject non-array keyword input');
-  }
-  {
-    const res = responseRecorder();
-    await knowledgeController.bulkAddKnowledge({ body: { knowledgeItems: Array(101).fill({}) } }, res);
-    assert.strictEqual(res.statusCode, 400, 'bulkAddKnowledge must enforce its batch limit');
-  }
-  {
-    const res = responseRecorder();
-    await knowledgeController.testRetrieval({ body: { query: 'x'.repeat(501) } }, res);
-    assert.strictEqual(res.statusCode, 400, 'testRetrieval must enforce its query limit');
   }
 
   const feedbackController = require('../../legacy-src/controllers/feedbackController');
@@ -189,8 +146,6 @@ const run = async () => {
   ))?.access;
   assert.strictEqual(accessFor('GET', '/api/chat/:chatId/messages'), 'authenticated');
   assert.strictEqual(accessFor('POST', '/api/chat/messages'), 'authenticated');
-  assert.strictEqual(accessFor('GET', '/api/knowledge/stats'), 'admin');
-  assert.strictEqual(accessFor('POST', '/api/knowledge/test-retrieval'), 'admin');
   assert.strictEqual(accessFor('POST', '/api/admin/auth/login'), 'public');
   assert.strictEqual(accessFor('GET', '/api/tournaments'), 'public-optional-auth');
   assert.strictEqual(accessFor('POST', '/api/tournaments'), 'authenticated');
