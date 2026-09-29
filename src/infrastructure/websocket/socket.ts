@@ -10,6 +10,8 @@ import { registerChatSocketHandlers } from "../../modules/chat/chat.socket";
 import { registerLegacySocketHandlers } from "../../modules/legacy/legacy.socket";
 import { backendMiddlewarePath } from "../../modules/legacy/legacy.paths";
 import { socketRedisPubClient, socketRedisSubClient } from "../cache/redis";
+import { redisCacheClient } from "../cache/redis";
+import { SocketConnectionGuard } from "../security/socketConnectionGuard";
 import {
   announcePresenceConnected,
   announcePresenceDisconnected,
@@ -40,6 +42,12 @@ declare module "socket.io" {
 
 export const createSocketServer = (httpServer: HttpServer): Server => {
   const allowedOrigins = getAllowedOrigins();
+  const connectionGuard = new SocketConnectionGuard({
+    redis: redisCacheClient,
+    windowSeconds: env.SOCKET_CONNECTION_RATE_WINDOW_SECONDS,
+    maxConnectionsPerWindow: env.SOCKET_CONNECTION_RATE_MAX,
+    originAuthSecret: env.CLOUDFLARE_ORIGIN_AUTH_SECRET
+  });
   const io = new Server(httpServer, {
     cors: {
       origin: allowedOrigins,
@@ -51,7 +59,12 @@ export const createSocketServer = (httpServer: HttpServer): Server => {
     pingTimeout: 60000,
     pingInterval: 25000,
     upgradeTimeout: 30000,
-    maxHttpBufferSize: 1e6
+    maxHttpBufferSize: 1e6,
+    allowRequest: (request, callback) => {
+      void connectionGuard.allow(request)
+        .then((allowed) => callback(allowed ? null : "Too many connection attempts", allowed))
+        .catch(() => callback("Connection validation failed", false));
+    }
   });
 
   io.use(async (socket, next) => {
@@ -85,6 +98,15 @@ export const createSocketServer = (httpServer: HttpServer): Server => {
       }
       if (user.needsProfileCompletion === true) {
         return next(new Error("PROFILE_COMPLETION_REQUIRED"));
+      }
+
+      const existingSockets = await io.in(`user-${userId}`).fetchSockets();
+      if (existingSockets.length >= env.SOCKET_MAX_CONNECTIONS_PER_USER) {
+        logger.warn("Socket connection rejected: per-user connection limit reached", {
+          userId: String(userId),
+          activeConnections: existingSockets.length
+        });
+        return next(new Error("Too many active connections"));
       }
 
       socket.authUser = { userId: String(userId) };

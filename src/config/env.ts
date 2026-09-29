@@ -18,6 +18,15 @@ const envSchema = z.object({
   REDIS_PASSWORD: z.string().optional(),
   REDIS_TLS: z.string().optional().transform((v) => v === "true"),
 
+  // Cloudflare edge/origin rollout. Keep origin authentication off until the
+  // request-header transform is present and verified through the proxied host.
+  CLOUDFLARE_ORIGIN_AUTH_MODE: z.enum(["off", "observe", "enforce"]).default("off"),
+  CLOUDFLARE_ORIGIN_AUTH_SECRET: z.string().optional(),
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(1).max(2).default(1),
+  SOCKET_CONNECTION_RATE_WINDOW_SECONDS: z.coerce.number().int().min(1).max(300).default(10),
+  SOCKET_CONNECTION_RATE_MAX: z.coerce.number().int().min(5).max(1000).default(30),
+  SOCKET_MAX_CONNECTIONS_PER_USER: z.coerce.number().int().min(1).max(100).default(8),
+
   // JWT
   JWT_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
@@ -99,6 +108,13 @@ const envSchema = z.object({
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD_HASH: z.string().optional(),
 }).superRefine((value, context) => {
+  if (value.CLOUDFLARE_ORIGIN_AUTH_MODE !== "off" && (value.CLOUDFLARE_ORIGIN_AUTH_SECRET || "").length < 32) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["CLOUDFLARE_ORIGIN_AUTH_SECRET"],
+      message: "Cloudflare origin authentication requires a secret with at least 32 characters"
+    });
+  }
   if (value.NODE_ENV !== "production") return;
   const key = value.BANK_DETAILS_ENCRYPTION_KEY || "";
   if (!/^[\x20-\x7E]{32,}$/.test(key)) {

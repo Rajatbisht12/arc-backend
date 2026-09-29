@@ -9,10 +9,17 @@ import { env } from "./config/env";
 import { isAllowedOrigin } from "./config/cors";
 import { registerModules } from "./modules";
 import { registerLegacyErrorHandlers } from "./modules/legacy/legacy.middleware";
+import { createCloudflareOriginAuthMiddleware } from "./infrastructure/security/cloudflareOrigin";
+import { logger } from "./config/logger";
 
 export const createApp = () => {
   const app = express();
-  app.set("trust proxy", 1);
+  app.set("trust proxy", env.TRUST_PROXY_HOPS);
+  app.use(createCloudflareOriginAuthMiddleware({
+    mode: env.CLOUDFLARE_ORIGIN_AUTH_MODE,
+    secret: env.CLOUDFLARE_ORIGIN_AUTH_SECRET,
+    logger
+  }));
   app.use(helmet({
     crossOriginOpenerPolicy: { policy: "unsafe-none" }
   }));
