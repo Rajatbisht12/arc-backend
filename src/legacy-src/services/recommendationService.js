@@ -6,6 +6,7 @@ const FollowRequest = require('../models/FollowRequest');
 const PostEngagement = require('../models/PostEngagement');
 const BoostDeliveryAttribution = require('../models/BoostDeliveryAttribution');
 const { formatPostDTO } = require('../utils/dto');
+const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
 const { buildPrivacyAccess } = require('../utils/privacyPolicy');
 const { normalizeTag } = require('../utils/hashtags');
 const log = require('../utils/logger');
@@ -1331,6 +1332,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   const targetClip = targetClipPost
     ? formattedPosts.get(normalizeId(targetClipPost._id)) || null
     : null;
+  const deliveredMedia = await resolveClientMediaPayload({ posts, targetClip });
 
   if (includeRankingDebug) {
     log.info('feed-ranking', {
@@ -1350,8 +1352,8 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   }
 
   return {
-    posts,
-    ...(query.targetClipId ? { targetClip } : {}),
+    posts: deliveredMedia.posts,
+    ...(query.targetClipId ? { targetClip: deliveredMedia.targetClip } : {}),
     pagination: {
       current: page,
       total: total !== null ? Math.ceil(total / limit) : undefined,

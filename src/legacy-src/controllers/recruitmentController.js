@@ -9,6 +9,7 @@ const { isSocialPreviewRequest } = require('../utils/socialPreviewRequest');
 const { createAndEmitNotification } = require('../utils/notificationEmitter');
 const { resolvePrivacyAccess } = require('../utils/privacyPolicy');
 const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
+const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
 const {
   generateRecruitmentCode,
   generatePlayerProfileCode,
@@ -186,10 +187,10 @@ const syncEmbeddedApplicantStatus = async ({ recruitmentId, teamId, applicantId,
 const emitRecruitmentDirectMessage = (applicantId, teamId, message) => {
   const io = global._arcSocketIO;
   if (!io?.to) return false;
-  io.to(`user-${String(applicantId)}`).emit('newMessage', {
+  io.to(`user-${String(applicantId)}`).emit('newMessage', rewritePublicMediaPayload({
     chatId: `direct_${teamId}`,
     message
-  });
+  }));
   return true;
 };
 

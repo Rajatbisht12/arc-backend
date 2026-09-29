@@ -1872,27 +1872,45 @@ const reconcilePushDeliveryReceipts = async (recordIds, processingKey) => {
       const receipt = receiptMap[record.providerTicketId];
       if (receipt?.status === 'ok') {
         delivered.push(record);
+        const deliveredUpdate = {
+          $set: {
+            receiptStatus: 'delivered',
+            receiptCheckedAt: new Date(), providerDeliveredAt: new Date(),
+            providerErrorCode: '', providerErrorMessage: '',
+            providerResponse: { status: 'ok' }
+          },
+          $unset: { receiptLeaseAt: 1, receiptLeaseKey: 1, nextReceiptAt: 1 }
+        };
+        // Amazon DocumentDB rejects aggregation-pipeline updates inside
+        // bulkWrite with "Wrong type for parameter u". Two mutually exclusive
+        // ordinary updates retain the original race-safe semantics: a client
+        // acknowledgement that lands before reconciliation remains
+        // `client_delivered`; otherwise the provider receipt wins.
         operations.push({
           updateOne: {
-            filter: { _id: record._id, receiptLeaseKey: leaseKey, receiptStatus: 'pending' },
-            update: [
-              {
-                $set: {
-                  receiptStatus: 'delivered',
-                  deliveryStatus: {
-                    $cond: [
-                      { $ne: [{ $ifNull: ['$clientDeliveredAt', null] }, null] },
-                      'client_delivered',
-                      'provider_delivered'
-                    ]
-                  },
-                  receiptCheckedAt: new Date(), providerDeliveredAt: new Date(),
-                  providerErrorCode: '', providerErrorMessage: '',
-                  providerResponse: { status: 'ok' }
-                }
-              },
-              { $unset: ['receiptLeaseAt', 'receiptLeaseKey', 'nextReceiptAt'] }
-            ]
+            filter: {
+              _id: record._id,
+              receiptLeaseKey: leaseKey,
+              receiptStatus: 'pending',
+              clientDeliveredAt: { $ne: null }
+            },
+            update: {
+              ...deliveredUpdate,
+              $set: { ...deliveredUpdate.$set, deliveryStatus: 'client_delivered' }
+            }
+          }
+        }, {
+          updateOne: {
+            filter: {
+              _id: record._id,
+              receiptLeaseKey: leaseKey,
+              receiptStatus: 'pending',
+              clientDeliveredAt: null
+            },
+            update: {
+              ...deliveredUpdate,
+              $set: { ...deliveredUpdate.$set, deliveryStatus: 'provider_delivered' }
+            }
           }
         });
         continue;

@@ -82,6 +82,27 @@ const publicMediaJsonReplacer = (_key, value, environment = process.env) => (
   typeof value === 'string' ? rewritePublicMediaUrl(value, environment) : value
 );
 
+// Socket.IO does not pass payloads through Express's JSON replacer. Normalize
+// a detached realtime payload explicitly so legacy database URLs cannot leak
+// around the REST delivery layer.
+const rewritePublicMediaPayload = (value, environment = process.env) => {
+  const payload = value && typeof value.toObject === 'function' ? value.toObject() : value;
+  const seen = new WeakSet();
+  const visit = (node) => {
+    if (typeof node === 'string') return rewritePublicMediaUrl(node, environment);
+    if (!node || typeof node !== 'object' || node instanceof Date || Buffer.isBuffer(node)) return node;
+    if (seen.has(node)) return node;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (let index = 0; index < node.length; index += 1) node[index] = visit(node[index]);
+      return node;
+    }
+    for (const [key, child] of Object.entries(node)) node[key] = visit(child);
+    return node;
+  };
+  return visit(payload);
+};
+
 const rewriteUserMediaDeliveryUrls = (user, environment = process.env) => {
   if (!user || typeof user !== 'object') return user;
   const rewriteField = (target, field) => {
@@ -131,6 +152,7 @@ module.exports = {
   getPublicS3ObjectKey,
   normalizeCdnBase,
   publicMediaJsonReplacer,
+  rewritePublicMediaPayload,
   rewriteClipMediaUrl,
   rewritePublicMediaUrl,
   rewriteUserMediaDeliveryUrls,

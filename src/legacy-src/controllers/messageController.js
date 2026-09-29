@@ -30,6 +30,7 @@ const {
 } = require('../utils/groupMembershipPrivacy');
 const { resolveGroupAddPrivacy } = require('../utils/groupAddPrivacy');
 const { resolvePublicWebOrigin } = require('../utils/publicWebUrl');
+const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
 const {
   createMongooseMessageHistoryRepository,
   resolveMessageHistoryWindow
@@ -39,6 +40,16 @@ const {
 let io;
 const setIoInstance = (ioInstance) => {
   io = ioInstance;
+};
+
+const prepareMessagePayload = async (message) => resolveClientMediaPayload(
+  message && typeof message.toObject === 'function' ? message.toObject() : message
+);
+
+const emitNewMessage = async (room, payload) => {
+  if (!io) return false;
+  io.to(room).emit('newMessage', await resolveClientMediaPayload(payload));
+  return true;
 };
 
 const getMessageMediaPolicy = (_req, res) => res.json({
@@ -380,13 +391,13 @@ const sendDirectMessage = async (req, res) => {
     ]);
 
     // Plain object so nested populated (e.g. sharedPost.author) serializes correctly in JSON/socket
-    const messagePojo = message.toObject ? message.toObject() : message;
+    const messagePojo = await prepareMessagePayload(message);
 
     // Emit the chat event immediately. Socket connectivity is transport
     // presence, not proof that a particular conversation is visible on any
     // device, so notification delivery must not be suppressed by this room.
     if (io) {
-      io.to(`user-${recipientIdResolved}`).emit('newMessage', {
+      await emitNewMessage(`user-${recipientIdResolved}`, {
         chatId: `direct_${senderId}`,
         message: messagePojo
       });
@@ -478,7 +489,7 @@ const getDirectMessages = async (req, res) => {
       await redactMessageReadReceipts(messages, req.user);
       return res.status(200).json({
         success: true,
-        messages,
+        messages: await resolveClientMediaPayload(messages),
         initialPosition: window.initialPosition,
         pagination: window.pagination
       });
@@ -527,9 +538,10 @@ const getDirectMessages = async (req, res) => {
     }
     await redactMessageReadReceipts(messages, req.user);
 
+    const clientMessages = await resolveClientMediaPayload(messages.reverse());
     res.status(200).json({
       success: true,
-      messages: messages.reverse(), // Reverse to show oldest first
+      messages: clientMessages, // oldest first
       pagination: {
         current: page,
         total: Math.ceil(total / limit),
@@ -1216,7 +1228,7 @@ const sendGroupMessage = async (req, res) => {
       { path: 'mentions', select: 'username profile.displayName profile.avatar' }
     ]);
 
-    const messagePojo = message.toObject ? message.toObject() : message;
+    const messagePojo = await prepareMessagePayload(message);
 
     // Send mention notifications
     if (mentionedUserIds.length > 0) {
@@ -1290,7 +1302,7 @@ const sendGroupMessage = async (req, res) => {
     // Emit real-time message to all group members
     if (io) {
       if (process.env.NODE_ENV === 'development') { console.log('Emitting real-time group message to chat room:', chatRoomId);}
-      io.to(`chat-${chatRoomId}`).emit('newMessage', {
+      await emitNewMessage(`chat-${chatRoomId}`, {
         chatId: chatRoomId,
         message: messagePojo
       });
@@ -1394,7 +1406,7 @@ const getGroupMessages = async (req, res) => {
       await redactMessageReadReceipts(messages, req.user);
       return res.status(200).json({
         success: true,
-        messages,
+        messages: await resolveClientMediaPayload(messages),
         initialPosition: window.initialPosition,
         pagination: window.pagination
       });
@@ -1426,9 +1438,10 @@ const getGroupMessages = async (req, res) => {
     }
     await redactMessageReadReceipts(messages, req.user);
 
+    const clientMessages = await resolveClientMediaPayload(messages.reverse());
     res.status(200).json({
       success: true,
-      messages: messages.reverse(), // Reverse to show oldest first
+      messages: clientMessages, // oldest first
       pagination: {
         current: page,
         total: Math.ceil(total / limit),
@@ -1751,9 +1764,10 @@ const updateChatRoom = async (req, res) => {
       chatRoom.lastActivity = new Date();
       await chatRoom.save();
       if (io) {
-        systemMessages.forEach(msg => {
-          io.to(`chat-${chatRoom._id}`).emit('newMessage', { chatId: chatRoom._id.toString(), message: msg });
-        });
+        await Promise.all(systemMessages.map((msg) => emitNewMessage(
+          `chat-${chatRoom._id}`,
+          { chatId: chatRoom._id.toString(), message: msg }
+        )));
       }
     }
 
@@ -1904,7 +1918,7 @@ const addMemberToChatRoom = async (req, res) => {
     await systemMessage.populate('sender', 'username profile.displayName profile.avatar');
 
     if (io) {
-      io.to(`chat-${chatRoom._id}`).emit('newMessage', {
+      await emitNewMessage(`chat-${chatRoom._id}`, {
         chatId: chatRoom._id.toString(),
         message: systemMessage
       });
@@ -2021,7 +2035,7 @@ const removeMemberFromChatRoom = async (req, res) => {
 
     // Emit to room members
     if (io) {
-      io.to(`chat-${chatRoom._id}`).emit('newMessage', {
+      await emitNewMessage(`chat-${chatRoom._id}`, {
         chatId: chatRoom._id.toString(),
         message: systemMessage
       });
@@ -2182,7 +2196,7 @@ const updateMemberRole = async (req, res) => {
       await chatRoom.save();
       if (io) {
         await roleMsg.populate('sender', 'username profile.displayName profile.avatar');
-        io.to(`chat-${chatRoom._id}`).emit('newMessage', {
+        await emitNewMessage(`chat-${chatRoom._id}`, {
           chatId: chatRoom._id.toString(),
           message: roleMsg
         });
@@ -2370,7 +2384,7 @@ const handleInviteResponse = async (req, res) => {
         });
       }
       if (io) {
-        io.to(`user-${outcome.invite.team}`).emit('newMessage', {
+        await emitNewMessage(`user-${outcome.invite.team}`, {
           chatId: `direct_${userId}`,
           message: responseMsg.toObject ? responseMsg.toObject() : responseMsg
         });
@@ -2761,7 +2775,7 @@ const leaveGroup = async (req, res) => {
 
     // Emit to room
     if (io) {
-      io.to(`chat-${chatRoomId}`).emit('newMessage', {
+      await emitNewMessage(`chat-${chatRoomId}`, {
         chatId: chatRoomId,
         message: systemMessage
       });
@@ -2916,25 +2930,31 @@ const createCallSummary = async (req, res) => {
     await message.populate('sender', 'username profile.displayName profile.avatar');
 
     if (!created && !upgraded) {
-      return res.status(200).json({ success: true, data: { message, deduplicated: true } });
+      return res.status(200).json({
+        success: true,
+        data: { message: await prepareMessagePayload(message), deduplicated: true }
+      });
     }
 
     // Emit real-time update to the relevant room
     if (io) {
       if (authorizedRecipientId) {
-        io.to(`user-${authorizedRecipientId}`).emit('newMessage', {
+        await emitNewMessage(`user-${authorizedRecipientId}`, {
           chatId: `direct_${senderId}`,
           message
         });
       } else {
-        io.to(`chat-${authorizedChatRoomId}`).emit('newMessage', {
+        await emitNewMessage(`chat-${authorizedChatRoomId}`, {
           chatId: authorizedChatRoomId,
           message
         });
       }
     }
 
-    res.status(created ? 201 : 200).json({ success: true, data: { message, upgraded } });
+    res.status(created ? 201 : 200).json({
+      success: true,
+      data: { message: await prepareMessagePayload(message), upgraded }
+    });
   } catch (error) {
     log.error('createCallSummary error:', { error: String(error) });
     const status = Number(error?.statusCode || 500);
@@ -3106,7 +3126,7 @@ const updateGroupPermissions = async (req, res) => {
       chatRoom.lastActivity = new Date();
       await chatRoom.save();
       if (io) {
-        io.to(`chat-${chatRoom._id}`).emit('newMessage', { chatId: chatRoom._id.toString(), message: systemMsg });
+        await emitNewMessage(`chat-${chatRoom._id}`, { chatId: chatRoom._id.toString(), message: systemMsg });
       }
     }
 
@@ -3257,7 +3277,7 @@ const joinGroupViaInvite = async (req, res) => {
     await chatRoom.save();
 
     if (io) {
-      io.to(`chat-${chatRoom._id}`).emit('newMessage', { chatId: chatRoom._id.toString(), message: systemMsg });
+      await emitNewMessage(`chat-${chatRoom._id}`, { chatId: chatRoom._id.toString(), message: systemMsg });
     }
 
     res.json({ success: true, chatRoomId: chatRoom._id, groupName: chatRoom.name });
@@ -3344,7 +3364,7 @@ const sendGroupInviteDM = async (req, res) => {
 
     // Emit real-time message to target user
     if (io) {
-      io.to(`user-${targetUserId}`).emit('newMessage', {
+      await emitNewMessage(`user-${targetUserId}`, {
         chatId: `direct_${callerId}`,
         message: message.toObject ? message.toObject() : message
       });
@@ -3362,7 +3382,7 @@ const sendGroupInviteDM = async (req, res) => {
       deepLink: `/conversation/direct_${callerId}`
     });
 
-    return res.status(201).json({ success: true, data: { message } });
+    return res.status(201).json({ success: true, data: { message: await prepareMessagePayload(message) } });
   } catch (err) {
     log.error('sendGroupInviteDM error:', { error: String(err) });
     res.status(500).json({ success: false, message: 'Failed to send group invite' });

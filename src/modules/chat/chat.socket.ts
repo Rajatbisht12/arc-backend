@@ -13,6 +13,11 @@ const Follow = require(path.join(backendModelPath, "Follow.js")) as any;
 const { normalizePrivacySettings, buildPrivacyAccess } = require(
   path.join(backendRootPath, "utils", "privacyPolicy.js")
 ) as any;
+// Socket payloads bypass Express's global JSON replacer.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { rewritePublicMediaPayload } = require(
+  path.join(backendRootPath, "utils", "mediaDelivery.js")
+) as any;
 
 const LegacyChatRoom = legacyMessageModels.ChatRoom;
 const LegacyMessage = legacyMessageModels.Message;
@@ -187,7 +192,7 @@ export const registerChatSocketHandlers = (io: Server, socket: Socket): void => 
       }
 
       const message = await chatService.postMessage({ chatId, senderId: userId, text });
-      io.to(`modular-chat-${chatId}`).emit("newMessage", { chatId, message });
+      io.to(`modular-chat-${chatId}`).emit("newMessage", rewritePublicMediaPayload({ chatId, message }));
     } catch (_error) {
       socket.emit("chat:error", { code: "CHAT_ACCESS_DENIED", message: "Chat not found or access denied" });
     }

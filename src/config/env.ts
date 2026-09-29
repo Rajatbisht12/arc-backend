@@ -88,6 +88,7 @@ const envSchema = z.object({
   AWS_S3_BUCKET: z.string().optional(),
   AWS_S3_BUCKET_NAME: z.string().optional(),
   AWS_S3_CDN_URL: z.string().url().refine((value) => value.startsWith("https://"), "AWS_S3_CDN_URL must use HTTPS").optional(),
+  PRIVATE_MEDIA_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
 

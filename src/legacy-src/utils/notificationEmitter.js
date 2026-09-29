@@ -2,6 +2,7 @@ const log = require('./logger');
 const { randomUUID } = require('crypto');
 const { evaluateNotificationEmailPolicy, isRandomConnectNotification } = require('./notificationChannelPolicy');
 const { resolvePublicWebOrigin } = require('./publicWebUrl');
+const { rewritePublicMediaPayload } = require('./mediaDelivery');
 
 let io;
 
@@ -18,7 +19,7 @@ const emitNotification = (userId, notification) => {
     });
     return false;
   }
-  io.to(`user-${userId}`).emit('new-notification', notification);
+  io.to(`user-${userId}`).emit('new-notification', rewritePublicMediaPayload(notification));
   log.debug('Notification socket event emitted', {
     userId: String(userId),
     notificationId: String(notification?._id || ''),
@@ -29,7 +30,7 @@ const emitNotification = (userId, notification) => {
 
 const emitBroadcastNotification = (userId, notification) => {
   if (io) {
-    io.to(`user-${userId}`).emit('broadcast-notification', notification);
+    io.to(`user-${userId}`).emit('broadcast-notification', rewritePublicMediaPayload(notification));
   }
 };
 
@@ -42,7 +43,7 @@ const emitBroadcastPushNotification = (userId, notification) => {
   // Emit through the configured Socket.IO adapter without consulting the
   // process-local room map. Cross-node delivery is acknowledged by the Web
   // client; a missing ACK expires durably in the broadcast recovery worker.
-  io.to(room).emit('broadcast-push-notification', notification);
+  io.to(room).emit('broadcast-push-notification', rewritePublicMediaPayload(notification));
   return true;
 };
 
@@ -363,7 +364,7 @@ const createAndEmitNotification = async (notificationData) => {
 const emitNotificationToMultiple = (userIds, notification) => {
   if (!io || !Array.isArray(userIds)) return;
   for (const userId of userIds) {
-    io.to(`user-${userId}`).emit('new-notification', notification);
+    io.to(`user-${userId}`).emit('new-notification', rewritePublicMediaPayload(notification));
   }
 };
 

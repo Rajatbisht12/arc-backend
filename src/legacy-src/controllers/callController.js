@@ -28,6 +28,7 @@ const {
 } = require('../services/callSessionService');
 const log = require('../utils/logger');
 const { resolvePrivacyAccess } = require('../utils/privacyPolicy');
+const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
 const { assertCallSessionPrivacy } = require('../utils/callPrivacy');
 
 // ── Config ──
@@ -644,10 +645,10 @@ const endCall = async (req, res) => {
 
     // Emit call summary to both participants' chat
     if (global._arcSocketIO) {
-      global._arcSocketIO.to(`user-${resolvedParticipantId}`).emit('newMessage', {
+      global._arcSocketIO.to(`user-${resolvedParticipantId}`).emit('newMessage', rewritePublicMediaPayload({
         chatId: `direct_${userId}`,
         message
-      });
+      }));
     }
 
     res.status(200).json({

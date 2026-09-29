@@ -471,10 +471,13 @@ const writeGroupCallSummary = async (
       }
     });
     await message.populate("sender", "username profile.displayName profile.avatar");
-    io.to(`chat-${session.chatRoomId}`).emit("newMessage", {
+    const { rewritePublicMediaPayload } = safeRequire<any>(
+      path.join(backendRootPath, "utils", "mediaDelivery.js")
+    ) || { rewritePublicMediaPayload: (value: unknown) => value };
+    io.to(`chat-${session.chatRoomId}`).emit("newMessage", rewritePublicMediaPayload({
       chatId: session.chatRoomId,
       message
-    });
+    }));
   } catch (error: any) {
     // 11000 = another finalizer won the race; the single record already exists.
     if (error?.code !== 11000) {
