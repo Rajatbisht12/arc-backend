@@ -11,10 +11,15 @@ import { registerModules } from "./modules";
 import { registerLegacyErrorHandlers } from "./modules/legacy/legacy.middleware";
 import { createCloudflareOriginAuthMiddleware } from "./infrastructure/security/cloudflareOrigin";
 import { logger } from "./config/logger";
+import { publicMediaJsonReplacer } from "./legacy-src/utils/mediaDelivery";
 
 export const createApp = () => {
   const app = express();
   app.set("trust proxy", env.TRUST_PROXY_HOPS);
+  // Convert legacy unsigned S3 display URLs to the configured CloudFront URL
+  // at the final JSON boundary. The resolver uses an explicit public-prefix
+  // allowlist and never rewrites signed URLs or private/mixed media prefixes.
+  app.set("json replacer", publicMediaJsonReplacer);
   app.use(createCloudflareOriginAuthMiddleware({
     mode: env.CLOUDFLARE_ORIGIN_AUTH_MODE,
     secret: env.CLOUDFLARE_ORIGIN_AUTH_SECRET,

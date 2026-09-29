@@ -1,6 +1,15 @@
-const PUBLIC_CLIP_MEDIA_PREFIXES = [
+// These prefixes contain media that is intentionally rendered on public or
+// broadly visible product surfaces. Keep private/mixed prefixes (messages,
+// stories, user audio and AI output) out of this list until they have an
+// authorization-aware CloudFront delivery path.
+const PUBLIC_MEDIA_PREFIXES = [
+  'gaming-social/avatars/',
+  'gaming-social/banners/',
+  'gaming-social/group-avatars/',
+  'gaming-social/post-covers/',
   'gaming-social/posts/',
-  'gaming-social/clips/'
+  'gaming-social/clips/',
+  'gaming-social/tournaments/'
 ];
 
 const normalizeCdnBase = (value) => {
@@ -51,10 +60,10 @@ const getPublicS3ObjectKey = (value, bucket, region) => {
     }
   }
 
-  return PUBLIC_CLIP_MEDIA_PREFIXES.some(prefix => objectKey.startsWith(prefix)) ? objectKey : '';
+  return PUBLIC_MEDIA_PREFIXES.some(prefix => objectKey.startsWith(prefix)) ? objectKey : '';
 };
 
-const rewriteClipMediaUrl = (value, environment = process.env) => {
+const rewritePublicMediaUrl = (value, environment = process.env) => {
   const cdnBase = normalizeCdnBase(environment.AWS_S3_CDN_URL);
   if (!cdnBase || typeof value !== 'string') return value;
   const objectKey = getPublicS3ObjectKey(
@@ -65,14 +74,41 @@ const rewriteClipMediaUrl = (value, environment = process.env) => {
   return objectKey ? `${cdnBase}/${objectKey}` : value;
 };
 
+// Backwards-compatible name retained for the Clip-specific call sites and
+// contract tests introduced before public-image delivery was centralized.
+const rewriteClipMediaUrl = rewritePublicMediaUrl;
+
+const publicMediaJsonReplacer = (_key, value, environment = process.env) => (
+  typeof value === 'string' ? rewritePublicMediaUrl(value, environment) : value
+);
+
+const rewriteUserMediaDeliveryUrls = (user, environment = process.env) => {
+  if (!user || typeof user !== 'object') return user;
+  const rewriteField = (target, field) => {
+    if (target && typeof target[field] === 'string') {
+      target[field] = rewritePublicMediaUrl(target[field], environment);
+    }
+  };
+
+  for (const field of ['profileImage', 'avatarUrl', 'profilePicture', 'avatar', 'picture', 'photoURL', 'imageUrl']) {
+    rewriteField(user, field);
+  }
+  if (user.profile && typeof user.profile === 'object') {
+    for (const field of ['avatar', 'profilePicture', 'banner', 'coverImage']) {
+      rewriteField(user.profile, field);
+    }
+  }
+  return user;
+};
+
 const rewritePostMediaDeliveryUrls = (post, environment = process.env) => {
   const media = post?.content?.media;
   if (!Array.isArray(media)) return post;
 
   for (const item of media) {
     if (!item || typeof item !== 'object') continue;
-    if (typeof item.url === 'string') item.url = rewriteClipMediaUrl(item.url, environment);
-    if (typeof item.coverUrl === 'string') item.coverUrl = rewriteClipMediaUrl(item.coverUrl, environment);
+    if (typeof item.url === 'string') item.url = rewritePublicMediaUrl(item.url, environment);
+    if (typeof item.coverUrl === 'string') item.coverUrl = rewritePublicMediaUrl(item.coverUrl, environment);
     const playback = item.playback;
     if (!playback || typeof playback !== 'object') continue;
     if (typeof playback.hlsUrl === 'string') playback.hlsUrl = rewriteClipMediaUrl(playback.hlsUrl, environment);
@@ -91,8 +127,12 @@ const rewritePostMediaDeliveryUrls = (post, environment = process.env) => {
 };
 
 module.exports = {
+  PUBLIC_MEDIA_PREFIXES,
   getPublicS3ObjectKey,
   normalizeCdnBase,
+  publicMediaJsonReplacer,
   rewriteClipMediaUrl,
+  rewritePublicMediaUrl,
+  rewriteUserMediaDeliveryUrls,
   rewritePostMediaDeliveryUrls
 };

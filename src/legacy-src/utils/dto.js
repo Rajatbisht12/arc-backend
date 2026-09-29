@@ -66,6 +66,7 @@ const formatUserDTO = (user, isGuest = false, isSelf = false, canSeeOnlineStatus
     : JSON.parse(JSON.stringify(user));
 
   normalizeUserAvatarFields(dto);
+  rewriteUserMediaDeliveryUrls(dto);
   filterInactiveTeamMemberships(dto);
 
   // ALWAYS remove these highly sensitive fields from ANY response
@@ -144,7 +145,10 @@ const uniqueLikeCount = (likes) => {
   return ids.length > 0 ? new Set(ids).size : likes.length;
 };
 
-const { rewritePostMediaDeliveryUrls } = require('./mediaDelivery');
+const {
+  rewritePostMediaDeliveryUrls,
+  rewriteUserMediaDeliveryUrls
+} = require('./mediaDelivery');
 
 const formatPostDTO = (post, isGuest = false, isAuthor = false, viewerId = null) => {
   if (!post) return null;
