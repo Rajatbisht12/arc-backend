@@ -19,15 +19,12 @@ src/
     websocket/
   modules/              # 25 feature modules + legacy glue
     admin/
-    ai-coach/
-    ai-recruitment/
     auth/
     challenges/
     chat/                # native TypeScript module
     feedback/
     health/              # native TypeScript module
     host-verification/
-    knowledge/
     leave-requests/
     legacy/              # passport init, static uploads, socket handlers
     membership/
@@ -103,9 +100,6 @@ All routes are registered as dedicated modules:
 | `/api/monetization` | `monetization` | Bridged |
 | `/api/feedback` | `feedback` | Bridged |
 | `/api/reports` | `reports` | Bridged |
-| `/api/ai-coach` | `ai-coach` | Bridged |
-| `/api/ai-recruitment` | `ai-recruitment` | Bridged |
-| `/api/knowledge` | `knowledge` | Bridged |
 | `/api/membership` | `membership` | Bridged |
 | `/api/music` | `music` | Bridged |
 | `/api/stories` | `stories` | Bridged |

@@ -77,7 +77,7 @@ test('recognizes all classified public media prefixes in the configured S3 bucke
     'gaming-social/messages/private.webp',
     'gaming-social/stories/followers-only.webp',
     'gaming-social/audio/user-upload.m4a',
-    'gaming-social/ai-coach/output.webp'
+    'gaming-social/private-analysis/output.webp'
   ]) {
     assert.equal(
       getPublicS3ObjectKey(

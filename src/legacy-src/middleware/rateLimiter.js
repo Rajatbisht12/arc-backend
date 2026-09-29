@@ -92,73 +92,6 @@ class RedisRateLimitStore {
 }
 
 /**
- * AI Coach specific rate limiter
- * Prevents spam and abuse of AI API
- */
-const aiCoachLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute window
-  max: 10, // Max 10 requests per minute per user
-  store: new RedisRateLimitStore('rl:ai'),
-  message: {
-    success: false,
-    message: 'Too many requests. Please wait before sending more messages.',
-    retryAfter: '1 minute'
-  },
-  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
-  legacyHeaders: false, // Disable `X-RateLimit-*` headers
-
-  // Custom key generator (by user ID if available, otherwise by IP)
-  keyGenerator: (req) => {
-    return req.user?.id || ipKeyGenerator(req);
-  },
-
-  // Skip successful requests from the count (optional)
-  skipSuccessfulRequests: false,
-
-  // Skip failed requests from the count
-  skipFailedRequests: false,
-
-  // Handler for when limit is exceeded
-  handler: (req, res) => {
-    console.log(`⚠️ Rate limit exceeded for user: ${req.user?.id || req.ip}`);
-
-    // Get user's language for localized message
-    const language = req.body?.language || 'english';
-
-    const messages = {
-      english: 'Too many requests. Please wait 1 minute before sending more messages. 🙏',
-      roman_hindi: 'Bahut zyada messages bhej diye. Please 1 minute wait karo. 🙏',
-      roman_marathi: 'Khup messages pathavle. Kripaya 1 minute thamba. 🙏',
-      mixed: 'Too many requests. Please wait 1 minute. 🙏'
-    };
-
-    res.status(429).json({
-      success: false,
-      message: messages[language] || messages.english,
-      retryAfter: 60, // seconds
-      error: 'RATE_LIMIT_EXCEEDED'
-    });
-  }
-});
-
-/**
- * Stricter rate limiter for analytics and heavy operations
- */
-const analyticsLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 5, // Max 5 requests per minute
-  store: new RedisRateLimitStore('rl:analytics'),
-  message: {
-    success: false,
-    message: 'Too many analytics requests. Please slow down.',
-    retryAfter: '1 minute'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || ipKeyGenerator(req)
-});
-
-/**
  * General API rate limiter (for all routes)
  */
 const generalLimiter = rateLimit({
@@ -190,8 +123,6 @@ const authLimiter = rateLimit({
 });
 
 module.exports = {
-  aiCoachLimiter,
-  analyticsLimiter,
   generalLimiter,
   authLimiter,
   _RedisRateLimitStore: RedisRateLimitStore

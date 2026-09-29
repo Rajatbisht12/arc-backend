@@ -25,8 +25,7 @@ for (const path of [
   "/api/users/example",
   "/api/posts/shared-id",
   "/api/calls/history",
-  "/api/tournaments/public-code",
-  "/api/ai-recruitment/recommendations"
+  "/api/tournaments/public-code"
 ]) {
   const result = invoke("GET", path);
   assert.equal(result.nextCalled, true);

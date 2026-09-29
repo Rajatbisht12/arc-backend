@@ -13,8 +13,6 @@ const destructiveScripts = [
   'seed-premium-user.js',
   'assign-premium.js',
   'remove-premium.js',
-  'batchLearn.js',
-  'addInitialKnowledge.js',
   'fix-verified-hosts.js',
   'do-test-payment.js'
 ].map(read);
@@ -45,7 +43,6 @@ for (const source of destructiveScripts) {
 }
 assert.match(read('clear-team-history.js'), /CONFIRM_DESTRUCTIVE_OPERATION=CLEAR_TEAM_HISTORY/);
 assert.match(read('clear-tournaments.js'), /CONFIRM_DESTRUCTIVE_OPERATION=CLEAR_TOURNAMENTS/);
-assert.doesNotMatch(read('testLlama.js'), /GROQ_API_KEY\.substring|mongoose\.connect/);
 assert.match(read('do-test-payment.js'), /rzp_test_/);
 
 console.log('Operator scripts are explicit, credential-free, and read-only where expected');
