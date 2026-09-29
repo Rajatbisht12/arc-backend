@@ -31,6 +31,10 @@ assert.match(script, /state\.distribution\.Status !== 'Deployed'/);
 assert.match(script, /activateEcsService/);
 assert.match(dto, /rewritePostMediaDeliveryUrls\(dto\)/);
 assert.match(delivery, /parsed\.search \|\| parsed\.hash/);
-assert.match(delivery, /PUBLIC_CLIP_MEDIA_PREFIXES/);
+assert.match(delivery, /PUBLIC_MEDIA_PREFIXES/);
+assert.match(delivery, /gaming-social\/avatars\//);
+assert.match(delivery, /gaming-social\/group-avatars\//);
+assert.match(delivery, /gaming-social\/post-covers\//);
+assert.match(delivery, /rewritePublicMediaUrl/);
 
 console.log('Clip CloudFront infrastructure contracts passed');

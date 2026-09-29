@@ -7,7 +7,11 @@ import {
   hasValidCloudflareOriginAuth,
   isOriginAuthHealthPath
 } from "../../infrastructure/security/cloudflareOrigin";
-import { getSocketClientIp, SocketConnectionGuard } from "../../infrastructure/security/socketConnectionGuard";
+import {
+  getSocketClientIp,
+  isSocketOriginAuthAllowed,
+  SocketConnectionGuard
+} from "../../infrastructure/security/socketConnectionGuard";
 
 const secret = "a-production-length-origin-secret-value";
 
@@ -74,6 +78,18 @@ test("socket IP resolution trusts CF-Connecting-IP only with origin authenticati
     socket: { remoteAddress: "10.0.0.5" }
   } as unknown as IncomingMessage;
   assert.equal(getSocketClientIp(untrusted, secret), "198.51.100.7");
+});
+
+test("socket origin authentication rejects direct handshakes only in enforce mode", () => {
+  const trusted = {
+    headers: { [CLOUDFLARE_ORIGIN_AUTH_HEADER]: secret }
+  } as unknown as IncomingMessage;
+  const direct = { headers: {} } as unknown as IncomingMessage;
+
+  assert.equal(isSocketOriginAuthAllowed(trusted, "enforce", secret), true);
+  assert.equal(isSocketOriginAuthAllowed(direct, "enforce", secret), false);
+  assert.equal(isSocketOriginAuthAllowed(direct, "observe", secret), true);
+  assert.equal(isSocketOriginAuthAllowed(direct, "off", secret), true);
 });
 
 test("socket fallback limiter rejects only after the configured burst", async () => {
