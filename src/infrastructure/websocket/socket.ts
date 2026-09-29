@@ -11,7 +11,11 @@ import { registerLegacySocketHandlers } from "../../modules/legacy/legacy.socket
 import { backendMiddlewarePath } from "../../modules/legacy/legacy.paths";
 import { socketRedisPubClient, socketRedisSubClient } from "../cache/redis";
 import { redisCacheClient } from "../cache/redis";
-import { SocketConnectionGuard } from "../security/socketConnectionGuard";
+import {
+  isSocketOriginAuthAllowed,
+  SocketConnectionGuard
+} from "../security/socketConnectionGuard";
+import { CLOUDFLARE_ORIGIN_AUTH_HEADER } from "../security/cloudflareOrigin";
 import {
   announcePresenceConnected,
   announcePresenceDisconnected,
@@ -61,9 +65,25 @@ export const createSocketServer = (httpServer: HttpServer): Server => {
     upgradeTimeout: 30000,
     maxHttpBufferSize: 1e6,
     allowRequest: (request, callback) => {
+      if (!isSocketOriginAuthAllowed(
+        request,
+        env.CLOUDFLARE_ORIGIN_AUTH_MODE,
+        env.CLOUDFLARE_ORIGIN_AUTH_SECRET
+      )) {
+        delete request.headers[CLOUDFLARE_ORIGIN_AUTH_HEADER];
+        callback("Connection validation failed", false);
+        return;
+      }
+
       void connectionGuard.allow(request)
-        .then((allowed) => callback(allowed ? null : "Too many connection attempts", allowed))
-        .catch(() => callback("Connection validation failed", false));
+        .then((allowed) => {
+          delete request.headers[CLOUDFLARE_ORIGIN_AUTH_HEADER];
+          callback(allowed ? null : "Too many connection attempts", allowed);
+        })
+        .catch(() => {
+          delete request.headers[CLOUDFLARE_ORIGIN_AUTH_HEADER];
+          callback("Connection validation failed", false);
+        });
     }
   });
 

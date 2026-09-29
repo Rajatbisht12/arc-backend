@@ -1,6 +1,10 @@
 import { createHash } from "crypto";
 import type { IncomingMessage } from "http";
-import { CLOUDFLARE_ORIGIN_AUTH_HEADER, hasValidCloudflareOriginAuth } from "./cloudflareOrigin";
+import {
+  CLOUDFLARE_ORIGIN_AUTH_HEADER,
+  type CloudflareOriginAuthMode,
+  hasValidCloudflareOriginAuth
+} from "./cloudflareOrigin";
 
 type RedisCounter = {
   isReady: boolean;
@@ -21,6 +25,18 @@ type SocketConnectionGuardOptions = {
 type LocalCounter = {
   count: number;
   expiresAt: number;
+};
+
+export const isSocketOriginAuthAllowed = (
+  request: IncomingMessage,
+  mode: CloudflareOriginAuthMode,
+  originAuthSecret?: string
+): boolean => {
+  if (mode !== "enforce") return true;
+  return hasValidCloudflareOriginAuth(
+    originAuthSecret,
+    request.headers[CLOUDFLARE_ORIGIN_AUTH_HEADER]
+  );
 };
 
 const normalizeAddress = (value: string): string => value.trim().replace(/^::ffff:/, "");
