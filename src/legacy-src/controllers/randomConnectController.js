@@ -18,6 +18,7 @@ const {
 } = require('../services/randomConnectAdmissionService');
 const { v4: uuidv4 } = require('uuid');
 const log = require('../utils/logger');
+const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
 const {
   normalizeMatchmakingGender,
   normalizePreferredGender,
@@ -177,7 +178,7 @@ const buildSessionPolicyPayload = (connection) => ({
 const buildConnectionPayload = (connection) => {
   const obj = connection?.toObject ? connection.toObject() : connection;
   if (!obj) return null;
-  return {
+  return rewritePublicMediaPayload({
     roomId: obj.roomId,
     sessionId: obj.roomId,
     participants: (obj.participants || []).map(p => ({
@@ -196,7 +197,7 @@ const buildConnectionPayload = (connection) => {
     sessionPolicy: buildSessionPolicyPayload(obj),
     createdAt: obj.createdAt,
     updatedAt: obj.updatedAt
-  };
+  });
 };
 
 const emitToParticipants = (io, connection, eventName, payload) => {

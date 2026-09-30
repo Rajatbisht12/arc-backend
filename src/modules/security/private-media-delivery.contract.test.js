@@ -14,6 +14,9 @@ const profiles = read('legacy-src/controllers/userController.js');
 const notificationEmitter = read('legacy-src/utils/notificationEmitter.js');
 const modularSocket = read('modules/chat/chat.socket.ts');
 const legacySocket = read('modules/legacy/legacy.socket.ts');
+const randomConnect = read('legacy-src/controllers/randomConnectController.js');
+const tournaments = read('legacy-src/controllers/tournamentController.js');
+const calls = read('legacy-src/services/callSessionService.js');
 
 for (const prefix of [
   'gaming-social/messages/',
@@ -35,7 +38,12 @@ assert(audio.includes('toAuthorizedAudioPayload'));
 assert(recommendations.includes('const deliveredMedia = await resolveClientMediaPayload'));
 assert(profiles.includes('deliveredRecentPosts'));
 assert(notificationEmitter.includes("emit('new-notification', rewritePublicMediaPayload(notification))"));
-assert(modularSocket.includes('emit("newMessage", rewritePublicMediaPayload'));
+assert(modularSocket.includes('await resolveClientMediaPayload({ chatId, message })'));
 assert(legacySocket.includes('emit("newMessage", rewritePublicMediaPayload'));
+assert(legacySocket.includes('emit("call-request", rewriteSocketPublicMedia'));
+assert(messages.includes("emit('groupInfoUpdated', deliveredGroupInfo)"));
+assert(randomConnect.includes('return rewritePublicMediaPayload({'));
+assert(tournaments.includes('const payload = rewritePublicMediaPayload('));
+assert(calls.includes('const serializeCallSession = (session) => session ? rewritePublicMediaPayload({'));
 
 console.log('Private REST and Socket.IO media delivery contracts passed');

@@ -159,6 +159,13 @@ const safeRequire = <T>(modulePath: string): T | null => {
   }
 };
 
+const rewriteSocketPublicMedia = (value: unknown): unknown => {
+  const resolver = safeRequire<{ rewritePublicMediaPayload?: (payload: unknown) => unknown }>(
+    path.join(backendRootPath, "utils", "mediaDelivery.js")
+  );
+  return resolver?.rewritePublicMediaPayload?.(value) ?? value;
+};
+
 const getObjectIdString = (value: unknown): string => {
   if (!value) return "";
   if (typeof value === "object" && "_id" in value && (value as { _id?: unknown })._id) {
@@ -861,7 +868,7 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     const targetRoom = data.randomRoomId
       ? `random-room-${boundedString(data.randomRoomId, 160)}`
       : `user-${targetUserId}`;
-    socket.to(targetRoom).emit("call-request", {
+    socket.to(targetRoom).emit("call-request", rewriteSocketPublicMedia({
       callId,
       nativeCallId: durableSession.nativeCallId,
       fromUserId: userIdStr,
@@ -871,7 +878,7 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       fromAvatar: caller.profile?.avatar,
       randomRoomId: boundedString(data.randomRoomId, 160) || undefined,
       deadlineAt
-    });
+    }));
     // Random Connect is an in-session realtime event. It must never enter the
     // durable notification, Expo/FCM/APNs or VoIP-push pipelines.
     if (data.randomRoomId) {

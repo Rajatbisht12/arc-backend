@@ -13,10 +13,11 @@ const Follow = require(path.join(backendModelPath, "Follow.js")) as any;
 const { normalizePrivacySettings, buildPrivacyAccess } = require(
   path.join(backendRootPath, "utils", "privacyPolicy.js")
 ) as any;
-// Socket payloads bypass Express's global JSON replacer.
+// Socket payloads bypass Express's global JSON replacer. Resolve both public
+// CDN media and authorized private message media before broadcasting.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { rewritePublicMediaPayload } = require(
-  path.join(backendRootPath, "utils", "mediaDelivery.js")
+const { resolveClientMediaPayload } = require(
+  path.join(backendRootPath, "utils", "privateMediaDelivery.js")
 ) as any;
 
 const LegacyChatRoom = legacyMessageModels.ChatRoom;
@@ -192,7 +193,10 @@ export const registerChatSocketHandlers = (io: Server, socket: Socket): void => 
       }
 
       const message = await chatService.postMessage({ chatId, senderId: userId, text });
-      io.to(`modular-chat-${chatId}`).emit("newMessage", rewritePublicMediaPayload({ chatId, message }));
+      io.to(`modular-chat-${chatId}`).emit(
+        "newMessage",
+        await resolveClientMediaPayload({ chatId, message })
+      );
     } catch (_error) {
       socket.emit("chat:error", { code: "CHAT_ACCESS_DENIED", message: "Chat not found or access denied" });
     }

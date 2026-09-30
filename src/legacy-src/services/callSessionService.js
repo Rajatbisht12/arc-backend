@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto');
 const CallSession = require('../models/CallSession');
 const Notification = require('../models/Notification');
 const log = require('../utils/logger');
+const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
 
 const CALL_RING_TTL_SECONDS = Math.max(15, Math.min(120, Number(process.env.CALL_RING_TTL_SECONDS || 30)));
 const MAX_CALL_DURATION_SECONDS = Math.max(300, Math.min(86400, Number(process.env.MAX_CALL_DURATION_SECONDS || 14400)));
@@ -35,7 +36,7 @@ const callStatePushMarker = (excludeInstallationId = '') => ({
   statePushCompletedAt: null
 });
 
-const serializeCallSession = (session) => session ? {
+const serializeCallSession = (session) => session ? rewritePublicMediaPayload({
   id: toId(session._id),
   callId: session.callId,
   nativeCallId: session.nativeCallId,
@@ -60,7 +61,7 @@ const serializeCallSession = (session) => session ? {
   endReason: session.endReason || '',
   createdAt: session.createdAt,
   updatedAt: session.updatedAt
-} : null;
+}) : null;
 
 const emitTerminalCallSession = (session, reason = '') => {
   const io = global._arcSocketIO;

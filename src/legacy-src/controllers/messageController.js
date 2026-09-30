@@ -31,6 +31,7 @@ const {
 const { resolveGroupAddPrivacy } = require('../utils/groupAddPrivacy');
 const { resolvePublicWebOrigin } = require('../utils/publicWebUrl');
 const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
+const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
 const {
   createMongooseMessageHistoryRepository,
   resolveMessageHistoryWindow
@@ -1782,13 +1783,14 @@ const updateChatRoom = async (req, res) => {
         avatar: chatRoom.avatar,
         updatedAt: chatRoom.updatedAt
       };
-      io.to(`chat-${chatRoom._id}`).emit('groupInfoUpdated', groupInfoPayload);
+      const deliveredGroupInfo = rewritePublicMediaPayload(groupInfoPayload);
+      io.to(`chat-${chatRoom._id}`).emit('groupInfoUpdated', deliveredGroupInfo);
       const memberUserIds = new Set([
         chatRoom.creator.toString(),
         ...chatRoom.members.map(member => member.user.toString())
       ]);
       memberUserIds.forEach(memberUserId => {
-        io.to(`user-${memberUserId}`).emit('groupInfoUpdated', groupInfoPayload);
+        io.to(`user-${memberUserId}`).emit('groupInfoUpdated', deliveredGroupInfo);
       });
     }
 
