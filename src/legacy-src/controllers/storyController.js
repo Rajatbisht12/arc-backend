@@ -16,6 +16,7 @@ const { deleteNotificationsForTarget } = require('../services/notificationHistor
 const mongoose = require('mongoose');
 const Follow = require('../models/Follow');
 const { resolvePrivacyAccess, minimalProfile } = require('../utils/privacyPolicy');
+const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const MAX_CLIENT_UPLOAD_ID_LENGTH = 96;
@@ -209,7 +210,7 @@ const populateStoryAuthor = (story) => story.populate('author', 'username profil
 
 const respondWithStory = async (res, story, statusCode = 201) => {
   await populateStoryAuthor(story);
-  const plain = story.toObject();
+  const plain = await resolveClientMediaPayload(story.toObject());
   return res.status(statusCode).json({
     success: true,
     data: { story: { ...plain, viewCount: 0 } }
@@ -244,10 +245,10 @@ const withStoryViewCounts = async (stories) => {
     typeof story.toObject === 'function' ? story.toObject() : story
   ));
   const counts = await getStoryViewCountMap(plainStories.map((story) => story._id));
-  return plainStories.map((story) => ({
+  return resolveClientMediaPayload(plainStories.map((story) => ({
     ...story,
     viewCount: counts.get(toIdStr(story._id)) || 0
-  }));
+  })));
 };
 
 // Fetch one still-active story by ID. This is intentionally constrained to
@@ -274,7 +275,7 @@ const getStory = async (req, res) => {
       return rejectStoryPrivacy(res, authorAccess.author, authorAccess.relationship.access);
     }
     const counts = await getStoryViewCountMap([story._id]);
-    const safeStory = { ...story, author: minimalProfile(story.author) };
+    const safeStory = await resolveClientMediaPayload({ ...story, author: minimalProfile(story.author) });
     return res.json({
       success: true,
       data: { story: { ...safeStory, viewCount: counts.get(toIdStr(story._id)) || 0 } }
@@ -586,6 +587,7 @@ const getStoriesFeed = async (req, res) => {
         profilePicture: u.author.profilePicture
       } : { _id: toIdStr(u._id), username: '', profile: {} }
     }));
+    finalUsers = await resolveClientMediaPayload(finalUsers);
 
     storyDebug('feed-response', {
       userId: myIdStr,

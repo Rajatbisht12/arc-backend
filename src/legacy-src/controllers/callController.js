@@ -28,6 +28,7 @@ const {
 } = require('../services/callSessionService');
 const log = require('../utils/logger');
 const { resolvePrivacyAccess } = require('../utils/privacyPolicy');
+const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
 const { assertCallSessionPrivacy } = require('../utils/callPrivacy');
 
 // ── Config ──
@@ -39,7 +40,7 @@ const emitCallSessionUpdate = (session) => {
   const io = global._arcSocketIO;
   if (!io?.to || !session) return;
   const participants = [...new Set([String(session.caller), String(session.callee)].filter(Boolean))];
-  const serialized = serializeCallSession(session);
+  const serialized = rewritePublicMediaPayload(serializeCallSession(session));
   for (const participantId of participants) {
     io.to(`user-${participantId}`).emit('call-session-updated', serialized);
   }
@@ -275,7 +276,7 @@ const initiateCall = async (req, res) => {
 
     // Emit to target user's socket room. Keep the legacy Zego event while also
     // emitting the canonical event consumed by the current Web and Mobile apps.
-    const callData = {
+    const callData = rewritePublicMediaPayload({
       roomId,
       callId: roomId,
       nativeCallId: callSession.nativeCallId,
@@ -288,12 +289,12 @@ const initiateCall = async (req, res) => {
       },
       appID: ZEGO_APP_ID,
       timestamp: Date.now()
-    };
+    });
 
     // Use the io instance from notificationEmitter (it's injected at boot)
     if (global._arcSocketIO) {
       global._arcSocketIO.to(`user-${targetUserId}`).emit('call:offer', callData);
-      global._arcSocketIO.to(`user-${targetUserId}`).emit('call-request', {
+      global._arcSocketIO.to(`user-${targetUserId}`).emit('call-request', rewritePublicMediaPayload({
         callId: roomId,
         nativeCallId: callSession.nativeCallId,
         fromUserId: callerId,
@@ -302,7 +303,7 @@ const initiateCall = async (req, res) => {
         fromDisplayName: callerUser?.profile?.displayName || callerUser?.username,
         fromAvatar: callerUser?.profile?.avatar,
         deadlineAt: expiresAt
-      });
+      }));
     }
 
     const incomingCallNotification = {
@@ -644,10 +645,10 @@ const endCall = async (req, res) => {
 
     // Emit call summary to both participants' chat
     if (global._arcSocketIO) {
-      global._arcSocketIO.to(`user-${resolvedParticipantId}`).emit('newMessage', {
+      global._arcSocketIO.to(`user-${resolvedParticipantId}`).emit('newMessage', rewritePublicMediaPayload({
         chatId: `direct_${userId}`,
         message
-      });
+      }));
     }
 
     res.status(200).json({

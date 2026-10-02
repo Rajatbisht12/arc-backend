@@ -12,6 +12,7 @@ const StaffInvite = require('../models/StaffInvite');
 const LeaveRequest = require('../models/LeaveRequest');
 const { createAndEmitNotification } = require('../utils/notificationEmitter');
 const { formatUserDTO, formatPostDTO } = require('../utils/dto');
+const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
 const { attachIsSavedFlags } = require('../utils/savedFlags');
 const { getJson, setJson } = require('../utils/redisCache');
 const { profileCacheKey, invalidateProfileCache } = require('../utils/profileCache');
@@ -855,12 +856,15 @@ const getUser = async (req, res) => {
 
     const profileDto = formatUserDTO(user, isGuest, isSelf, privacyRelationship.access.canSeeOnlineStatus);
     if (!isSelf) delete profileDto.privacySettings;
+    const deliveredRecentPosts = await resolveClientMediaPayload(
+      await attachIsSavedFlags(recentPosts.map(p => formatPostDTO(p, isGuest, isSelf)), req.user)
+    );
     const responseData = {
       success: true,
       data: {
         user: profileDto,
         isBlockedByMe,
-        recentPosts: await attachIsSavedFlags(recentPosts.map(p => formatPostDTO(p, isGuest, isSelf)), req.user),
+        recentPosts: deliveredRecentPosts,
         relationship: {
           isFollowing,
           isFollowedBy,
@@ -1430,10 +1434,10 @@ const getUserPosts = async (req, res) => {
     });
 
     const isGuest = isGuestViewer;
-    const postDtos = await attachIsSavedFlags(
+    const postDtos = await resolveClientMediaPayload(await attachIsSavedFlags(
       posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString())),
       req.user
-    );
+    ));
 
     res.status(200).json({
       success: true,
@@ -1513,10 +1517,10 @@ const getUserClips = async (req, res) => {
     const total = await Post.countDocuments(filter);
 
     const isGuest = isGuestViewer;
-    const postDtos = await attachIsSavedFlags(
+    const postDtos = await resolveClientMediaPayload(await attachIsSavedFlags(
       posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString())),
       req.user
-    );
+    ));
 
     res.status(200).json({
       success: true,

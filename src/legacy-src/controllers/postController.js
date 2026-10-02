@@ -9,6 +9,7 @@ const { uploadMultipleFiles } = require('../utils/cloudinary');
 const { createLikeNotification, createCommentNotification, createReplyNotification, createMentionNotification } = require('../utils/notificationService');
 const { resolveCommentRelation } = require('../utils/commentThreading');
 const { formatPostDTO } = require('../utils/dto');
+const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
 const { extractHashtags, mergeTags } = require('../utils/hashtags');
 const { isMusicAllowedForMedia } = require('../utils/postAudioRules');
 const {
@@ -387,7 +388,7 @@ const createPost = async (req, res) => {
       success: true,
       message: 'Post created successfully',
       data: {
-        post: formatPostDTO(post, isGuest, isAuthor)
+        post: await resolveClientMediaPayload(formatPostDTO(post, isGuest, isAuthor))
       }
     });
 
@@ -615,7 +616,7 @@ const getPost = async (req, res) => {
     }
 
     const isAuthor = Boolean(req.user && req.user._id && !isGuest && post.author && post.author._id && post.author._id.toString() === req.user._id.toString());
-    const postDto = formatPostDTO(post, isGuest, isAuthor, viewerId);
+    const postDto = await resolveClientMediaPayload(formatPostDTO(post, isGuest, isAuthor, viewerId));
     if (postDto) {
       postDto.isSaved = Boolean(
         viewerId
@@ -759,7 +760,7 @@ const toggleLike = async (req, res) => {
       data: {
         likeCount: uniqueLikeCount,
         isLiked,
-        post: formatPostDTO(finalPost, req.user && req.user.userType === 'guest', authorId?.toString?.() === userId.toString())
+        post: await resolveClientMediaPayload(formatPostDTO(finalPost, req.user && req.user.userType === 'guest', authorId?.toString?.() === userId.toString()))
       }
     });
 
@@ -1185,15 +1186,16 @@ const getSavedPosts = async (req, res) => {
 
     const total = orderedPosts.length;
     const pageItems = orderedPosts.slice(skip, skip + limit);
+    const deliveredPosts = await resolveClientMediaPayload(pageItems.map(({ post, savedAt }) => ({
+      ...formatPostDTO(post, false, post.author?._id?.toString() === userId.toString()),
+      isSaved: true,
+      savedAt
+    })));
 
     res.status(200).json({
       success: true,
       data: {
-        posts: pageItems.map(({ post, savedAt }) => ({
-          ...formatPostDTO(post, false, post.author?._id?.toString() === userId.toString()),
-          isSaved: true,
-          savedAt
-        })),
+        posts: deliveredPosts,
         pagination: {
           current: page,
           total: Math.ceil(total / limit),
@@ -1233,14 +1235,15 @@ const getLikedPosts = async (req, res) => {
 
     const savedIds = new Set((user?.savedPosts || []).map(item => item?.post?.toString()).filter(Boolean));
 
+    const deliveredPosts = await resolveClientMediaPayload(posts.map(post => ({
+      ...formatPostDTO(post, false, post.author?._id?.toString() === userId.toString()),
+      isLiked: true,
+      isSaved: savedIds.has(post._id.toString())
+    })));
     res.status(200).json({
       success: true,
       data: {
-        posts: posts.map(post => ({
-          ...formatPostDTO(post, false, post.author?._id?.toString() === userId.toString()),
-          isLiked: true,
-          isSaved: savedIds.has(post._id.toString())
-        })),
+        posts: deliveredPosts,
         pagination: {
           current: page,
           total: Math.ceil(total / limit),
@@ -1341,7 +1344,7 @@ const updatePost = async (req, res) => {
       success: true,
       message: 'Post updated successfully',
       data: {
-        post: formatPostDTO(post, false, true)
+        post: await resolveClientMediaPayload(formatPostDTO(post, false, true))
       }
     });
 

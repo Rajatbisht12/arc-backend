@@ -2,6 +2,7 @@ const UserAudio = require('../models/UserAudio');
 const { validateAudioUpload, resolveAudioMimeType, AUDIO_LIMITS } = require('../utils/audioPolicy');
 const { uploadAudio, deleteFile } = require('../utils/cloudinary');
 const { probeMediaDuration } = require('../utils/videoProcessing');
+const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
 
 const AUDIO_FOLDER = 'gaming-social/audio/user-uploads';
 
@@ -37,6 +38,8 @@ const toAudioPayload = (doc) => ({
   status: doc.status,
   copyrightConfirmedAt: doc.copyrightConfirmedAt || null,
 });
+
+const toAuthorizedAudioPayload = async (doc) => resolveClientMediaPayload(toAudioPayload(doc));
 
 /**
  * POST /api/music/upload  (auth required)
@@ -129,7 +132,7 @@ const uploadUserAudio = async (req, res) => {
       return res.status(500).json({ success: false, code: 'persist_failed', message: 'Upload failed. Try again' });
     }
 
-    return res.status(201).json({ success: true, audio: toAudioPayload(doc) });
+    return res.status(201).json({ success: true, audio: await toAuthorizedAudioPayload(doc) });
   } catch (err) {
     console.error('uploadUserAudio error:', err?.message);
     return res.status(500).json({ success: false, code: 'server_error', message: 'Upload failed. Try again' });
@@ -144,7 +147,10 @@ const listMyAudio = async (req, res) => {
     const docs = await UserAudio.find({ owner: req.user._id, removed: { $ne: true } })
       .sort({ createdAt: -1 })
       .limit(50);
-    return res.json({ success: true, tracks: docs.map(toAudioPayload) });
+    return res.json({
+      success: true,
+      tracks: await Promise.all(docs.map(toAuthorizedAudioPayload))
+    });
   } catch (err) {
     console.error('listMyAudio error:', err?.message);
     return res.status(500).json({ success: false, message: 'Could not load your audio.' });
@@ -175,4 +181,4 @@ const removeUserAudio = async (req, res) => {
   }
 };
 
-module.exports = { uploadUserAudio, listMyAudio, removeUserAudio, toAudioPayload, AUDIO_LIMITS };
+module.exports = { uploadUserAudio, listMyAudio, removeUserAudio, toAudioPayload, toAuthorizedAudioPayload, AUDIO_LIMITS };

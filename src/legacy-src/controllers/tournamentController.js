@@ -46,6 +46,7 @@ const { getTimezoneDayBounds } = require('../utils/timezoneDayBounds');
 const {
   resolveTeamPremiumEntitlement
 } = require('../services/entitlementService');
+const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
 
 const TOURNAMENT_UPLOAD_DIR = path.resolve(process.cwd(), 'uploads', 'tournaments');
 
@@ -878,7 +879,9 @@ const emitTournamentUpdated = async (req, tournamentId) => {
   try {
     const tournament = await loadPublicTournament(tournamentId);
     if (!tournament) return null;
-    const payload = sanitizePublicTournament(processTournament(tournament));
+    const payload = rewritePublicMediaPayload(
+      sanitizePublicTournament(processTournament(tournament))
+    );
     const emittedAt = new Date();
     io.emit(
       'tournament_updated',

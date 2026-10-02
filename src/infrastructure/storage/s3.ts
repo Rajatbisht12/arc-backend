@@ -7,6 +7,7 @@ import {
   DeleteObjectsCommand,
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createHash } from "crypto";
 import { createReadStream, createWriteStream } from "fs";
 import { stat } from "fs/promises";
@@ -24,6 +25,19 @@ let s3: S3Sender = createStorageClient();
 const BUCKET = env.AWS_S3_BUCKET ?? "";
 const MAX_REMOTE_AVATAR_BYTES = 5 * 1024 * 1024;
 const DEFAULT_REMOTE_AVATAR_HOSTS = ["googleusercontent.com", "res.cloudinary.com"];
+const PRIVATE_MEDIA_PREFIXES = [
+  "gaming-social/messages/",
+  "gaming-social/stories/",
+  "gaming-social/audio/user-uploads/",
+];
+const PUBLIC_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const PRIVATE_MEDIA_CACHE_CONTROL = "private, max-age=900, no-transform";
+
+const cacheControlForKey = (key: string): string => (
+  PRIVATE_MEDIA_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ? PRIVATE_MEDIA_CACHE_CONTROL
+    : PUBLIC_IMMUTABLE_CACHE_CONTROL
+);
 
 export function parseAllowedRemoteAvatarUrl(value: string): URL | null {
   let parsed: URL;
@@ -69,6 +83,31 @@ async function readBodyWithLimit(response: Response, maxBytes: number): Promise<
 export function publicUrl(key: string): string {
   if (env.AWS_S3_CDN_URL) return `${env.AWS_S3_CDN_URL.replace(/\/$/, "")}/${key}`;
   return `https://${BUCKET}.s3.${env.AWS_REGION}.amazonaws.com/${key}`;
+}
+
+/**
+ * Issue a short-lived, read-only URL only after an application endpoint has
+ * authorized the viewer. Stored object keys/URLs remain stable in MongoDB;
+ * credentials are never persisted or emitted in Socket.IO history.
+ */
+export async function privateDownloadUrl(key: string, expiresIn = env.PRIVATE_MEDIA_URL_TTL_SECONDS): Promise<string> {
+  assertBucket();
+  const normalizedKey = String(key || "").replace(/^\/+/, "");
+  if (!normalizedKey || normalizedKey.includes("..") || normalizedKey.includes("\\") || normalizedKey.length > 1024) {
+    throw new Error("Invalid private media object key");
+  }
+  const ttl = Math.max(60, Math.min(3600, Number(expiresIn) || env.PRIVATE_MEDIA_URL_TTL_SECONDS));
+  return getSignedUrl(
+    s3 as S3Client,
+    new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: normalizedKey,
+      // Override legacy objects that were uploaded with a one-year public
+      // cache directive. The signed response must not outlive its bearer URL.
+      ResponseCacheControl: PRIVATE_MEDIA_CACHE_CONTROL,
+    }),
+    { expiresIn: ttl }
+  );
 }
 
 function assertBucket(): void {
@@ -258,7 +297,7 @@ export async function uploadImage(
       Key: key,
       Body: data,
       ContentType: "image/webp",
-      CacheControl: "public, max-age=31536000",
+      CacheControl: cacheControlForKey(key),
     })
   );
 
@@ -320,7 +359,7 @@ export async function uploadVideo(
     body: file.buffer,
     contentLength: file.buffer.length,
     contentType,
-    cacheControl: "public, max-age=31536000, immutable",
+    cacheControl: cacheControlForKey(key),
     checksum,
     metadata: file.integrity?.jobId ? { "integrity-job-id": String(file.integrity.jobId).slice(0, 128) } : undefined,
   });
@@ -358,7 +397,7 @@ export async function uploadAudio(
       Key: key,
       Body: file.buffer,
       ContentType: getAudioContentType(file),
-      CacheControl: "public, max-age=31536000, immutable",
+      CacheControl: cacheControlForKey(key),
     })
   );
   return { url: publicUrl(key), publicId: key };
@@ -369,7 +408,7 @@ export async function deleteFile(publicId: string): Promise<void> {
   await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: publicId }));
 }
 
-const IMMUTABLE_MEDIA_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const IMMUTABLE_MEDIA_CACHE_CONTROL = PUBLIC_IMMUTABLE_CACHE_CONTROL;
 
 export function contentTypeForMediaPath(filePath: string): string {
   const extension = filePath.toLowerCase().split(".").pop();

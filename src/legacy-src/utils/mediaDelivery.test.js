@@ -7,6 +7,7 @@ const {
   publicMediaJsonReplacer,
   rewriteClipMediaUrl,
   rewritePublicMediaUrl,
+  rewritePublicMediaPayload,
   rewriteUserMediaDeliveryUrls,
   rewritePostMediaDeliveryUrls
 } = require('./mediaDelivery');
@@ -159,4 +160,15 @@ test('JSON response replacer covers group avatars and post covers but preserves 
     publicMediaJsonReplacer('uploadUrl', `${origin}/gaming-social/avatars/user.webp?X-Amz-Signature=keep`, environment),
     `${origin}/gaming-social/avatars/user.webp?X-Amz-Signature=keep`
   );
+});
+
+test('Socket.IO payload normalizer rewrites nested public media without exposing private media', () => {
+  const origin = 'https://arc-gaming-media-906446637180.s3.us-east-1.amazonaws.com';
+  const payload = {
+    sender: { profile: { avatar: `${origin}/gaming-social/avatars/user.webp` } },
+    content: { media: [{ url: `${origin}/gaming-social/messages/private.webp` }] }
+  };
+  rewritePublicMediaPayload(payload, environment);
+  assert.equal(payload.sender.profile.avatar, 'https://media.example.cloudfront.net/gaming-social/avatars/user.webp');
+  assert.equal(payload.content.media[0].url, `${origin}/gaming-social/messages/private.webp`);
 });

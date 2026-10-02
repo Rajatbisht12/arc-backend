@@ -288,6 +288,10 @@ assert(serviceSource.includes("ticketStatus: 'accepted', receiptStatus: 'pending
 assert(serviceSource.includes("'provider_delivered'"));
 assert(serviceSource.includes('providerDeliveredAt'));
 assert(serviceSource.includes('clientDeliveredAt'));
+assert(!/update:\s*\[\s*\{\s*\$set:[\s\S]{0,600}?providerDeliveredAt/.test(serviceSource),
+  'DocumentDB-incompatible aggregation update pipelines must not be used for push receipts');
+assert(serviceSource.includes("clientDeliveredAt: { $ne: null }"),
+  'receipt reconciliation must preserve a racing client acknowledgement');
 assert(serviceSource.includes('pushTargetTokenHashes'), 'durable retry must stay scoped to original device hashes');
 assert(serviceSource.includes('pushTargetPlatforms'), 'call-state cleanup must target mobile installations without alerting web');
 assert(serviceSource.includes('pushDeliveryAttemptId: String(record._id)'));
