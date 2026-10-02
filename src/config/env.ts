@@ -22,6 +22,9 @@ const envSchema = z.object({
   // request-header transform is present and verified through the proxied host.
   CLOUDFLARE_ORIGIN_AUTH_MODE: z.enum(["off", "observe", "enforce"]).default("off"),
   CLOUDFLARE_ORIGIN_AUTH_SECRET: z.string().optional(),
+  TURNSTILE_MODE: z.enum(["off", "observe", "enforce"]).default("off"),
+  TURNSTILE_SECRET_KEY: z.string().optional(),
+  TURNSTILE_ALLOWED_HOSTNAMES: z.string().default("squadhunt.com,www.squadhunt.com"),
   TRUST_PROXY_HOPS: z.coerce.number().int().min(1).max(2).default(1),
   SOCKET_CONNECTION_RATE_WINDOW_SECONDS: z.coerce.number().int().min(1).max(300).default(10),
   SOCKET_CONNECTION_RATE_MAX: z.coerce.number().int().min(5).max(1000).default(30),
@@ -114,6 +117,13 @@ const envSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["CLOUDFLARE_ORIGIN_AUTH_SECRET"],
       message: "Cloudflare origin authentication requires a secret with at least 32 characters"
+    });
+  }
+  if (value.TURNSTILE_MODE !== "off" && (value.TURNSTILE_SECRET_KEY || "").trim().length < 10) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TURNSTILE_SECRET_KEY"],
+      message: "Turnstile verification requires a configured secret key"
     });
   }
   if (value.NODE_ENV !== "production") return;

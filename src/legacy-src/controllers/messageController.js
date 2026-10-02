@@ -1004,7 +1004,7 @@ const getRecentConversations = async (req, res) => {
       }
     ]);
 
-    res.status(200).json({
+    const clientPayload = await resolveClientMediaPayload({
       success: true,
       data: {
         conversations: validConversations,
@@ -1016,6 +1016,7 @@ const getRecentConversations = async (req, res) => {
         }
       }
     });
+    res.status(200).json(clientPayload);
 
   } catch (error) {
     log.error('Error fetching recent conversations:', { error: String(error) });

@@ -13,6 +13,7 @@ import {
   uploadSingle
 } from "./auth.legacy-adapters";
 import { resolvePublicWebOrigin } from "../../legacy-src/utils/publicWebUrl";
+import { turnstileWebAuthGuard } from "../../infrastructure/security/turnstile";
 
 const router = Router();
 
@@ -164,7 +165,7 @@ const profileUpdateValidation = [
 
 router.get("/check-username", authLookupLimiter, usernameLookupValidation, handleValidationErrors, legacyAuthController.checkUsernameAvailability);
 router.get("/check-email", authLookupLimiter, emailLookupValidation, handleValidationErrors, legacyAuthController.checkEmailAvailability);
-router.post("/send-otp", otpLimiter, sendOtpValidation, handleValidationErrors, legacyAuthController.sendOtp);
+router.post("/send-otp", otpLimiter, turnstileWebAuthGuard(), sendOtpValidation, handleValidationErrors, legacyAuthController.sendOtp);
 router.post("/verify-otp-register", otpLimiter, verifyOtpValidation, handleValidationErrors, legacyAuthController.verifyOtpForRegister);
 router.post("/verify-otp-login", progressiveOtpLoginLimiter, verifyOtpValidation, handleValidationErrors, legacyAuthController.verifyOtpAndLogin);
 router.post("/reset-password-otp", otpLimiter, resetPasswordValidation, handleValidationErrors, legacyAuthController.resetPasswordWithOtp);
@@ -177,7 +178,7 @@ router.post(
   legacyAuthController.checkPasswordSame
 );
 router.post("/register", uploadSingle("avatar"), registerValidation, handleValidationErrors, legacyAuthController.register);
-router.post("/login", progressiveLoginLimiter, loginValidation, handleValidationErrors, legacyAuthController.login);
+router.post("/login", progressiveLoginLimiter, turnstileWebAuthGuard(), loginValidation, handleValidationErrors, legacyAuthController.login);
 router.post("/guest-token", guestTokenLimiter, legacyAuthController.generateGuestToken);
 router.get("/me", protectAllowIncomplete, legacyAuthController.getMe);
 router.put("/profile", protect, uploadSingle("avatar"), profileUpdateValidation, handleValidationErrors, legacyAuthController.updateProfile);

@@ -30,6 +30,8 @@ assert(storage.includes('ResponseCacheControl: PRIVATE_MEDIA_CACHE_CONTROL'));
 assert(storage.includes('getSignedUrl('));
 assert(messages.includes('messages: await resolveClientMediaPayload(messages)'));
 assert(messages.includes('const clientMessages = await resolveClientMediaPayload(messages.reverse())'));
+assert(messages.includes('const clientPayload = await resolveClientMediaPayload({'));
+assert(messages.includes('res.status(200).json(clientPayload);'));
 assert.equal((messages.match(/\.emit\('newMessage'/g) || []).length, 1,
   'all legacy message emits must flow through the signed-media helper');
 assert(stories.includes('const safeStory = await resolveClientMediaPayload'));

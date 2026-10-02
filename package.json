@@ -12,6 +12,7 @@
     "test:auth-oauth-contracts": "node src/legacy-src/controllers/authController.oauth.test.js",
     "test:auth-onboarding": "node src/legacy-src/utils/onboardingValidation.test.js && node src/legacy-src/middleware/auth.profile-completion.test.js && node src/legacy-src/controllers/authController.oauth.test.js && node src/legacy-src/models/User.oauthPasswordSetup.test.js && node src/legacy-src/config/passport.oauth.test.js",
     "test:auth-limiter": "node src/legacy-src/middleware/progressiveAuthLimiter.test.js",
+    "test:turnstile": "node --import tsx src/modules/security/turnstile.contract.test.ts",
     "test:profile-social-links": "node --test src/legacy-src/utils/profileSocialLinks.test.js",
     "test:auth-login-audit": "node src/legacy-src/utils/userLoginAudit.test.js && node src/legacy-src/models/UserLoginEvent.test.js",
     "test:notification-policy": "node src/legacy-src/utils/notificationChannelPolicy.test.js && node src/legacy-src/utils/notificationEmitter.policy.test.js && node src/legacy-src/utils/securityEmail.test.js && node src/legacy-src/utils/emailBranding.test.js && node src/legacy-src/utils/transactionalEmailCallsites.test.js && node src/legacy-src/utils/socialEmailTriggerAudit.test.js",
