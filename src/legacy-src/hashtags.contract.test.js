@@ -45,11 +45,14 @@ test('createPost and editPost index hashtags from the caption (source of truth)'
   const controller = read('controllers/postController.js');
   assert.match(controller, /require\('\.\.\/utils\/hashtags'\)/);
   // Create indexes caption hashtags + explicit tags.
-  assert.match(controller, /tags: mergeTags\(parsedTags, typeof text === 'string' \? text : ''\)/);
+  assert.match(controller, /indexedTags = mergeTags\(parsedTags, typeof text === 'string' \? text : ''\)/);
+  assert.match(controller, /tags: indexedTags/);
+  assert.match(controller, /indexedTags\.length > MAX_HASHTAGS_PER_POST/);
   // Edit re-derives from the caption and preserves manual field tags.
   assert.match(controller, /oldCaptionTags = new Set\(extractHashtags\(oldText\)\)/);
   assert.match(controller, /preservedFieldTags/);
   assert.match(controller, /nextTags = mergeTags\(explicit, typeof effectiveText === 'string'/);
+  assert.match(controller, /nextTags\.length > MAX_HASHTAGS_PER_POST/);
 });
 
 test('hashtag search query is normalized to the stored lowercase keys', () => {

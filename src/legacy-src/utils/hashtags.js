@@ -12,6 +12,8 @@
 
 // Global matcher for hashtags embedded in caption text.
 const HASHTAG_RE = /#([A-Za-z0-9_]+)/g;
+const MAX_HASHTAGS_PER_POST = 5;
+const HASHTAG_LIMIT_MESSAGE = 'Maximum 5 hashtags allowed.';
 
 /**
  * Normalize a single raw tag token (which may carry a leading `#` and/or
@@ -74,4 +76,4 @@ function mergeTags(explicitTags, text) {
   return out;
 }
 
-module.exports = { normalizeTag, extractHashtags, mergeTags, HASHTAG_RE };
+module.exports = { normalizeTag, extractHashtags, mergeTags, HASHTAG_RE, MAX_HASHTAGS_PER_POST, HASHTAG_LIMIT_MESSAGE };

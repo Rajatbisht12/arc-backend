@@ -13,7 +13,7 @@ const { resolveCommentRelation } = require('../utils/commentThreading');
 const { buildCommentDeletion, getCommentPermissions, idString } = require('../utils/commentModeration');
 const { formatPostDTO } = require('../utils/dto');
 const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
-const { extractHashtags, mergeTags } = require('../utils/hashtags');
+const { extractHashtags, mergeTags, MAX_HASHTAGS_PER_POST, HASHTAG_LIMIT_MESSAGE } = require('../utils/hashtags');
 const { isMusicAllowedForMedia } = require('../utils/postAudioRules');
 const {
   getRecommendedPosts,
@@ -92,6 +92,18 @@ const createPost = async (req, res) => {
   try {
     const { text, postType, tags, visibility, recruitmentInfo, mentions } = req.body;
     const authorId = req.user._id;
+    const rawTags = tags !== undefined ? tags : req.body['tags[]'];
+    const parsedTags = Array.isArray(rawTags)
+      ? rawTags.map(tag => String(tag).trim()).filter(Boolean)
+      : typeof rawTags === 'string'
+        ? rawTags.split(',').map(tag => tag.trim()).filter(Boolean)
+        : [];
+    const indexedTags = mergeTags(parsedTags, typeof text === 'string' ? text : '');
+    // Reject before processing/uploading media or sending notifications. The
+    // indexed, case-insensitive set is the same one used for discovery.
+    if (indexedTags.length > MAX_HASHTAGS_PER_POST) {
+      return res.status(400).json({ success: false, message: HASHTAG_LIMIT_MESSAGE });
+    }
 
     const parsedAchievementInfo = normalizeAchievementInfoInput(req.body);
     if (postType === 'achievement') {
@@ -271,13 +283,6 @@ const createPost = async (req, res) => {
       }
     }
 
-    const rawTags = tags !== undefined ? tags : req.body['tags[]'];
-    const parsedTags = Array.isArray(rawTags)
-      ? rawTags.map(tag => String(tag).trim()).filter(Boolean)
-      : typeof rawTags === 'string'
-        ? rawTags.split(',').map(tag => tag.trim()).filter(Boolean)
-        : [];
-
     // Create post data (allow post with only media, no caption)
     const postData = {
       author: authorId,
@@ -288,7 +293,7 @@ const createPost = async (req, res) => {
       postType: postType || 'general',
       // Index hashtags from the caption (source of truth) unioned with any
       // explicit tags, all normalized + deduped for case-insensitive search.
-      tags: mergeTags(parsedTags, typeof text === 'string' ? text : ''),
+      tags: indexedTags,
       mentions: mentionedUserIds,
       visibility: visibility || 'public'
     };
@@ -1419,17 +1424,21 @@ const updatePost = async (req, res) => {
       post.content.text = text;
       contentChanged = true;
     }
-    const textChanged = text !== undefined && text !== oldText;
     // Re-derive the hashtag index whenever the caption or the explicit tags
     // change. Field tags (added manually, not present in the old caption) are
     // preserved; hashtags removed from the caption drop out automatically.
-    if (tags !== undefined || textChanged) {
+    // Validate every caption supplied by an edit request, including a no-op
+    // resend of a legacy caption that already exceeds the current limit.
+    if (tags !== undefined || text !== undefined) {
       const oldCaptionTags = new Set(extractHashtags(oldText));
       const preservedFieldTags = (Array.isArray(post.tags) ? post.tags : [])
         .filter((tag) => !oldCaptionTags.has(String(tag).toLowerCase()));
       const explicit = tags !== undefined ? tags : preservedFieldTags;
       const effectiveText = text !== undefined ? text : oldText;
       const nextTags = mergeTags(explicit, typeof effectiveText === 'string' ? effectiveText : '');
+      if (nextTags.length > MAX_HASHTAGS_PER_POST) {
+        return res.status(400).json({ success: false, message: HASHTAG_LIMIT_MESSAGE });
+      }
       const currentTags = Array.isArray(post.tags) ? post.tags : [];
       if (nextTags.length !== currentTags.length || nextTags.some((tag, i) => tag !== currentTags[i])) {
         post.tags = nextTags;
