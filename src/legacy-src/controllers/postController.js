@@ -7,7 +7,8 @@ const BoostCampaign = require('../models/BoostCampaign');
 const BoostDeliveryAttribution = require('../models/BoostDeliveryAttribution');
 const UserAudio = require('../models/UserAudio');
 const { uploadMultipleFiles } = require('../utils/cloudinary');
-const { createLikeNotification, createCommentNotification, createReplyNotification, createMentionNotification } = require('../utils/notificationService');
+const { createLikeNotification, createCommentNotification, createReplyNotification, createMentionNotification, createCommentMentionNotification } = require('../utils/notificationService');
+const { resolveCommentMentions, mentionNotificationRecipients } = require('../utils/commentMentions');
 const { resolveCommentRelation } = require('../utils/commentThreading');
 const { buildCommentDeletion, getCommentPermissions, idString } = require('../utils/commentModeration');
 const { formatPostDTO } = require('../utils/dto');
@@ -828,6 +829,7 @@ const getPostComments = async (req, res) => {
         _id: c._id,
         user: c.user,
         text: c.text,
+        mentions: c.mentions || [],
         createdAt: c.createdAt,
         parentComment: null,
         rootComment: null,
@@ -1022,9 +1024,32 @@ const addComment = async (req, res) => {
     }
     const isReply = Boolean(relation.rootComment);
 
+    let resolvedMentions;
+    try {
+      resolvedMentions = await resolveCommentMentions(text.trim(), User);
+    } catch (error) {
+      if (error.code === 'COMMENT_MENTION_LIMIT') {
+        return res.status(400).json({ success: false, code: error.code, message: error.message });
+      }
+      throw error;
+    }
+    if (resolvedMentions.length) {
+      // The same content owner is checked for every recipient; populate once
+      // rather than reloading that user for each visibility decision.
+      await visiblePost.populate('author', 'username userType profile privacySettings blockedUsers isActive');
+      const commentAuthor = await User.findById(userId).select('blockedUsers').lean();
+      const mentionVisibility = await Promise.all(resolvedMentions.map(async (recipient) => {
+        if ((commentAuthor?.blockedUsers || []).some((id) => String(id) === String(recipient._id))
+          || (recipient.blockedUsers || []).some((id) => String(id) === String(userId))) return false;
+        return (await resolvePostAccess({ post: visiblePost, viewer: recipient })).allowed;
+      }));
+      resolvedMentions = resolvedMentions.filter((_, index) => mentionVisibility[index]);
+    }
+
     const comment = {
       user: userId,
       text: text.trim(),
+      mentions: resolvedMentions.map(({ _id, username }) => ({ user: _id, username })),
       likes: [],
       parentComment: relation.parentComment,
       rootComment: relation.rootComment,
@@ -1063,6 +1088,7 @@ const addComment = async (req, res) => {
     // Notifications: a top-level comment notifies the post author; a reply
     // notifies the answered commenter and deep-links to the exact thread.
     // Never notify yourself.
+    let standardRecipientId = null;
     if (isReply) {
       if (relation.replyTargetUserId && relation.replyTargetUserId !== userId.toString()) {
         await createReplyNotification(relation.replyTargetUserId, userId, post._id, {
@@ -1070,10 +1096,23 @@ const addComment = async (req, res) => {
           replyId: newComment?._id,
           text: text.trim(),
         }).catch(() => {});
+        standardRecipientId = relation.replyTargetUserId;
       }
     } else if (post.author.toString() !== userId.toString()) {
       await createCommentNotification(post.author, userId, post._id, text.trim(), newComment?._id);
+      standardRecipientId = post.author;
     }
+
+    // A recipient already notified as post owner or reply target receives only
+    // that notification. Every other resolved recipient gets one mention event.
+    await Promise.all(mentionNotificationRecipients(resolvedMentions, userId, standardRecipientId).map((recipient) => (
+      createCommentMentionNotification(recipient, userId, visiblePost, {
+        commentId: newComment?._id,
+        rootCommentId: relation.rootComment || newComment?._id,
+        isReply,
+        text: text.trim(),
+      }).catch((error) => log.error('Comment mention notification failed', { error: String(error), postId: String(postId) }))
+    )));
 
     await recordEngagementEvent({
       userId,

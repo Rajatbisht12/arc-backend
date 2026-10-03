@@ -329,6 +329,41 @@ const createMentionNotification = async (recipientId, senderId, postId) => {
   }
 };
 
+// Comment and reply mentions share the established in-app + push outbox. The
+// durable key makes retries safe even if the sender submits the same token twice.
+const createCommentMentionNotification = async (recipient, senderId, post, { commentId, rootCommentId, isReply, text } = {}) => {
+  if (!recipient || !post || !commentId || String(recipient._id) === String(senderId)) return null;
+  const { resolvePostAccess } = require('./privacyPolicy');
+  const sender = await require('../models/User').findById(senderId)
+    .select('username blockedUsers isActive').lean();
+  if (!sender || sender.isActive === false) return null;
+  if ((sender.blockedUsers || []).some((id) => String(id) === String(recipient._id))
+      || (recipient.blockedUsers || []).some((id) => String(id) === String(senderId))) return null;
+  const access = await resolvePostAccess({ post, viewer: recipient });
+  if (!access.allowed) return null;
+
+  const notificationDedupeKey = `comment-mention:${commentId}:${recipient._id}`;
+  const deepLink = `/post/${post._id}?comment=${rootCommentId || commentId}${isReply ? `&reply=${commentId}` : ''}`;
+  return createAndEmitNotification({
+    recipient: recipient._id,
+    sender: senderId,
+    type: 'mention',
+    title: `${sender.username} mentioned you`,
+    message: `${sender.username} mentioned you in a ${isReply ? 'reply' : 'comment'}: ${String(text || '').slice(0, 120)}`,
+    data: {
+      postId: post._id,
+      commentId,
+      deepLink,
+      customData: {
+        kind: isReply ? 'reply_mention' : 'comment_mention',
+        rootCommentId: String(rootCommentId || commentId),
+        notificationDedupeKey,
+        pushRequestId: notificationDedupeKey,
+      },
+    },
+  });
+};
+
 // Create system notification
 const createSystemNotification = async (recipientId, title, message, data = {}, options = {}) => {
   try {
@@ -365,5 +400,6 @@ module.exports = {
   createTournamentNotification,
   createSystemNotification,
   createMentionNotification,
+  createCommentMentionNotification,
   buildMessageNotificationBody
 };

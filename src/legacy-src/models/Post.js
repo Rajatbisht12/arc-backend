@@ -148,6 +148,13 @@ const postSchema = new mongoose.Schema({
       required: true,
       maxlength: [500, 'Comment cannot exceed 500 characters']
     },
+    // Resolved by the server from comment text. The username snapshot identifies
+    // the exact token while the user ID remains stable after username changes.
+    mentions: [{
+      _id: false,
+      user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      username: { type: String, required: true }
+    }],
     likes: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
