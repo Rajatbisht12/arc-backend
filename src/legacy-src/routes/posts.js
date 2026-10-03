@@ -1,5 +1,5 @@
 const express = require('express');
-const { body } = require('express-validator');
+const { body, param } = require('express-validator');
 const { protect, optionalAuth } = require('../middleware/auth');
 const { uploadFields } = require('../middleware/upload');
 const { handleValidationErrors } = require('../middleware/validation');
@@ -14,6 +14,7 @@ const {
   recordClipView,
   toggleLike,
   addComment,
+  deleteComment,
   recordShare,
   toggleSave,
   trackInteraction,
@@ -74,6 +75,10 @@ const addCommentValidation = [
     .isLength({ min: 1, max: 500 })
     .withMessage('Comment must be between 1 and 500 characters')
 ];
+const commentDeleteValidation = [
+  param('id').isMongoId().withMessage('Invalid post ID'),
+  param('commentId').isMongoId().withMessage('Invalid comment ID')
+];
 
 const MAX_ENGAGEMENT_DURATION_MS = 24 * 60 * 60 * 1000;
 const engagementMetricValidation = [
@@ -101,6 +106,7 @@ router.get('/:id/likes', optionalAuth, getPostLikes);
 router.post('/:id/view', protect, engagementMetricValidation, handleValidationErrors, recordClipView);
 router.post('/:id/like', protect, toggleLike);
 router.post('/:id/comment', protect, addCommentValidation, handleValidationErrors, addComment);
+router.delete('/:id/comments/:commentId', protect, commentDeleteValidation, handleValidationErrors, deleteComment);
 router.post('/:id/share', protect, recordShare);
 router.post('/:id/save', protect, toggleSave);
 router.post('/interaction', protect, interactionValidation, handleValidationErrors, trackInteraction);

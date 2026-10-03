@@ -5,6 +5,31 @@ const TeamRecruitment = require('../models/TeamRecruitment');
 const mongoose = require('mongoose');
 const log = require('../utils/logger');
 
+const idString = (value) => String(value?._id || value || '').trim();
+
+const resolveCommentTarget = async (targetId) => {
+  const post = await Post.findOne({ 'comments._id': targetId, isActive: { $ne: false } })
+    .select('author postType content.media comments');
+  if (!post) return null;
+  const comment = (post.comments || []).find((entry) => idString(entry?._id) === idString(targetId));
+  if (!comment) return null;
+  const isClip = post.postType === 'clip'
+    || (post.content?.media || []).some((media) => String(media?.type || '').toLowerCase() === 'video');
+  return {
+    post,
+    comment,
+    context: {
+      parentContentType: isClip ? 'clip' : 'post',
+      parentContentId: post._id,
+      contentOwner: post.author,
+      targetAuthor: comment.user,
+      parentCommentId: comment.parentComment || undefined,
+      rootCommentId: comment.rootComment || undefined,
+      textSnapshot: String(comment.text || '').slice(0, 500)
+    }
+  };
+};
+
 const reportTargetExists = async (targetType, targetId) => {
   if (targetType === 'post') {
     return Boolean(await Post.exists({ _id: targetId, isActive: { $ne: false } }));
@@ -15,9 +40,7 @@ const reportTargetExists = async (targetType, targetId) => {
   if (targetType === 'user') {
     return Boolean(await User.exists({ _id: targetId, isActive: { $ne: false } }));
   }
-  if (targetType === 'comment') {
-    return Boolean(await Post.exists({ 'comments._id': targetId, isActive: { $ne: false } }));
-  }
+  if (targetType === 'comment') return Boolean(await resolveCommentTarget(targetId));
   return false;
 };
 
@@ -37,7 +60,16 @@ const createReport = async (req, res) => {
     const allowedReasons = ['spam', 'harassment', 'hate_speech', 'violence', 'nudity', 'misinformation', 'copyright', 'other'];
     const finalReason = allowedReasons.includes(reason) ? reason : 'other';
 
-    if (!await reportTargetExists(targetType, targetId)) {
+    const commentTarget = targetType === 'comment' ? await resolveCommentTarget(targetId) : null;
+    if (targetType === 'comment' && commentTarget && idString(commentTarget.comment.user) === idString(reporterId)) {
+      return res.status(400).json({
+        success: false,
+        code: 'SELF_REPORT_NOT_ALLOWED',
+        message: 'You cannot report your own comment'
+      });
+    }
+
+    if (targetType === 'comment' ? !commentTarget : !await reportTargetExists(targetType, targetId)) {
       return res.status(404).json({ success: false, message: 'Report target not found' });
     }
 
@@ -61,7 +93,8 @@ const createReport = async (req, res) => {
         targetType,
         targetId,
         reason: finalReason,
-        details: typeof details === 'string' ? details.slice(0, 500) : ''
+        details: typeof details === 'string' ? details.slice(0, 500) : '',
+        ...(commentTarget ? { targetContext: commentTarget.context } : {})
       });
     } catch (err) {
       // Duplicate key => a concurrent request already created this report.

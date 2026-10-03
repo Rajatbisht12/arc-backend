@@ -12,8 +12,9 @@ const routesSource = fs.readFileSync(
 );
 
 assert.match(controllerSource, /const getReportTarget = async \(req, res\)/);
-assert.match(controllerSource, /Report\.findById\(reportId\)[\s\S]*\.select\('targetType targetId'\)/);
-assert.match(controllerSource, /if \(report\.targetType !== 'post'\)/);
+assert.match(controllerSource, /Report\.findById\(reportId\)[\s\S]*\.select\('targetType targetId targetContext'\)/);
+assert.match(controllerSource, /\['post', 'comment'\]\.includes\(report\.targetType\)/);
+assert.match(controllerSource, /report\.targetType === 'comment'/);
 assert.match(controllerSource, /Post\.findById\(report\.targetId\)/);
 assert.match(controllerSource, /populate\('author', 'username profile\.displayName profile\.avatar userType'\)/);
 assert.match(controllerSource, /availability: post \? 'available' : 'unavailable'/);
@@ -30,6 +31,7 @@ console.log('Admin reported-post lazy target contract passed');
 
 const originalReportFindById = Report.findById;
 const originalPostFindById = Post.findById;
+const originalPostFindOne = Post.findOne;
 
 const responseRecorder = () => ({
   statusCode: 200,
@@ -40,21 +42,23 @@ const responseRecorder = () => ({
   json(body) { this.body = body; return this; }
 });
 
-const reportQuery = (report) => ({
-  select() {
-    return { lean: async () => report };
-  }
-});
+const reportQuery = (report) => {
+  const query = {
+    select() { return query; },
+    populate() { return query; },
+    lean: async () => report
+  };
+  return query;
+};
 
-const postQuery = (post) => ({
-  populate() {
-    return {
-      select() {
-        return { lean: async () => post };
-      }
-    };
-  }
-});
+const postQuery = (post) => {
+  const query = {
+    populate() { return query; },
+    select() { return query; },
+    lean: async () => post
+  };
+  return query;
+};
 
 const runControllerCases = async () => {
   try {
@@ -84,6 +88,24 @@ const runControllerCases = async () => {
     assert.equal(response.body.data.availability, 'unavailable');
     assert.equal(response.body.data.post, null);
 
+    const commentId = '507f1f77bcf86cd799439022';
+    Report.findById = () => reportQuery({
+      targetType: 'comment',
+      targetId: commentId,
+      targetContext: { parentContentId: targetId, textSnapshot: 'reported text' }
+    });
+    Post.findOne = () => postQuery({
+      _id: targetId,
+      author: { username: 'owner' },
+      comments: [{ _id: commentId, text: 'reported text', user: { username: 'author' } }]
+    });
+    response = responseRecorder();
+    await adminController.getReportTarget({ params: { reportId: '507f1f77bcf86cd799439011' } }, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.data.targetType, 'comment');
+    assert.equal(response.body.data.comment.text, 'reported text');
+    assert.equal(response.body.data.post.comments, undefined, 'comment arrays are not duplicated in the post preview');
+
     Report.findById = () => reportQuery({ targetType: 'user', targetId });
     response = responseRecorder();
     await adminController.getReportTarget({ params: { reportId: '507f1f77bcf86cd799439011' } }, response);
@@ -94,12 +116,14 @@ const runControllerCases = async () => {
   } finally {
     Report.findById = originalReportFindById;
     Post.findById = originalPostFindById;
+    Post.findOne = originalPostFindOne;
   }
 };
 
 runControllerCases().catch((error) => {
   Report.findById = originalReportFindById;
   Post.findById = originalPostFindById;
+  Post.findOne = originalPostFindOne;
   console.error(error);
   process.exitCode = 1;
 });
