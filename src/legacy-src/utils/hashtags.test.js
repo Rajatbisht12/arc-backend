@@ -1,7 +1,18 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { extractHashtags, normalizeTag, mergeTags } = require('./hashtags');
+const { extractHashtags, normalizeTag, mergeTags, MAX_HASHTAGS_PER_POST, HASHTAG_LIMIT_MESSAGE } = require('./hashtags');
+
+test('post hashtag limit uses five distinct indexed keys', () => {
+  assert.equal(MAX_HASHTAGS_PER_POST, 5);
+  assert.equal(HASHTAG_LIMIT_MESSAGE, 'Maximum 5 hashtags allowed.');
+  for (const count of [0, 1, 4, 5]) {
+    assert.equal(mergeTags([], Array.from({ length: count }, (_, i) => `#tag${i}`).join(' ')).length, count);
+  }
+  assert.equal(mergeTags([], '#a #b #c #d #e #f').length, 6);
+  assert.equal(mergeTags([], '#a #b #c #d #e #A').length, 5);
+  assert.equal(mergeTags(['extra'], '#a #b #c #d #e').length, 6);
+});
 
 test('#Gaming and #gaming resolve to the same stored key (case-insensitive)', () => {
   assert.deepEqual(extractHashtags('#Gaming #gaming #GAMING'), ['gaming']);
