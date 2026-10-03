@@ -181,6 +181,7 @@ const run = (): void => {
     ["post", "/:id/view"],
     ["post", "/:id/like"],
     ["post", "/:id/comment"],
+    ["delete", "/:id/comments/:commentId"],
     ["post", "/:id/share"],
     ["post", "/:id/save"],
     ["put", "/:id"],

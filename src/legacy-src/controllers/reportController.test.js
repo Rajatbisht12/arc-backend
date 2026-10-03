@@ -22,6 +22,7 @@ const originals = {
   reportCreate: Report.create,
   reportFindById: Report.findById,
   postExists: Post.exists,
+  postFindOne: Post.findOne,
   postFindByIdAndUpdate: Post.findByIdAndUpdate,
   postFindOneAndUpdate: Post.findOneAndUpdate
 };
@@ -31,6 +32,7 @@ const restore = () => {
   Report.create = originals.reportCreate;
   Report.findById = originals.reportFindById;
   Post.exists = originals.postExists;
+  Post.findOne = originals.postFindOne;
   Post.findByIdAndUpdate = originals.postFindByIdAndUpdate;
   Post.findOneAndUpdate = originals.postFindOneAndUpdate;
 };
@@ -108,6 +110,71 @@ const run = async () => {
       reason: 'spam'
     }), res);
     assert.strictEqual(res.statusCode, 409, 'duplicate-key race must resolve to already-reported, not a server error');
+
+    // Comment reports resolve their real author and reject self-reporting before
+    // persistence; opening the comment from another profile does not affect it.
+    const commentId = '507f1f77bcf86cd799439020';
+    Post.findOne = () => ({
+      select: async () => ({
+        _id: '507f1f77bcf86cd799439021',
+        author: '507f1f77bcf86cd799439099',
+        postType: 'general',
+        content: { media: [] },
+        comments: [{
+          _id: commentId,
+          user: '507f1f77bcf86cd799439011',
+          text: 'own comment',
+          parentComment: null,
+          rootComment: null
+        }]
+      })
+    });
+    res = responseRecorder();
+    await reportController.createReport(baseRequest({
+      targetType: 'comment',
+      targetId: commentId,
+      reason: 'spam'
+    }), res);
+    assert.strictEqual(res.statusCode, 400);
+    assert.strictEqual(res.body.code, 'SELF_REPORT_NOT_ALLOWED');
+
+    // A report by another user persists the immutable moderation context needed
+    // by the Admin Panel even if the comment is deleted before review.
+    const reportedAuthorId = '507f1f77bcf86cd799439022';
+    const parentPostId = '507f1f77bcf86cd799439021';
+    Post.findOne = () => ({
+      select: async () => ({
+        _id: parentPostId,
+        author: '507f1f77bcf86cd799439099',
+        postType: 'general',
+        content: { media: [] },
+        comments: [{
+          _id: commentId,
+          user: reportedAuthorId,
+          text: 'reported comment',
+          parentComment: null,
+          rootComment: null
+        }]
+      })
+    });
+    let persistedCommentReport;
+    Report.findOne = async () => null;
+    Report.create = async (payload) => {
+      persistedCommentReport = payload;
+      return { _id: '507f1f77bcf86cd799439023', ...payload };
+    };
+    Report.findById = () => ({ populate: async () => ({ _id: '507f1f77bcf86cd799439023' }) });
+    res = responseRecorder();
+    await reportController.createReport(baseRequest({
+      targetType: 'comment',
+      targetId: commentId,
+      reason: 'harassment',
+      details: 'context preserved'
+    }), res);
+    assert.strictEqual(res.statusCode, 201);
+    assert.strictEqual(String(persistedCommentReport.targetContext.parentContentId), parentPostId);
+    assert.strictEqual(String(persistedCommentReport.targetContext.targetAuthor), reportedAuthorId);
+    assert.strictEqual(persistedCommentReport.targetContext.textSnapshot, 'reported comment');
 
     console.log('Report controller validation and target-integrity contracts passed');
   } finally {

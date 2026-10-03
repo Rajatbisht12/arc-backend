@@ -149,6 +149,7 @@ const {
   rewritePostMediaDeliveryUrls,
   rewriteUserMediaDeliveryUrls
 } = require('./mediaDelivery');
+const { getCommentPermissions } = require('./commentModeration');
 
 const formatPostDTO = (post, isGuest = false, isAuthor = false, viewerId = null) => {
   if (!post) return null;
@@ -156,6 +157,7 @@ const formatPostDTO = (post, isGuest = false, isAuthor = false, viewerId = null)
   const dto = typeof post.toObject === 'function'
     ? post.toObject({ virtuals: true })
     : JSON.parse(JSON.stringify(post));
+  const contentOwnerId = dto.author?._id || dto.author;
 
   // Stored URLs remain stable evidence of the uploaded S3 object. At response
   // time, route only public post/Clip media through the configured CDN. This
@@ -207,6 +209,11 @@ const formatPostDTO = (post, isGuest = false, isAuthor = false, viewerId = null)
       // Clean up extended user info in comments even for logged in users
       if (Array.isArray(dto.comments)) {
         dto.comments = dto.comments.map(comment => {
+            comment.permissions = getCommentPermissions({
+              viewerId,
+              contentOwnerId,
+              commentAuthorId: comment.user,
+            });
             if (comment.user && typeof comment.user === 'object') {
                 comment.user = formatUserDTO(comment.user, false);
             }

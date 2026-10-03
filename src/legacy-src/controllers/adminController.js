@@ -51,6 +51,7 @@ const {
 const { getTournamentCapacity } = require('../utils/tournamentCapacity');
 const { deleteTournamentAndCleanup } = require('../services/tournamentDeletionService');
 const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
+const { buildCommentDeletion, idString } = require('../utils/commentModeration');
 const {
   approve: approveHostVerificationReview,
   reject: rejectHostVerificationReview,
@@ -1188,6 +1189,8 @@ const getReports = async (req, res) => {
     const reports = await Report.find(query)
       .populate('reporter', 'username profile.displayName profile.avatar email')
       .populate('reviewedBy', 'username profile.displayName')
+      .populate('targetContext.targetAuthor', 'username profile.displayName profile.avatar')
+      .populate('targetContext.contentOwner', 'username profile.displayName profile.avatar')
       .sort({ createdAt: -1 })
       .limit(limit)
       .skip((page - 1) * limit)
@@ -1217,16 +1220,52 @@ const getReportTarget = async (req, res) => {
     }
 
     const report = await Report.findById(reportId)
-      .select('targetType targetId')
+      .select('targetType targetId targetContext')
+      .populate('targetContext.targetAuthor', 'username profile.displayName profile.avatar')
+      .populate('targetContext.contentOwner', 'username profile.displayName profile.avatar')
       .lean();
     if (!report) {
       return res.status(404).json({ success: false, message: 'Report not found' });
     }
-    if (report.targetType !== 'post') {
+    if (!['post', 'comment'].includes(report.targetType)) {
       return res.status(400).json({
         success: false,
         code: 'UNSUPPORTED_REPORT_TARGET',
-        message: 'Only post report targets can be previewed'
+        message: 'This report target cannot be previewed'
+      });
+    }
+
+    if (report.targetType === 'comment') {
+      const parentId = report.targetContext?.parentContentId;
+      const post = await Post.findOne(parentId
+        ? { _id: parentId }
+        : { 'comments._id': report.targetId })
+        .populate('author', 'username profile.displayName profile.avatar userType')
+        .populate('comments.user', 'username profile.displayName profile.avatar userType')
+        .select('content images postType achievementInfo visibility likes comments createdAt updatedAt isActive hiddenByAdmin author')
+        .lean();
+      const comment = post?.comments?.find((entry) => idString(entry?._id) === idString(report.targetId)) || null;
+      const snapshot = report.targetContext ? {
+        _id: String(report.targetId),
+        text: report.targetContext.textSnapshot || '',
+        parentComment: report.targetContext.parentCommentId || null,
+        rootComment: report.targetContext.rootCommentId || null,
+        user: report.targetContext.targetAuthor || null,
+      } : null;
+      const postPreview = post ? { ...post, comments: undefined } : null;
+
+      res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+      return res.json({
+        success: true,
+        data: {
+          targetType: 'comment',
+          targetId: String(report.targetId),
+          availability: comment ? 'available' : 'unavailable',
+          comment: comment || snapshot,
+          post: postPreview,
+          parentContentId: idString(post?._id || report.targetContext?.parentContentId),
+          contentOwner: post?.author || report.targetContext?.contentOwner || null,
+        }
       });
     }
 
@@ -1278,7 +1317,23 @@ const updateReport = async (req, res) => {
     report.reviewedAt = new Date();
     if (adminAction === 'dismiss' || !adminAction) report.status = 'dismissed';
     else report.status = 'action_taken';
-    if (adminAction === 'hide_content' && report.targetType === 'post') {
+    if (['hide_content', 'delete_content'].includes(adminAction) && report.targetType === 'comment') {
+      const post = await Post.findOne({
+        ...(report.targetContext?.parentContentId ? { _id: report.targetContext.parentContentId } : {}),
+        'comments._id': report.targetId
+      }).select('comments __v');
+      if (!post) return res.status(404).json({ success: false, message: 'Comment report target not found' });
+      const deletion = buildCommentDeletion(post.comments, report.targetId);
+      const updatedPost = deletion && await Post.findOneAndUpdate(
+        { _id: post._id, __v: post.__v, 'comments._id': report.targetId },
+        { $set: { comments: deletion.comments }, $inc: { __v: 1 } },
+        { new: true }
+      );
+      if (!updatedPost) {
+        return res.status(409).json({ success: false, message: 'The comment thread changed. Retry the moderation action.' });
+      }
+      await Promise.all(deletion.deletedCommentIds.map((commentId) => cleanupTargetNotifications('comment', commentId)));
+    } else if (adminAction === 'hide_content' && report.targetType === 'post') {
       await Post.findByIdAndUpdate(report.targetId, { hiddenByAdmin: true, isActive: false });
       await cleanupTargetNotifications('post', report.targetId);
     } else if (adminAction === 'hide_content' && report.targetType === 'recruitment') {
@@ -1311,7 +1366,9 @@ const updateReport = async (req, res) => {
       if (!deleted) return res.status(404).json({ success: false, message: 'Recruitment report target not found' });
       await cleanupTargetNotifications('recruitment', report.targetId);
     } else if (adminAction === 'warn_user') {
-      const target = report.targetType === 'recruitment'
+      const target = report.targetType === 'comment'
+        ? { author: report.targetContext?.targetAuthor }
+        : report.targetType === 'recruitment'
         ? await TeamRecruitment.findById(report.targetId).select('team').lean()
         : await Post.findById(report.targetId).select('author').lean();
       const targetOwnerId = target?.team || target?.author;
@@ -1324,7 +1381,9 @@ const updateReport = async (req, res) => {
         );
       }
     } else if (adminAction === 'ban_user') {
-      const target = report.targetType === 'recruitment'
+      const target = report.targetType === 'comment'
+        ? { author: report.targetContext?.targetAuthor }
+        : report.targetType === 'recruitment'
         ? await TeamRecruitment.findById(report.targetId).select('team').lean()
         : await Post.findById(report.targetId).select('author').lean();
       const targetOwnerId = target?.team || target?.author;

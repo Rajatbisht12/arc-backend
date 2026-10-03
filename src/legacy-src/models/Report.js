@@ -25,6 +25,30 @@ const reportSchema = new mongoose.Schema({
     maxlength: 500,
     default: ''
   },
+  // A bounded moderation snapshot keeps a comment report intelligible if the
+  // reported comment or its parent post is deleted before an admin reviews it.
+  targetContext: {
+    parentContentType: {
+      type: String,
+      enum: ['post', 'clip']
+    },
+    parentContentId: mongoose.Schema.Types.ObjectId,
+    contentOwner: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    targetAuthor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    parentCommentId: mongoose.Schema.Types.ObjectId,
+    rootCommentId: mongoose.Schema.Types.ObjectId,
+    textSnapshot: {
+      type: String,
+      maxlength: 500,
+      default: ''
+    }
+  },
   status: {
     type: String,
     enum: ['pending', 'dismissed', 'action_taken'],

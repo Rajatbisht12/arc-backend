@@ -32,6 +32,7 @@ const updatePostValidation = [
 
 const addCommentValidation = [body("text").isLength({ min: 1, max: 500 }).withMessage("Comment must be between 1 and 500 characters")];
 const postIdValidation = [param("id").isMongoId().withMessage("Invalid post ID")];
+const commentIdValidation = [param("commentId").isMongoId().withMessage("Invalid comment ID")];
 const MAX_ENGAGEMENT_DURATION_MS = 24 * 60 * 60 * 1000;
 const engagementMetricValidation = [
   body("durationMs").optional({ values: "null" }).isInt({ min: 0, max: MAX_ENGAGEMENT_DURATION_MS }).withMessage("Invalid engagement duration"),
@@ -73,6 +74,7 @@ router.get("/:id/likes", optionalAuth, postIdValidation, handleValidationErrors,
 router.post("/:id/view", protect, postIdValidation, engagementMetricValidation, handleValidationErrors, postController.recordClipView);
 router.post("/:id/like", protect, postIdValidation, handleValidationErrors, postController.toggleLike);
 router.post("/:id/comment", protect, postIdValidation, addCommentValidation, handleValidationErrors, postController.addComment);
+router.delete("/:id/comments/:commentId", protect, postIdValidation, commentIdValidation, handleValidationErrors, postController.deleteComment);
 router.post("/:id/share", protect, postIdValidation, handleValidationErrors, postController.recordShare);
 router.post("/:id/save", protect, postIdValidation, handleValidationErrors, postController.toggleSave);
 router.post("/interaction", protect, interactionValidation, handleValidationErrors, postController.trackInteraction);

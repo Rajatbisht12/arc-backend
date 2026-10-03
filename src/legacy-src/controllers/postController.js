@@ -1,4 +1,5 @@
 const Post = require('../models/Post');
+const mongoose = require('mongoose');
 const { randomUUID } = require('crypto');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
@@ -8,6 +9,7 @@ const UserAudio = require('../models/UserAudio');
 const { uploadMultipleFiles } = require('../utils/cloudinary');
 const { createLikeNotification, createCommentNotification, createReplyNotification, createMentionNotification } = require('../utils/notificationService');
 const { resolveCommentRelation } = require('../utils/commentThreading');
+const { buildCommentDeletion, getCommentPermissions, idString } = require('../utils/commentModeration');
 const { formatPostDTO } = require('../utils/dto');
 const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
 const { extractHashtags, mergeTags } = require('../utils/hashtags');
@@ -814,8 +816,14 @@ const getPostComments = async (req, res) => {
     const nextCursor = hasMore && pageItems.length ? String(pageItems[pageItems.length - 1]._id) : null;
 
     const viewerId = req.user?._id ? String(req.user._id) : null;
+    const contentOwnerId = idString(post.author);
     const comments = pageItems.map((c) => {
       const likes = Array.isArray(c.likes) ? c.likes : [];
+      const permissions = getCommentPermissions({
+        viewerId,
+        contentOwnerId,
+        commentAuthorId: c.user,
+      });
       return {
         _id: c._id,
         user: c.user,
@@ -826,6 +834,7 @@ const getPostComments = async (req, res) => {
         replyCount: Math.max(0, Number(c.replyCount) || 0),
         likeCount: likes.length,
         isLiked: Boolean(viewerId && likes.some((u) => String(u?._id || u) === viewerId)),
+        permissions,
       };
     });
 
@@ -838,6 +847,7 @@ const getPostComments = async (req, res) => {
         // Total drives the drawer header; loaded length must NOT be used for it.
         totalTopLevel: topLevel.length,
         totalComments: all.length,
+        contentOwnerId,
       },
     });
   } catch (error) {
@@ -845,6 +855,82 @@ const getPostComments = async (req, res) => {
       success: false,
       message: 'Failed to load comments',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+};
+
+// Delete a comment using one server-authoritative permission model. The
+// comment author may delete their own comment; the post/Clip owner may delete
+// any comment on their content. Descendants are removed with their parent so
+// no dangling parentComment references survive.
+const deleteComment = async (req, res) => {
+  try {
+    const { id: postId, commentId } = req.params;
+    const viewerId = req.user?._id;
+    if (!mongoose.Types.ObjectId.isValid(postId) || !mongoose.Types.ObjectId.isValid(commentId)) {
+      return res.status(400).json({ success: false, message: 'Invalid post or comment ID' });
+    }
+
+    const post = await Post.findOne({ _id: postId, isActive: true })
+      .select('author visibility isActive hiddenByAdmin comments __v');
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
+    if (!await requireVisiblePost(req, res, post)) return;
+
+    const plan = buildCommentDeletion(post.comments, commentId);
+    if (!plan) return res.status(404).json({ success: false, message: 'Comment not found' });
+    const permissions = getCommentPermissions({
+      viewerId,
+      contentOwnerId: post.author,
+      commentAuthorId: plan.target.user,
+    });
+    if (!permissions.canDelete) {
+      return res.status(403).json({
+        success: false,
+        code: 'COMMENT_DELETE_FORBIDDEN',
+        message: 'You do not have permission to delete this comment'
+      });
+    }
+
+    const updated = await Post.findOneAndUpdate(
+      {
+        _id: post._id,
+        __v: post.__v,
+        'comments._id': commentId,
+        $or: [
+          { author: viewerId },
+          { comments: { $elemMatch: { _id: commentId, user: viewerId } } }
+        ]
+      },
+      { $set: { comments: plan.comments }, $inc: { __v: 1 } },
+      { new: true }
+    ).select('comments');
+
+    if (!updated) {
+      return res.status(409).json({
+        success: false,
+        code: 'COMMENT_CHANGED',
+        message: 'The comment thread changed. Please refresh and try again.'
+      });
+    }
+
+    await Promise.all(plan.deletedCommentIds.map((deletedId) => (
+      deleteNotificationsForTarget({ targetType: 'comment', targetId: deletedId }).catch(() => null)
+    )));
+
+    return res.json({
+      success: true,
+      message: 'Comment deleted successfully',
+      data: {
+        deletedCommentIds: plan.deletedCommentIds,
+        commentCount: updated.comments.length,
+      }
+    });
+  } catch (error) {
+    log.error('Delete comment error:', { error: String(error) });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete comment',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
@@ -1666,6 +1752,7 @@ module.exports = {
   getPersonalizedFeed,
   toggleLike,
   addComment,
+  deleteComment,
   recordShare,
   toggleSave,
   getSavedPosts,
