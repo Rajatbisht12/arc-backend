@@ -11,7 +11,7 @@ const {
 
 let transporter = null;
 
-const EMAIL_BRAND = 'Squadhunt';
+const EMAIL_BRAND = 'SquadHunt';
 const DEFAULT_FROM_ADDRESS = 'noreply@squadhunt.com';
 
 const resolveEmailFrom = () => {
@@ -128,24 +128,24 @@ async function sendOTPEmail(to, otp, purpose = 'login') {
   let headerSubtitle = '';
 
   if (purpose === 'login') {
-    subject = 'Login to Squadhunt using OTP';
-    headerTitle = 'Login to Squadhunt using OTP';
+    subject = 'Login to SquadHunt using OTP';
+    headerTitle = 'Login to SquadHunt using OTP';
     headerSubtitle = 'Secure one‑time verification for your account.';
   } else if (purpose === 'register') {
-    subject = 'Verify your email for Squadhunt';
-    headerTitle = 'Verify your email for Squadhunt';
+    subject = 'Verify your email for SquadHunt';
+    headerTitle = 'Verify your email for SquadHunt';
     headerSubtitle = 'Complete your signup by confirming this email address.';
   } else if (purpose === 'forgot_password') {
-    subject = 'Reset your Squadhunt password';
-    headerTitle = 'Reset your Squadhunt password';
+    subject = 'Reset your SquadHunt password';
+    headerTitle = 'Reset your SquadHunt password';
     headerSubtitle = 'Use this OTP to securely reset your password.';
   } else {
-    subject = 'Squadhunt verification code';
-    headerTitle = 'Squadhunt verification code';
+    subject = 'SquadHunt verification code';
+    headerTitle = 'SquadHunt verification code';
     headerSubtitle = 'Use this code to complete your action.';
   }
 
-  const text = `Your Squadhunt OTP is: ${otp}. Valid for 10 minutes. Do not share with anyone.`;
+  const text = `Your SquadHunt OTP is: ${otp}. Valid for 10 minutes. Do not share with anyone.`;
 
   const html = `
     <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0b1120; padding:24px;">
@@ -178,7 +178,7 @@ async function sendOTPEmail(to, otp, purpose = 'login') {
               or visit
               <a href="https://www.squadhunt.com" style="color:#9ca3af;text-decoration:none;"> squadhunt.com</a>.
             </p>
-            <p style="margin:0;font-size:11px;color:#6b7280;">— Squadhunt</p>
+            <p style="margin:0;font-size:11px;color:#6b7280;">— SquadHunt</p>
           </td>
         </tr>
       </table>
@@ -221,16 +221,16 @@ const sanitizeEmailLink = (value) => {
 };
 
 async function sendNotificationEmail(to, title, message, link, context = {}) {
-  const subject = `Squadhunt: ${title}`;
+  const subject = `SquadHunt: ${title}`;
   const safeLink = sanitizeEmailLink(link);
-  const text = `${title}\n\n${message}${safeLink ? `\n\nView in Squadhunt: ${safeLink}` : ''}\n\n— Squadhunt`;
+  const text = `${title}\n\n${message}${safeLink ? `\n\nView in SquadHunt: ${safeLink}` : ''}\n\n— SquadHunt`;
   const html = `
     <div style="font-family: sans-serif;">
       <h3>${escapeHtml(title)}</h3>
       <p>${escapeHtml(message)}</p>
-      ${safeLink ? `<p><a href="${escapeHtml(safeLink)}">View in Squadhunt</a></p>` : ''}
+      ${safeLink ? `<p><a href="${escapeHtml(safeLink)}">View in SquadHunt</a></p>` : ''}
       <p style="margin:8px 0 2px;color: #999; font-size: 12px;">Need help? Email <a href="mailto:support@squadhunt.com" style="color:#9ca3af;text-decoration:none;">support@squadhunt.com</a>.</p>
-      <p style="margin:0;color: #999; font-size: 12px;">— Squadhunt</p>
+      <p style="margin:0;color: #999; font-size: 12px;">— SquadHunt</p>
     </div>
   `;
   return sendTransactionalEmail({

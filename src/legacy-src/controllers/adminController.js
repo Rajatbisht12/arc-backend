@@ -722,8 +722,8 @@ const updateUserStatus = async (req, res) => {
       userId,
       isActive ? 'Account Access Restored' : 'Account Suspended',
       isActive
-        ? 'Your Squadhunt account access has been restored by an administrator.'
-        : 'Your Squadhunt account has been suspended by an administrator. Contact Squadhunt support if you believe this was a mistake.',
+        ? 'Your SquadHunt account access has been restored by an administrator.'
+        : 'Your SquadHunt account has been suspended by an administrator. Contact SquadHunt support if you believe this was a mistake.',
       { type: isActive ? 'account_restored' : 'account_suspended' },
       notificationEmail(
         EMAIL_INTENTS.ACCOUNT_LIFECYCLE,
@@ -1410,7 +1410,7 @@ const updateReport = async (req, res) => {
         await createSystemNotification(
           targetOwnerId,
           'Account Suspended',
-          'Your Squadhunt account has been suspended following a report review. Contact Squadhunt support if you believe this was a mistake.',
+          'Your SquadHunt account has been suspended following a report review. Contact SquadHunt support if you believe this was a mistake.',
           { type: 'account_suspended', reportId: report._id },
           notificationEmail(EMAIL_INTENTS.ACCOUNT_LIFECYCLE, 'report_account_suspended')
         );
@@ -3018,7 +3018,7 @@ const revokeHostVerification = async (req, res) => {
         createSystemNotification(
           userId,
           'Verified Host Status Revoked',
-          'Your Verified Host status has been revoked by an administrator. Contact Squadhunt support if you believe this was a mistake.',
+          'Your Verified Host status has been revoked by an administrator. Contact SquadHunt support if you believe this was a mistake.',
           {
             type: 'host_verification_revoked',
             applicationId: result.application?._id,

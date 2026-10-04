@@ -182,7 +182,7 @@ for (const [platform, source] of [['Web', webPremium], ['Mobile', mobilePremium]
   assert(source.includes('plan.features.map'), `${platform} main benefits must consume the shared feature list`);
   assert(source.includes('explorePlan.exploreDetails'), `${platform} included-details UI must consume the shared details`);
   assert.equal(source.includes('Financial modeling assistance'), false, `${platform} must not hardcode stale Team copy`);
-  assert(source.includes('Squadhunt'), `${platform} must display Squadhunt Premium branding`);
+  assert(source.includes('SquadHunt'), `${platform} must display SquadHunt Premium branding`);
   assert.equal(source.includes("ARC{' '}"), false, `${platform} must not retain responsive ARC Premium branding`);
 }
 
@@ -190,10 +190,10 @@ const webSettings = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'page
 const webNavbar = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'components', 'Navbar.tsx'), 'utf8');
 const mobileSettings = fs.readFileSync(path.join(repoRoot, 'mobile-ui', 'arc-mobile', 'app', 'settings.tsx'), 'utf8');
 const mobileLayout = fs.readFileSync(path.join(repoRoot, 'mobile-ui', 'arc-mobile', 'app', '_layout.tsx'), 'utf8');
-assert(webSettings.includes('label="Squadhunt Premium"'));
-assert(webNavbar.includes('>Squadhunt Premium</span>'));
-assert(mobileSettings.includes("label: 'Squadhunt Premium'"));
-assert(mobileLayout.includes("title: 'Squadhunt Premium'"));
+assert(webSettings.includes('label="SquadHunt Premium"'));
+assert(webNavbar.includes('>SquadHunt Premium</span>'));
+assert(mobileSettings.includes("label: 'SquadHunt Premium'"));
+assert(mobileLayout.includes("title: 'SquadHunt Premium'"));
 
 const ownMobileProfile = fs.readFileSync(path.join(repoRoot, 'mobile-ui', 'arc-mobile', 'app', '(tabs)', 'profile.tsx'), 'utf8');
 const publicMobileProfile = fs.readFileSync(path.join(repoRoot, 'mobile-ui', 'arc-mobile', 'app', 'user', '[username].tsx'), 'utf8');
