@@ -29,7 +29,7 @@ const previousEnvironment = {
 process.env.SMTP_USER = 'smtp-user@example.test';
 process.env.SMTP_PASS = 'smtp-password';
 // Production may retain an old display label. Delivery must still expose the
-// canonical Squadhunt brand while preserving the configured mailbox.
+// canonical SquadHunt brand while preserving the configured mailbox.
 process.env.SMTP_FROM = 'ARC <legacy-mailbox@example.test>';
 
 const {
@@ -40,15 +40,15 @@ const {
 const { EMAIL_INTENTS } = require('./notificationChannelPolicy');
 
 const assertSquadhuntDelivery = (delivery) => {
-  assert.equal(delivery.from, 'Squadhunt <legacy-mailbox@example.test>');
-  assert.match(delivery.subject, /Squadhunt/i);
-  assert.match(delivery.text, /Squadhunt/i);
-  assert.match(delivery.html, /Squadhunt/i);
+  assert.equal(delivery.from, 'SquadHunt <legacy-mailbox@example.test>');
+  assert.match(delivery.subject, /SquadHunt/i);
+  assert.match(delivery.text, /SquadHunt/i);
+  assert.match(delivery.html, /SquadHunt/i);
   assert.equal(/\bARC\b/i.test(`${delivery.from}\n${delivery.subject}\n${delivery.text}\n${delivery.html}`), false);
 };
 
 (async () => {
-  assert.equal(resolveEmailFrom(), 'Squadhunt <legacy-mailbox@example.test>');
+  assert.equal(resolveEmailFrom(), 'SquadHunt <legacy-mailbox@example.test>');
 
   for (const purpose of ['login', 'register', 'forgot_password']) {
     const result = await sendOTPEmail('member@example.test', '123456', purpose);
@@ -72,12 +72,12 @@ const assertSquadhuntDelivery = (delivery) => {
   deliveries.forEach(assertSquadhuntDelivery);
 
   const notificationDelivery = deliveries.at(-1);
-  assert.match(notificationDelivery.text, /View in Squadhunt/);
-  assert.match(notificationDelivery.html, />View in Squadhunt</);
+  assert.match(notificationDelivery.text, /View in SquadHunt/);
+  assert.match(notificationDelivery.html, />View in SquadHunt</);
   assert.match(notificationDelivery.text, /https:\/\/www\.squadhunt\.com\/settings\/security/);
   assert.doesNotMatch(notificationDelivery.text, /squadhunt\.in/);
-  assert.match(notificationDelivery.text, /— Squadhunt/);
-  assert.match(notificationDelivery.html, /— Squadhunt/);
+  assert.match(notificationDelivery.text, /— SquadHunt/);
+  assert.match(notificationDelivery.html, /— SquadHunt/);
 
   // These are the only hand-authored email templates. Premium, payment,
   // account, legal and critical notifications all use sendNotificationEmail.

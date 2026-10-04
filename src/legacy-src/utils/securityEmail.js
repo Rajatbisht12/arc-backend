@@ -4,16 +4,16 @@ const { resolvePublicWebOrigin } = require('./publicWebUrl');
 
 const PASSWORD_SECURITY_EVENTS = Object.freeze({
   password_reset: Object.freeze({
-    subject: 'Your Squadhunt password was reset',
-    text: 'Your Squadhunt account password was reset successfully. If you did not make this change, contact Squadhunt support immediately.'
+    subject: 'Your SquadHunt password was reset',
+    text: 'Your SquadHunt account password was reset successfully. If you did not make this change, contact SquadHunt support immediately.'
   }),
   password_changed: Object.freeze({
-    subject: 'Your Squadhunt password was changed',
-    text: 'Your Squadhunt account password was changed successfully. If you did not make this change, contact Squadhunt support immediately.'
+    subject: 'Your SquadHunt password was changed',
+    text: 'Your SquadHunt account password was changed successfully. If you did not make this change, contact SquadHunt support immediately.'
   }),
   admin_password_reset: Object.freeze({
-    subject: 'Your Squadhunt password was reset by an administrator',
-    text: 'A Squadhunt administrator reset your account password. If you did not expect this change, contact Squadhunt support immediately.'
+    subject: 'Your SquadHunt password was reset by an administrator',
+    text: 'A SquadHunt administrator reset your account password. If you did not expect this change, contact SquadHunt support immediately.'
   })
 });
 
