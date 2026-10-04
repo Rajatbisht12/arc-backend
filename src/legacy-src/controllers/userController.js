@@ -20,6 +20,7 @@ const { publishPrivacySettingsUpdate, evictPresenceAudience, removePresenceSubsc
 const { invalidateUserCache } = require('../middleware/auth');
 const log = require('../utils/logger');
 const { normalizeQuerySearch, buildPrefixRegex } = require('../utils/searchQuery');
+const { getVisibleFollowCounts } = require('../services/discoverUserCounts');
 const { recordSuccessfulProfileVisit } = require('../services/profileVisitService');
 const {
   activePendingQuery,
@@ -129,6 +130,7 @@ const getUsers = async (req, res) => {
     const search = normalizeQuerySearch(
       req.query.search !== undefined ? req.query.search : req.query.q
     );
+    const discoverSearch = Boolean(search && req.query.context === 'search');
     const viewerId = req.user?._id;
     const isGuest = req.user && req.user.userType === 'guest';
     const excludeFollowing = req.query.excludeFollowing === 'true' || req.query.suggestions === 'true';
@@ -197,28 +199,33 @@ const getUsers = async (req, res) => {
 
     filter.$and = andConditions;
 
-    const users = await User.find(filter)
-      .select('-password -email')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-
-    const total = await User.countDocuments(filter);
+    // Discover cards need identity, avatar, relationship/privacy and join date
+    // only. Avoid loading large team/player arrays and account metadata for
+    // every search hit; other /api/users consumers keep their existing DTO.
+    const searchProjection = '_id username userType profile.displayName profile.avatar profile.profilePicture profileImage avatarUrl profilePicture avatar picture photoURL privacySettings createdAt isActive';
+    const [candidateUsers, total] = await Promise.all([
+      User.find(filter)
+        .select(discoverSearch ? searchProjection : '-password -email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(discoverSearch ? limit + 1 : limit),
+      discoverSearch ? Promise.resolve(null) : User.countDocuments(filter)
+    ]);
+    const hasMore = discoverSearch && candidateUsers.length > limit;
+    const users = hasMore ? candidateUsers.slice(0, limit) : candidateUsers;
 
     const userIds = users.map(u => u._id);
-    const [viewerFollows, pendingFollowRequests, followerCounts, followingCounts] = await Promise.all([
+    const [viewerFollows, pendingFollowRequests, followCounts] = await Promise.all([
       viewerId && !isGuest
         ? Follow.find({ follower: viewerId, following: { $in: userIds } }).select('following').lean()
         : Promise.resolve([]),
       viewerId && !isGuest
         ? FollowRequest.find({ requester: viewerId, target: { $in: userIds }, status: 'pending' }).select('target').lean()
         : Promise.resolve([]),
-      Promise.all(users.map(u =>
-        Follow.getFollowerCount(u._id).catch(() => Array.isArray(u.followers) ? u.followers.length : 0)
-      )),
-      Promise.all(users.map(u =>
-        Follow.getFollowingCount(u._id).catch(() => Array.isArray(u.following) ? u.following.length : 0)
-      )),
+      getVisibleFollowCounts(Follow, userIds).catch(() => ({
+        followers: new Map(users.map(u => [String(u._id), Array.isArray(u.followers) ? u.followers.length : 0])),
+        following: new Map(users.map(u => [String(u._id), Array.isArray(u.following) ? u.following.length : 0]))
+      })),
     ]);
     const viewerFollowingIds = new Set(viewerFollows.map(f => f.following.toString()));
     const pendingTargetIds = new Set(pendingFollowRequests.map(request => request.target.toString()));
@@ -226,7 +233,7 @@ const getUsers = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        users: users.map((u, index) => {
+        users: users.map((u) => {
           const id = u._id.toString();
           const isSelf = Boolean(viewerId && id === viewerId.toString());
           const isFollowing = Boolean(viewerId && !isSelf
@@ -250,16 +257,16 @@ const getUsers = async (req, res) => {
           dto.isFollowing = isFollowing;
           dto.followStatus = isFollowing ? 'accepted' : followRequestPending ? 'pending' : 'none';
           if (!privacyAccess.restricted) {
-            dto.followersCount = followerCounts[index];
-            dto.followingCount = followingCounts[index];
+            dto.followersCount = followCounts.followers.get(id) || 0;
+            dto.followingCount = followCounts.following.get(id) || 0;
           }
           return dto;
         }),
         pagination: {
           current: page,
-          total: Math.ceil(total / limit),
+          ...(total !== null ? { total: Math.ceil(total / limit), totalUsers: total } : {}),
           count: users.length,
-          totalUsers: total
+          ...(discoverSearch ? { hasMore } : {})
         }
       }
     });

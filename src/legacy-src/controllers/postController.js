@@ -22,6 +22,8 @@ const {
   normalizeEngagementDuration,
   normalizeCompletionRate
 } = require('../services/recommendationService');
+const { getDiscoverSearchPosts } = require('../services/discoverPostSearchService');
+const { normalizeQuerySearch } = require('../utils/searchQuery');
 const { isActiveBoost } = require('../services/boostService');
 const log = require('../utils/logger');
 const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
@@ -412,7 +414,8 @@ const createPost = async (req, res) => {
 // Get clips feed (posts that have at least one video - Reels/Shorts style)
 const getClips = async (req, res) => {
   try {
-    const result = await getRecommendedPosts({
+    const search = normalizeQuerySearch(req.query.search);
+    const result = await (search && req.query.context === 'search' ? getDiscoverSearchPosts : getRecommendedPosts)({
       user: req.user,
       query: req.query,
       mode: 'clips'
@@ -439,7 +442,8 @@ const getClips = async (req, res) => {
 // Get all posts (feed)
 const getPosts = async (req, res) => {
   try {
-    const result = await getRecommendedPosts({
+    const search = normalizeQuerySearch(req.query.search);
+    const result = await (search && req.query.context === 'search' ? getDiscoverSearchPosts : getRecommendedPosts)({
       user: req.user,
       query: req.query,
       mode: 'feed'

@@ -1448,6 +1448,7 @@ async function recordEngagementEvent({
 
 module.exports = {
   getRecommendedPosts,
+  getRelationshipContext,
   recordEngagementEvent,
   scorePost,
   selectDiversePosts,
