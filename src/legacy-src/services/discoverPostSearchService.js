@@ -8,7 +8,7 @@ const { getRelationshipContext, buildAudienceFilter } = require('./recommendatio
 const normalizeId = (value) => String(value?._id || value || '');
 const MAX_CREATOR_MATCHES = 250;
 
-const buildDiscoverSearchFilter = ({ audienceFilter, search, matchingAuthorIds, mode }) => {
+const buildDiscoverSearchFilter = ({ audienceFilter, search, matchingAuthorIds }) => {
   const captionPattern = escapeRegex(search);
   const contentMatch = [
     { 'content.text': { $regex: captionPattern, $options: 'i' } },
@@ -17,9 +17,6 @@ const buildDiscoverSearchFilter = ({ audienceFilter, search, matchingAuthorIds, 
   if (matchingAuthorIds.length) contentMatch.push({ author: { $in: matchingAuthorIds } });
   return {
     ...audienceFilter,
-    ...(mode === 'feed'
-      ? { 'content.media': { $not: { $elemMatch: { type: 'video' } } } }
-      : {}),
     $and: [...(audienceFilter.$and || []), { $or: contentMatch }]
   };
 };
@@ -64,8 +61,7 @@ const getDiscoverSearchPosts = async ({ user, query = {}, mode = 'feed' }) => {
   const filter = buildDiscoverSearchFilter({
     audienceFilter,
     search,
-    matchingAuthorIds: matchingAuthors.map((author) => author._id),
-    mode
+    matchingAuthorIds: matchingAuthors.map((author) => author._id)
   });
 
   const found = await Post.find(filter)

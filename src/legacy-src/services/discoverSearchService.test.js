@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { buildDiscoverSearchFilter, toDiscoverSearchTile } = require('./discoverPostSearchService');
 const { getVisibleFollowCounts } = require('./discoverUserCounts');
 
-test('post search preserves server audience constraints and excludes Clips before pagination', () => {
+test('post search preserves server audience constraints without excluding video posts', () => {
   const audienceFilter = {
     isActive: true,
     visibility: 'public',
@@ -19,7 +19,7 @@ test('post search preserves server audience constraints and excludes Clips befor
   assert.equal(filter.isActive, true);
   assert.equal(filter.visibility, 'public');
   assert.deepEqual(filter.$and[0], audienceFilter.$and[0]);
-  assert.deepEqual(filter['content.media'], { $not: { $elemMatch: { type: 'video' } } });
+  assert.equal(filter['content.media'], undefined);
   assert.deepEqual(filter.$and[1].$or, [
     { 'content.text': { $regex: 'a\\.\\*', $options: 'i' } },
     { tags: { $regex: 'a\\.\\*', $options: 'i' } },
