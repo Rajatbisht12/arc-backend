@@ -40,7 +40,10 @@ export const createApp = () => {
         error.code = "CORS_ORIGIN_DENIED";
         return callback(error);
       },
-      credentials: true
+      credentials: true,
+      // Search sends authenticated cross-origin GETs. Reuse successful
+      // allowlisted preflights without weakening the origin/auth checks.
+      maxAge: 600
     })
   );
   app.use(express.json({
