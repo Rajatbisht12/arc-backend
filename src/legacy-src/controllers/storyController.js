@@ -17,6 +17,7 @@ const mongoose = require('mongoose');
 const Follow = require('../models/Follow');
 const { resolvePrivacyAccess, minimalProfile } = require('../utils/privacyPolicy');
 const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
+const { parseStoryOverlays } = require('../utils/storyOverlays');
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const MAX_CLIENT_UPLOAD_ID_LENGTH = 96;
@@ -336,6 +337,9 @@ const createStory = async (req, res) => {
     if (!mediaFile.mimetype.startsWith('image/') && !mediaFile.mimetype.startsWith('video/')) {
       return res.status(415).json({ success: false, code: 'STORY_MEDIA_INVALID', message: 'Story media must be an image or video.' });
     }
+    // Validate before media processing/upload so invalid metadata cannot leave
+    // an uploaded asset behind or produce a Story missing its text.
+    const overlays = parseStoryOverlays(req.body?.overlays);
     const musicFile = req.files?.music?.[0];
     const attachedMusicPayload = parseAttachedMusicPayload(req.body?.attachedMusic);
     if (musicFile && attachedMusicPayload) {
@@ -429,6 +433,7 @@ const createStory = async (req, res) => {
       author: req.user._id,
       media,
       duration,
+      overlays,
       ...(clientUploadId && { clientUploadId }),
       ...(musicData && { music: musicData })
     });
@@ -470,7 +475,7 @@ const createStory = async (req, res) => {
       log.error('Failed Story creation media cleanup failed', { error: String(cleanupError) });
     });
     const status = Number(err?.statusCode || 500);
-    const safeMusicError = String(err?.code || '').startsWith('STORY_MUSIC_');
+    const safeMusicError = String(err?.code || '').startsWith('STORY_MUSIC_') || err?.code === 'STORY_OVERLAYS_INVALID';
     return res.status(status).json({
       success: false,
       ...(err?.code && { code: err.code }),

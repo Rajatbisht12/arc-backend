@@ -1,5 +1,18 @@
 const mongoose = require('mongoose');
 
+const { STORY_FONTS, STORY_COLORS } = require('../utils/storyOverlays');
+
+const storyOverlaySchema = new mongoose.Schema({
+  id: { type: String, required: true },
+  type: { type: String, enum: ['text'], required: true },
+  text: { type: String, required: true, maxlength: 500 },
+  font: { type: String, enum: STORY_FONTS, required: true },
+  color: { type: String, enum: STORY_COLORS, required: true },
+  x: { type: Number, min: 0, max: 1, required: true },
+  y: { type: Number, min: 0, max: 1, required: true },
+  scale: { type: Number, min: 0.5, max: 3, required: true },
+}, { _id: false });
+
 const storySchema = new mongoose.Schema({
   author: {
     type: mongoose.Schema.Types.ObjectId,
@@ -26,6 +39,7 @@ const storySchema = new mongoose.Schema({
     min: 1,
     max: 30
   },
+  overlays: { type: [storyOverlaySchema], default: [] },
   views: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     viewedAt: { type: Date, default: Date.now }
