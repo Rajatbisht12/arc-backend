@@ -10,6 +10,12 @@ if (!uri) {
   console.error('MONGODB_URI is required');
   process.exit(1);
 }
+const auditOnly = process.argv.includes('--audit-only');
+const verifyOnly = process.argv.includes('--verify');
+if (auditOnly && verifyOnly) {
+  console.error('Use only one of --audit-only or --verify');
+  process.exit(1);
+}
 
 const modelNames = [
   'Broadcast',
@@ -66,7 +72,12 @@ const main = async () => {
     owner.username !== 'SquadHunt' || owner.userType !== 'system' || owner.isSystemAccount !== true)) {
     throw new Error('Reserved SquadHunt username conflicts with an existing account; manual review required');
   }
-  if (!process.argv.includes('--verify')) {
+  if (auditOnly) {
+    console.log('Verified reserved SquadHunt username has no conflicting owner');
+    await mongoose.disconnect();
+    return;
+  }
+  if (!verifyOnly) {
     for (const Model of models) {
       await Model.createIndexes();
       console.log(`created/confirmed indexes for ${Model.modelName}`);

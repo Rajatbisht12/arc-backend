@@ -688,6 +688,8 @@ test('production hardening contracts cover retries, audit, indexes, and provider
   const adminAuthSource = fs.readFileSync(path.join(backendRoot, 'legacy-src', 'middleware', 'adminAuth.js'), 'utf8');
   const adminRoutes = fs.readFileSync(path.join(backendRoot, 'modules', 'admin', 'broadcast.routes.ts'), 'utf8');
   const migrationSource = fs.readFileSync(path.join(backendRoot, '..', 'scripts', 'migrate-broadcast-indexes.js'), 'utf8');
+  const releasePreflight = fs.readFileSync(path.join(backendRoot, '..', 'scripts', 'preflight-push-release.js'), 'utf8');
+  const deployScript = fs.readFileSync(path.join(backendRoot, '..', 'deploy.sh'), 'utf8');
 
   assert.strictEqual(isTransientExpoError('ExpoRequestTimeout'), true);
   assert(pushSource.includes('AbortController'));
@@ -724,6 +726,22 @@ test('production hardening contracts cover retries, audit, indexes, and provider
   assert(migrationSource.includes("'BroadcastOccurrence'"));
   assert(migrationSource.includes("'AdminAuditLog'"));
   assert(migrationSource.includes('Model.createIndexes()'));
+  const secretLoadAt = releasePreflight.indexOf('await loadSecretsManagerEnv()');
+  const broadcastAuditAt = releasePreflight.indexOf("run('migrate-broadcast-indexes.js', ['--audit-only'])");
+  const broadcastMigrationAt = releasePreflight.indexOf("run('migrate-broadcast-indexes.js')");
+  const broadcastVerificationAt = releasePreflight.indexOf("run('migrate-broadcast-indexes.js', ['--verify'])");
+  assert(secretLoadAt >= 0 && secretLoadAt < broadcastMigrationAt,
+    'ECS must hydrate database secrets before the broadcast migration');
+  const auditExitAt = releasePreflight.indexOf('if (auditOnly) return;');
+  assert(secretLoadAt < broadcastAuditAt && broadcastAuditAt < auditExitAt,
+    'the read-only ECS audit must detect a reserved-name conflict before maintenance');
+  assert(auditExitAt >= 0 && auditExitAt < broadcastMigrationAt,
+    'read-only audit mode must not create broadcast indexes');
+  assert(broadcastMigrationAt >= 0 && broadcastMigrationAt < broadcastVerificationAt,
+    'ECS must verify broadcast indexes after creating them');
+  assert(deployScript.indexOf('run_preflight verify') >= 0
+    && deployScript.indexOf('run_preflight verify') < deployScript.indexOf('# 7. Deploy'),
+    'broadcast index migration must finish before updated workers start');
 
   assert(serviceSource.includes('webPushAcknowledgedAt: null'));
   assert(serviceSource.includes("? { ...providerResult, status: 'delivered'"));

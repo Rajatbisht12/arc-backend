@@ -109,7 +109,14 @@ deployments must keep the Socket.IO Redis adapter enabled.
 ## Production index migration
 
 MongoDB runs with `autoIndex=false`, so deploy indexes before enabling the
-Broadcast Center:
+Broadcast Center.
+
+The normal `deploy.sh` path runs this migration and its verification inside
+the ECS preflight task after Secrets Manager has supplied `MONGODB_URI` and
+before the service switches to the new worker revision. A failed migration or
+verification stops that deployment. The read-only preflight also checks for a
+conflicting reserved `SquadHunt` username before maintenance begins. For
+manual, one-off recovery in an environment with the same credentials:
 
 ```sh
 npm run migrate:broadcast-indexes
