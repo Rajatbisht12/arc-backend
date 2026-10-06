@@ -7,6 +7,7 @@ const path = require('node:path');
 const backendRoot = path.resolve(__dirname, '..');
 const auditOnly = process.argv.includes('--audit-only');
 const verifyOnly = process.argv.includes('--verify-only');
+const allowBroadcastEventRepair = process.argv.includes('--allow-broadcast-event-repair');
 if (auditOnly && verifyOnly) {
   console.error('Use only one of --audit-only or --verify-only');
   process.exit(1);
@@ -43,9 +44,12 @@ const main = async () => {
   run('migrate-bank-details.js');
   run('migrate-monetization-admin.js');
   run('verify-push-provider-config.js', ['--release']);
-  // Catch a conflicting pre-existing SquadHunt username before a financial
-  // maintenance cutover or any broadcast index creation begins.
-  run('migrate-broadcast-indexes.js', ['--audit-only']);
+  // Catch reserved-name conflicts and broadcast-event duplicate keys before
+  // maintenance or any broadcast index creation. This pass never repairs data.
+  run('migrate-broadcast-indexes.js', [
+    '--audit-only',
+    ...(allowBroadcastEventRepair ? ['--allow-event-repair'] : [])
+  ]);
   if (auditOnly) return;
   if (!verifyOnly) {
     run('migrate-bank-details.js', ['--apply']);
@@ -59,7 +63,7 @@ const main = async () => {
   // Broadcast retries rely on the unique Message.broadcastRecipient index.
   // Run this inside the secret-hydrated ECS preflight before the new worker
   // revision receives traffic; a conflict or missing index blocks deployment.
-  run('migrate-broadcast-indexes.js');
+  run('migrate-broadcast-indexes.js', allowBroadcastEventRepair ? ['--repair-events'] : []);
   run('migrate-broadcast-indexes.js', ['--verify']);
   // Admission correctness depends on unique user/day indexes. Install and
   // verify them before the new task revision receives production traffic.

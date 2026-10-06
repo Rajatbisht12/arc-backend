@@ -114,8 +114,9 @@ Broadcast Center.
 The normal `deploy.sh` path runs this migration and its verification inside
 the ECS preflight task after Secrets Manager has supplied `MONGODB_URI` and
 before the service switches to the new worker revision. A failed migration or
-verification stops that deployment. The read-only preflight also checks for a
-conflicting reserved `SquadHunt` username before maintenance begins. For
+verification stops that deployment. The read-only preflight checks for a
+conflicting reserved `SquadHunt` username and duplicate `BroadcastEvent`
+`(broadcastRecipient, eventType)` keys before maintenance begins. For
 manual, one-off recovery in an environment with the same credentials:
 
 ```sh
@@ -125,10 +126,30 @@ npm run verify:broadcast-indexes
 
 The migration is additive/idempotent and covers broadcast, occurrence,
 recipient, chunk, provider receipt, event, template, failure, audit,
-notification, and user targeting indexes. A unique-index failure usually
-means pre-existing duplicate idempotency rows and must be resolved before
-workers are enabled. Run the verification command as a release gate after the
-migration and after restoring any production snapshot.
+notification, and user targeting indexes. The audit prints duplicate-event
+group counts and up to ten recipient/type key samples without logging event
+metadata. If duplicate keys exist, the default deployment stops before the
+mutating preflight. Do not drop the unique index or delete records by hand.
+
+After taking a production database snapshot and reviewing the audit output,
+an operator can explicitly enable the bounded repair for one deployment:
+
+```sh
+ALLOW_BROADCAST_EVENT_REPAIR=1 bash deploy.sh
+```
+
+This runs in the same secret-hydrated ECS task. It retains the earliest
+event by `createdAt`/`_id`, copies every redundant full original document into
+`broadcasteventduplicatearchives` (uniquely keyed by `sourceEventId`),
+verifies each archive, and only then removes the redundant source row. It
+refuses malformed duplicate keys or more than 10,000 redundant rows for
+manual review. Re-running after a partial failure is safe: archive upserts
+are idempotent. The unique source index is created and verified before the
+new service revision receives traffic. Remove the flag for ordinary releases.
+
+Run the verification command as a release gate after the migration and after
+restoring any production snapshot. Other unique-index conflicts still require
+individual review; this repair is scoped only to duplicate broadcast events.
 
 The official SquadHunt DM delivery also requires the unique
 `Message.broadcastRecipient` index. The same migration creates/verifies it and

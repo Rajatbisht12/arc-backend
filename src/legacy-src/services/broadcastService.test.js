@@ -727,9 +727,14 @@ test('production hardening contracts cover retries, audit, indexes, and provider
   assert(migrationSource.includes("'AdminAuditLog'"));
   assert(migrationSource.includes('Model.createIndexes()'));
   const secretLoadAt = releasePreflight.indexOf('await loadSecretsManagerEnv()');
-  const broadcastAuditAt = releasePreflight.indexOf("run('migrate-broadcast-indexes.js', ['--audit-only'])");
-  const broadcastMigrationAt = releasePreflight.indexOf("run('migrate-broadcast-indexes.js')");
+  const broadcastAuditAt = releasePreflight.indexOf("run('migrate-broadcast-indexes.js', [");
+  const broadcastMigrationAt = releasePreflight.indexOf("run('migrate-broadcast-indexes.js', allowBroadcastEventRepair");
   const broadcastVerificationAt = releasePreflight.indexOf("run('migrate-broadcast-indexes.js', ['--verify'])");
+  assert(migrationSource.includes('auditDuplicateEvents(BroadcastEvent.collection)'));
+  assert(migrationSource.includes('repairDuplicateEvents(mongoose.connection.db, BroadcastEvent.collection)'));
+  assert(releasePreflight.includes("['--repair-events']"));
+  assert(deployScript.includes('ALLOW_BROADCAST_EVENT_REPAIR'));
+  assert(deployScript.includes('npm run test:broadcast'));
   assert(secretLoadAt >= 0 && secretLoadAt < broadcastMigrationAt,
     'ECS must hydrate database secrets before the broadcast migration');
   const auditExitAt = releasePreflight.indexOf('if (auditOnly) return;');
