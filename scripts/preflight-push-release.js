@@ -43,6 +43,9 @@ const main = async () => {
   run('migrate-bank-details.js');
   run('migrate-monetization-admin.js');
   run('verify-push-provider-config.js', ['--release']);
+  // Catch a conflicting pre-existing SquadHunt username before a financial
+  // maintenance cutover or any broadcast index creation begins.
+  run('migrate-broadcast-indexes.js', ['--audit-only']);
   if (auditOnly) return;
   if (!verifyOnly) {
     run('migrate-bank-details.js', ['--apply']);
@@ -53,6 +56,11 @@ const main = async () => {
 
   run('migrate-push-infrastructure.js');
   run('migrate-push-infrastructure.js', ['--verify']);
+  // Broadcast retries rely on the unique Message.broadcastRecipient index.
+  // Run this inside the secret-hydrated ECS preflight before the new worker
+  // revision receives traffic; a conflict or missing index blocks deployment.
+  run('migrate-broadcast-indexes.js');
+  run('migrate-broadcast-indexes.js', ['--verify']);
   // Admission correctness depends on unique user/day indexes. Install and
   // verify them before the new task revision receives production traffic.
   run('migrate-random-connect-indexes.js');

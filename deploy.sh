@@ -317,8 +317,10 @@ fi
 
 # 6. Run provider credential verification, email-policy artifact verification,
 # and a primary-only financial audit (plus additive index preparation) before
-# entering maintenance. A schema-version rollout then stops all older writers
-# before any record migration can mutate data.
+# entering maintenance. The secret-hydrated ECS preflight also installs and
+# verifies broadcast indexes before the updated worker receives traffic.
+# A schema-version rollout then stops all older writers before any record
+# migration can mutate data.
 CONTAINER_NAME=$(aws ecs describe-task-definition \
   --task-definition "$TASK_FAMILY:$NEW_REV" \
   --query 'taskDefinition.containerDefinitions[0].name' --output text)
@@ -416,7 +418,7 @@ if [[ "$REQUIRES_FINANCIAL_QUIESCE" == "1" ]]; then
   MUTATING_PREFLIGHT_STARTED=1
   run_preflight apply
 else
-  echo "==> Schema $TARGET_BANK_SCHEMA_VERSION is already active; verifying without rewriting live bank rows..."
+  echo "==> Schema $TARGET_BANK_SCHEMA_VERSION is already active; verifying bank rows and preparing additive push, broadcast, and Random Connect indexes..."
   run_preflight verify
 fi
 
