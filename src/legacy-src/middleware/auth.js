@@ -94,7 +94,7 @@ const protect = async (req, res, next) => {
       });
     }
 
-    if (!user.isActive) {
+    if (!user.isActive || user.isSystemAccount || user.userType === 'system') {
       return res.status(401).json({
         success: false,
         message: 'User account is deactivated.'

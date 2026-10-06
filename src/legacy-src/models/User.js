@@ -78,13 +78,14 @@ const userSchema = new mongoose.Schema({
   },
   userType: {
     type: String,
-    enum: ['player', 'team', 'admin', 'creator'],
+    enum: ['player', 'team', 'admin', 'creator', 'system'],
     required: [true, 'User type is required']
   },
   isSuperUser: {
     type: Boolean,
     default: false
   },
+  isSystemAccount: { type: Boolean, default: false, immutable: true },
   adminRole: {
     type: String,
     enum: ['super_admin', 'admin', 'moderator', 'support', 'finance', 'tournament_manager', 'content_moderator', 'creator_manager'],
@@ -819,6 +820,18 @@ userSchema.index(
   { 'pushTokens.installationId': 1 },
   { unique: true, partialFilterExpression: { 'pushTokens.installationId': { $type: 'string', $gt: '' } } }
 );
+
+// The public username is reserved even if a future account-creation path
+// bypasses the controller's existing reserved-name check.
+userSchema.pre('validate', function(next) {
+  const reserved = String(this.username || '').toLowerCase() === 'squadhunt';
+  if (reserved && (this.username !== 'SquadHunt' || this.isSystemAccount !== true || this.userType !== 'system')) {
+    return next(new Error('SquadHunt is a reserved system username'));
+  }
+  if (this.userType === 'system' && !this.isSystemAccount) return next(new Error('System account marker is required'));
+  if (this.isSystemAccount && !reserved) return next(new Error('System account username cannot be changed'));
+  next();
+});
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {

@@ -17,6 +17,14 @@ let tokenCalls = 0;
 let refreshTokenCalls = 0;
 let avatarUploadCalls = 0;
 let saveCalls = 0;
+let mockUser = {
+  _id: 'deactivated-user-id',
+  email: 'deactivated@example.com',
+  username: 'deactivated_user',
+  userType: 'player',
+  isActive: false,
+  async save() { saveCalls += 1; }
+};
 
 class GoogleStrategy {
   constructor(_options, verify) {
@@ -27,16 +35,7 @@ class GoogleStrategy {
 stubModule('passport', { use: () => {} });
 stubModule('passport-google-oauth20', { Strategy: GoogleStrategy });
 stubModule('../models/User', {
-  findOne: async () => ({
-    _id: 'deactivated-user-id',
-    email: 'deactivated@example.com',
-    username: 'deactivated_user',
-    userType: 'player',
-    isActive: false,
-    async save() {
-      saveCalls += 1;
-    }
-  }),
+  findOne: async () => mockUser,
   create: async () => {
     throw new Error('Deactivated users must not create a replacement account');
   }
@@ -84,6 +83,27 @@ require('./passport');
   assert.deepStrictEqual(result.info, { message: 'Account is deactivated.' });
   assert.strictEqual(avatarUploadCalls, 0);
   assert.strictEqual(saveCalls, 0);
+  assert.strictEqual(tokenCalls, 0);
+  assert.strictEqual(refreshTokenCalls, 0);
+
+  mockUser = {
+    ...mockUser,
+    _id: 'official-system-id',
+    username: 'SquadHunt',
+    userType: 'system',
+    isSystemAccount: true,
+    isActive: true
+  };
+  const systemResult = await new Promise((resolve, reject) => {
+    verifyGoogle(
+      'google-access-token',
+      'google-refresh-token',
+      { id: 'google-subject', emails: [{ value: 'official-system@squadhunt.invalid' }] },
+      (error, user, info) => error ? reject(error) : resolve({ user, info })
+    );
+  });
+  assert.strictEqual(systemResult.user, false);
+  assert.deepStrictEqual(systemResult.info, { message: 'Account is unavailable.' });
   assert.strictEqual(tokenCalls, 0);
   assert.strictEqual(refreshTokenCalls, 0);
 

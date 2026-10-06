@@ -772,11 +772,15 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     const User = safeRequire<any>(path.join(backendModelPath, "User.js"));
     if (!User) return;
     const [caller, target] = await Promise.all([
-      User.findById(userIdStr).select("username userType profile privacySettings blockedUsers isActive").lean(),
-      User.findById(targetUserId).select("username userType profile privacySettings blockedUsers isActive").lean()
+      User.findById(userIdStr).select("username userType isSystemAccount profile privacySettings blockedUsers isActive").lean(),
+      User.findById(targetUserId).select("username userType isSystemAccount profile privacySettings blockedUsers isActive").lean()
     ]);
     if (!caller?.isActive || !target?.isActive) {
       socket.emit("call-error", { callId, code: "CALL_UNAVAILABLE" });
+      return;
+    }
+    if (target.isSystemAccount || target.userType === "system") {
+      socket.emit("call-error", { callId, code: "CALL_PRIVACY_RESTRICTED", reason: "system_conversation" });
       return;
     }
     const callerBlockedTarget = (caller.blockedUsers || []).some((id: unknown) => getObjectIdString(id) === targetUserId);

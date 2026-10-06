@@ -309,6 +309,8 @@ const buildPushData = (notification, unreadCount = 0) => {
     return {
       notificationId: toId(notification?._id),
       broadcastId,
+      systemConversationId: toId(data.systemConversationId || customData.systemConversationId) || undefined,
+      messageId: toId(data.messageId || customData.messageId) || undefined,
       deliveryLogId: toId(data.deliveryLogId || customData.deliveryLogId) || undefined,
       deepLink: sanitizeString(data.deepLink || customData.deepLink || customData.url) || route,
       hasCta: Boolean(sanitizeString(cta.text) || (sanitizeString(cta.type) && cta.type !== 'none')),

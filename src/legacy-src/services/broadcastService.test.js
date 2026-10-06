@@ -76,7 +76,7 @@ test('allUsers is explicit and clears stale disabled filters', () => {
   assert.strictEqual(audience.premium, 'all');
   assert.deepStrictEqual(audience.platforms, []);
   const query = buildAudienceQuery(audience);
-  assert.deepStrictEqual(query.userType, { $ne: 'admin' });
+  assert.deepStrictEqual(query.userType, { $nin: ['admin', 'system'] });
   assert.strictEqual(query.pushTokens, undefined);
 });
 

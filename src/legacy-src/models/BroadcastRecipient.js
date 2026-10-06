@@ -17,6 +17,9 @@ const broadcastRecipientSchema = new mongoose.Schema({
   recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   occurrenceKey: { type: String, required: true, maxlength: 100 },
   notification: { type: mongoose.Schema.Types.ObjectId, ref: 'Notification', default: null },
+  message: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
+  systemConversationId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  dm: { type: channelStateSchema, default: () => ({}) },
   recipientSnapshot: {
     username: { type: String, default: '' },
     displayName: { type: String, default: '' },

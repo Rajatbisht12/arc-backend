@@ -27,7 +27,7 @@ const modelNames = [
 
 const loadModels = () => modelNames.map((name) =>
   require(path.resolve(__dirname, '..', 'src', 'legacy-src', 'models', `${name}.js`))
-);
+).concat(require('../src/legacy-src/models/Message').Message);
 
 const normalizeKey = (key) => JSON.stringify(Object.entries(key || {}));
 
@@ -59,6 +59,13 @@ const main = async () => {
     } : {})
   });
   const models = loadModels();
+  const User = models.find((model) => model.modelName === 'User');
+  const reservedOwners = await User.find({ username: /^squadhunt$/i })
+    .select('_id username userType isSystemAccount').lean();
+  if (reservedOwners.length > 1 || reservedOwners.some((owner) =>
+    owner.username !== 'SquadHunt' || owner.userType !== 'system' || owner.isSystemAccount !== true)) {
+    throw new Error('Reserved SquadHunt username conflicts with an existing account; manual review required');
+  }
   if (!process.argv.includes('--verify')) {
     for (const Model of models) {
       await Model.createIndexes();

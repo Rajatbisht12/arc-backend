@@ -175,6 +175,8 @@ const messageSchema = new mongoose.Schema({
     groupAvatar: { type: String },
     inviteToken: { type: String }
   },
+  // Only the broadcast worker sets this. A unique key makes retries safe.
+  broadcastRecipient: { type: mongoose.Schema.Types.ObjectId, ref: 'BroadcastRecipient' },
 
   // Presentation metadata for the non-actionable acknowledgement message
   // created after a roster/staff invitation is accepted or declined. This is
@@ -338,6 +340,7 @@ messageSchema.index({ sender: 1, createdAt: -1 });
 messageSchema.index({ recipient: 1, createdAt: -1 });
 messageSchema.index({ chatRoom: 1, createdAt: -1 });
 messageSchema.index({ messageType: 1, createdAt: -1 });
+messageSchema.index({ broadcastRecipient: 1 }, { unique: true, sparse: true });
 // Bounded chat-history windows walk a stable (createdAt, _id) cursor. Keep
 // direct and group timelines covered so finding the first unread boundary and
 // paging around it never requires loading the full conversation.

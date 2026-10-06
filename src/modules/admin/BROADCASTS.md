@@ -123,6 +123,13 @@ means pre-existing duplicate idempotency rows and must be resolved before
 workers are enabled. Run the verification command as a release gate after the
 migration and after restoring any production snapshot.
 
+The official SquadHunt DM delivery also requires the unique
+`Message.broadcastRecipient` index. The same migration creates/verifies it and
+refuses to proceed if an existing non-system account already owns a
+case-insensitive `SquadHunt` username; resolve that conflict manually before
+enabling the updated broadcast workers. Historical notifications are retained,
+but only newly delivered broadcasts create DM messages.
+
 ## Rollback
 
 Stop the broadcast worker first, then cancel queued/scheduled broadcasts through
