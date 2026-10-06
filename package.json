@@ -23,7 +23,7 @@
     "verify:email-policy-release": "node scripts/verify-email-policy-release.js",
     "test:push": "node src/legacy-src/utils/pushNotificationInfrastructure.test.js && node --check scripts/migrate-push-infrastructure.js",
     "test:notification-producers": "node --import tsx src/modules/legacy/legacy.socket.test.ts && node src/legacy-src/services/callSessionService.disconnect.test.js && node src/legacy-src/services/callSessionService.realtime.test.js && node src/legacy-src/utils/callSessionContracts.test.js && node src/legacy-src/utils/notificationProducerContracts.test.js",
-    "test:broadcast": "node src/legacy-src/services/broadcastService.test.js",
+    "test:broadcast": "node src/legacy-src/services/broadcastService.test.js && node scripts/lib/broadcast-event-index-repair.test.js",
     "test:saved-posts": "node src/legacy-src/controllers/postController.savedPosts.test.js",
     "test:comments": "node src/legacy-src/utils/commentThreading.test.js && node src/legacy-src/utils/commentModeration.test.js && node --test src/legacy-src/utils/commentMentions.test.js && node src/legacy-src/controllers/postCommentModeration.test.mjs && node src/legacy-src/controllers/postCommentMentions.test.mjs",
     "test:clash-royale": "node --test src/legacy-src/utils/clashRoyaleAPI.test.js",

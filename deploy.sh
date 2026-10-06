@@ -251,6 +251,7 @@ echo "==> Tag: $TAG"
 echo "==> Running notification and email policy release gates..."
 npm run test:notification-policy
 npm run test:notification-producers
+npm run test:broadcast
 npm run test:bank-details
 npm run test:monetization
 # The build runs tsc with type checking and emits dist. Running a separate
@@ -327,16 +328,21 @@ CONTAINER_NAME=$(aws ecs describe-task-definition \
 run_preflight() {
   local mode="$1"
   local overrides
+  local repair_events="${ALLOW_BROADCAST_EVENT_REPAIR:-0}"
+  if [[ "$repair_events" != "0" && "$repair_events" != "1" ]]; then
+    echo "ALLOW_BROADCAST_EVENT_REPAIR must be 0 or 1" >&2
+    return 1
+  fi
   if [[ "$mode" == "audit" ]]; then
-    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--audit-only']}]}))" "$CONTAINER_NAME")
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--audit-only',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[])]}]}))" "$CONTAINER_NAME" "$repair_events")
   elif [[ "$mode" == "verify" ]]; then
-    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--verify-only']}]}))" "$CONTAINER_NAME")
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--verify-only',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[])]}]}))" "$CONTAINER_NAME" "$repair_events")
   elif [[ "$mode" == "random-connect-apply" ]]; then
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-random-connect-indexes.js']}]}))" "$CONTAINER_NAME")
   elif [[ "$mode" == "random-connect-verify" ]]; then
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-random-connect-indexes.js','--verify']}]}))" "$CONTAINER_NAME")
   else
-    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js']}]}))" "$CONTAINER_NAME")
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[])]}]}))" "$CONTAINER_NAME" "$repair_events")
   fi
   local task
   local run_result
@@ -385,9 +391,9 @@ run_preflight() {
         --region "$REGION" \
         --log-group-name "$log_group" \
         --log-stream-name "$log_stream" \
-        --limit 200 \
+        --limit 80 \
         --query 'events[].message' \
-        --output text >&2; then
+        --output json | node -e "const chunks=[];process.stdin.on('data',c=>chunks.push(c));process.stdin.on('end',()=>{for(const message of JSON.parse(chunks.join('')))console.error(message)})" >&2; then
         echo "Unable to read the preflight log stream; inspect task $task in ECS." >&2
       fi
     else
@@ -398,6 +404,9 @@ run_preflight() {
 }
 
 echo "==> Running non-destructive provider and database readiness audit..."
+if [[ "${ALLOW_BROADCAST_EVENT_REPAIR:-0}" == "1" ]]; then
+  echo "==> BroadcastEvent repair enabled: redundant events will be fully archived before removal. Confirm a production database snapshot exists."
+fi
 run_preflight audit
 
 if [[ "$REQUIRES_FINANCIAL_QUIESCE" == "1" ]]; then
