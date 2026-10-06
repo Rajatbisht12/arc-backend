@@ -58,6 +58,7 @@ const notificationSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Message'
     },
+    systemConversationId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     tournamentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Tournament'

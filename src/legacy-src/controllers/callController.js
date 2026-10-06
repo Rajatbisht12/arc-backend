@@ -179,7 +179,7 @@ const initiateCall = async (req, res) => {
 
     // Check if target user exists and is active
     const targetUser = await User.findById(targetUserId)
-      .select('isActive username userType profile privacySettings blockedUsers')
+      .select('isActive username userType isSystemAccount profile privacySettings blockedUsers')
       .lean();
 
     if (!targetUser || !targetUser.isActive) {
@@ -187,6 +187,9 @@ const initiateCall = async (req, res) => {
         success: false,
         message: 'User not found or inactive'
       });
+    }
+    if (targetUser.isSystemAccount || targetUser.userType === 'system') {
+      return res.status(403).json({ success: false, message: 'Calls to this conversation are not permitted' });
     }
 
     // Get caller info for the offer payload

@@ -9,6 +9,7 @@ const BroadcastOccurrence = require('../models/BroadcastOccurrence');
 const NotificationFailure = require('../models/NotificationFailure');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const { deliverBroadcastDm } = require('./officialSquadHunt');
 const log = require('../utils/logger');
 const { canonicalizePublicWebUrl } = require('../utils/publicWebUrl');
 
@@ -531,7 +532,7 @@ const buildAudienceQuery = (rawAudience = {}) => {
   const audience = normalizeAudience(rawAudience);
   const query = {
     isActive: true,
-    userType: { $ne: 'admin' },
+    userType: { $nin: ['admin', 'system'] },
     needsProfileCompletion: { $ne: true },
     moderationStatus: { $nin: ['banned', 'soft_deleted'] }
   };
@@ -745,8 +746,9 @@ const mapWithConcurrency = async (items, concurrency, handler) => {
   await Promise.all(workers);
 };
 
-const resolveOverallStatus = (pushStatus, inAppStatus) => {
-  const statuses = [pushStatus, inAppStatus].filter((status) => status && status !== 'pending');
+const resolveOverallStatus = (pushStatus, inAppStatus, dmStatus) => {
+  if (dmStatus === 'delivered' && [pushStatus, inAppStatus].every((status) => !status || status === 'skipped' || status === 'pending')) return 'delivered';
+  const statuses = [pushStatus, inAppStatus, dmStatus].filter((status) => status && status !== 'pending');
   const delivered = statuses.filter((status) => status === 'delivered').length;
   const failed = statuses.filter((status) => status === 'failed').length;
   const processing = statuses.some((status) => status === 'processing');
@@ -788,6 +790,8 @@ const resolveBroadcastWebUrl = (cta = {}) => canonicalizePublicWebUrl(cta.url ||
 
 const buildNotificationData = (broadcast, recipientLog, effectiveDeliveryType = broadcast.deliveryType) => ({
   broadcastId: broadcast._id,
+  systemConversationId: recipientLog.systemConversationId || '',
+  messageId: recipientLog.message || '',
   deliveryLogId: recipientLog._id,
   deepLink: resolveBroadcastDeepLink(broadcast.cta),
   deliveryType: effectiveDeliveryType,
@@ -807,6 +811,8 @@ const buildNotificationData = (broadcast, recipientLog, effectiveDeliveryType = 
   },
   customData: {
     broadcastId: String(broadcast._id),
+    systemConversationId: String(recipientLog.systemConversationId || ''),
+    messageId: String(recipientLog.message || ''),
     deliveryLogId: String(recipientLog._id),
     deepLink: resolveBroadcastDeepLink(broadcast.cta),
     url: resolveBroadcastWebUrl(broadcast.cta),
@@ -911,7 +917,7 @@ const deliverToRecipient = async (broadcast, occurrenceKey, user, processingKey)
       'execution.occurrenceKey': occurrenceKey
     });
     if (active) return true;
-    const latest = await BroadcastRecipient.findById(recipientLog._id).select('inApp').lean();
+    const latest = await BroadcastRecipient.findById(recipientLog._id).select('inApp dm').lean();
     const finalInAppStatus = ['delivered', 'failed'].includes(latest?.inApp?.status)
       ? latest.inApp.status
       : 'skipped';
@@ -923,7 +929,7 @@ const deliverToRecipient = async (broadcast, occurrenceKey, user, processingKey)
       },
       {
         $set: {
-          overallStatus: resolveOverallStatus('skipped', finalInAppStatus),
+          overallStatus: resolveOverallStatus('skipped', finalInAppStatus, latest?.dm?.status),
           'push.status': 'skipped',
           'inApp.status': finalInAppStatus,
           processingLeaseAt: null,
@@ -936,6 +942,48 @@ const deliverToRecipient = async (broadcast, occurrenceKey, user, processingKey)
   };
   if (!await ensureOccurrenceActive()) {
     return { ...recipientLog.toObject(), overallStatus: 'skipped', push: { status: 'skipped' }, inApp: { status: 'skipped' } };
+  }
+
+  // Commit the durable DM before producing notification/push destinations.
+  // The unique message key makes worker retries and concurrent leases idempotent.
+  try {
+    const delivered = await deliverBroadcastDm({ recipientLog, broadcast, recipientId: user._id });
+    if (delivered.created) {
+      try {
+        await delivered.message.populate('sender', 'username profile.displayName profile.avatar isSystemAccount');
+        require('../utils/notificationEmitter').emitOfficialDirectMessage(user._id, delivered.official._id, delivered.message.toObject());
+      } catch (socketError) {
+        log.warn('Broadcast DM socket emit failed', { recipientId: String(user._id), error: String(socketError) });
+      }
+    }
+    recipientLog.message = delivered.message._id;
+    recipientLog.systemConversationId = delivered.official._id;
+    if (!recipientLog.dm) recipientLog.dm = {};
+    recipientLog.dm.status = 'delivered';
+    await BroadcastRecipient.updateOne({ _id: recipientLog._id }, {
+      $set: {
+        message: delivered.message._id,
+        systemConversationId: delivered.official._id,
+        'dm.status': 'delivered',
+        'dm.attemptedAt': new Date(),
+        'dm.deliveredAt': delivered.message.createdAt,
+        'dm.failureReason': ''
+      }
+    });
+  } catch (error) {
+    await BroadcastRecipient.updateOne({ _id: recipientLog._id }, {
+      $set: {
+        overallStatus: 'failed',
+        processingLeaseAt: null,
+        processingKey: '',
+        'dm.status': 'failed',
+        'dm.attemptedAt': new Date(),
+        'dm.failureReason': String(error.message).slice(0, 1000),
+        lastError: `DM: ${error.message}`.slice(0, 1000)
+      }
+    });
+    log.error('Broadcast DM delivery failed', { broadcastId: String(broadcast._id), recipientId: String(user._id), error: String(error) });
+    return { ...recipientLog.toObject(), overallStatus: 'failed', dm: { status: 'failed' }, push: { status: 'skipped' }, inApp: { status: 'skipped' } };
   }
 
   const settings = user.notificationSettings || {};
@@ -1082,7 +1130,7 @@ const deliverToRecipient = async (broadcast, occurrenceKey, user, processingKey)
   }
 
   const now = new Date();
-  const overallStatus = resolveOverallStatus(pushStatus, inAppStatus);
+  const overallStatus = resolveOverallStatus(pushStatus, inAppStatus, recipientLog.dm?.status);
   const finalStatusUpdate = await BroadcastRecipient.updateOne(
     { _id: recipientLog._id, webPushAcknowledgedAt: null },
     {
@@ -1112,7 +1160,7 @@ const deliverToRecipient = async (broadcast, occurrenceKey, user, processingKey)
       {
         $set: {
           notification: notification?._id || null,
-          overallStatus: resolveOverallStatus('delivered', inAppStatus),
+          overallStatus: resolveOverallStatus('delivered', inAppStatus, recipientLog.dm?.status),
           processingLeaseAt: null,
           processingKey: '',
           'push.status': 'delivered',
@@ -1151,7 +1199,8 @@ const aggregateBroadcastMetrics = async (broadcastId) => {
       inAppDelivered: { $sum: { $cond: [{ $eq: ['$inApp.status', 'delivered'] }, 1, 0] } },
       retryableFailures: { $sum: { $cond: [{ $or: [
         { $eq: ['$push.status', 'failed'] },
-        { $eq: ['$inApp.status', 'failed'] }
+        { $eq: ['$inApp.status', 'failed'] },
+        { $eq: ['$dm.status', 'failed'] }
       ] }, 1, 0] } }
     } }
   ]);
@@ -1378,7 +1427,7 @@ const expireUnacknowledgedWebPushes = async (limit = 1000) => {
     webPushAcknowledgedAt: null,
     webPushAckDeadlineAt: { $ne: null, $lte: now },
     'push.status': 'processing'
-  }).select('_id broadcast recipient occurrenceKey overallStatus push inApp attempts').limit(Math.max(1, Math.min(5000, limit))).lean();
+  }).select('_id broadcast recipient occurrenceKey overallStatus push inApp dm attempts').limit(Math.max(1, Math.min(5000, limit))).lean();
   if (!rows.length) return { expired: 0, broadcastIds: [] };
   const reason = 'Connected Web notification was not acknowledged before its delivery deadline';
   const expiredRows = [];
@@ -1388,7 +1437,7 @@ const expireUnacknowledgedWebPushes = async (limit = 1000) => {
       { $set: {
         'push.status': 'failed',
         'push.failureReason': reason,
-        overallStatus: resolveOverallStatus('failed', row.inApp?.status),
+        overallStatus: resolveOverallStatus('failed', row.inApp?.status, row.dm?.status),
         webPushAckDeadlineAt: null,
         lastError: `Push: ${reason}`
       } },
@@ -1474,7 +1523,7 @@ const refreshRecipientPushStatuses = async (recipientLogIds) => {
       ? { ...providerResult, status: 'delivered', failureReason: '' }
       : providerResult;
     if (['delivered', 'skipped'].includes(result.status)) resolvedFailureIds.push(recipientLog._id);
-    const overallStatus = resolveOverallStatus(result.status, recipientLog.inApp?.status);
+    const overallStatus = resolveOverallStatus(result.status, recipientLog.inApp?.status, recipientLog.dm?.status);
     addMetricTransition(
       metricDeltas,
       recipientLog.broadcast,
@@ -1621,7 +1670,7 @@ const retryBroadcastPushRecipients = async (recipientLogIds, reconciliationKey) 
             $set: {
               'push.status': pushStatus,
               'push.failureReason': '',
-              overallStatus: resolveOverallStatus(pushStatus, recipientLog.inApp?.status)
+              overallStatus: resolveOverallStatus(pushStatus, recipientLog.inApp?.status, recipientLog.dm?.status)
             }
           }
         }
@@ -1668,7 +1717,7 @@ const retryBroadcastPushRecipients = async (recipientLogIds, reconciliationKey) 
               'push.failureReason': '',
               'inApp.status': inAppStatus,
               'inApp.deliveredAt': inAppStatus === 'delivered' ? new Date() : recipientLog.inApp?.deliveredAt,
-              overallStatus: resolveOverallStatus('skipped', inAppStatus)
+              overallStatus: resolveOverallStatus('skipped', inAppStatus, recipientLog.dm?.status)
             }
           }
         }
@@ -1701,7 +1750,8 @@ const retryBroadcastPushRecipients = async (recipientLogIds, reconciliationKey) 
       user,
       notificationId: notification?._id || null,
       notification: pushNotification,
-      inAppStatus: recipientLog.inApp?.status || 'skipped'
+      inAppStatus: recipientLog.inApp?.status || 'skipped',
+      dmStatus: recipientLog.dm?.status
     });
   }
   if (skippedOperations.length) await BroadcastRecipient.bulkWrite(skippedOperations, { ordered: false });
@@ -1755,7 +1805,7 @@ const retryBroadcastPushRecipients = async (recipientLogIds, reconciliationKey) 
           filter: { _id: entry.recipientLogId, webPushAcknowledgedAt: null },
           update: {
             $set: {
-              overallStatus: resolveOverallStatus(result.status, entry.inAppStatus),
+              overallStatus: resolveOverallStatus(result.status, entry.inAppStatus, entry.dmStatus),
               'push.status': result.status,
               'push.providerMessageIds': result.providerMessageIds,
               'push.deliveredAt': result.status === 'delivered' ? now : null,
@@ -2197,7 +2247,7 @@ const processBroadcastChunk = async ({ broadcastId, occurrenceKey, chunkIndex, r
           filter: { _id: outcome.pushWork.recipientLogId, webPushAcknowledgedAt: null },
           update: {
             $set: {
-              overallStatus: resolveOverallStatus('failed', outcome.inApp?.status),
+              overallStatus: resolveOverallStatus('failed', outcome.inApp?.status, outcome.dm?.status),
               'push.status': 'failed',
               'push.attemptedAt': failedAt,
               'push.failureReason': failureReason,
@@ -2220,7 +2270,7 @@ const processBroadcastChunk = async ({ broadcastId, occurrenceKey, chunkIndex, r
         failureReason: 'No matched registered device token'
       };
       outcome.push = { status: result.status };
-      outcome.overallStatus = resolveOverallStatus(result.status, outcome.inApp?.status);
+      outcome.overallStatus = resolveOverallStatus(result.status, outcome.inApp?.status, outcome.dm?.status);
       updates.push({
         updateOne: {
           filter: { _id: outcome.pushWork.recipientLogId, webPushAcknowledgedAt: null },
@@ -2259,7 +2309,7 @@ const processBroadcastChunk = async ({ broadcastId, occurrenceKey, chunkIndex, r
   }
 
   const channelFailures = outcomes.filter((item) =>
-    item?.inApp?.status === 'failed'
+    item?.inApp?.status === 'failed' || item?.dm?.status === 'failed'
   );
   if (channelFailures.length) {
     unexpectedErrors.push(new Error(`${channelFailures.length} recipient deliveries require retry`));
@@ -2480,7 +2530,7 @@ const trackDelivery = async ({ notification, userId, platform = 'unknown', metad
         'push.status': 'delivered',
         'push.deliveredAt': now,
         'push.failureReason': '',
-        overallStatus: resolveOverallStatus('delivered', recipientLog.inApp?.status)
+        overallStatus: resolveOverallStatus('delivered', recipientLog.inApp?.status, recipientLog.dm?.status)
       }
     },
     { new: true }

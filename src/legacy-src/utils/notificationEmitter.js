@@ -28,6 +28,15 @@ const emitNotification = (userId, notification) => {
   return true;
 };
 
+const emitOfficialDirectMessage = (userId, systemUserId, message) => {
+  if (!io) return false;
+  io.to(`user-${userId}`).emit('newMessage', {
+    chatId: `direct_${systemUserId}`,
+    message: rewritePublicMediaPayload(message)
+  });
+  return true;
+};
+
 const emitBroadcastNotification = (userId, notification) => {
   if (io) {
     io.to(`user-${userId}`).emit('broadcast-notification', rewritePublicMediaPayload(notification));
@@ -72,6 +81,7 @@ const PERSISTED_NOTIFICATION_DATA_KEYS = new Set([
   'postId',
   'commentId',
   'messageId',
+  'systemConversationId',
   'tournamentId',
   'recruitmentId',
   'profileId',
@@ -371,6 +381,7 @@ const emitNotificationToMultiple = (userIds, notification) => {
 module.exports = {
   setIoInstance,
   emitNotification,
+  emitOfficialDirectMessage,
   emitBroadcastNotification,
   emitBroadcastPushNotification,
   emitNotificationToMultiple,

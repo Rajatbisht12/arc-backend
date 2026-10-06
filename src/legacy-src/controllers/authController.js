@@ -428,7 +428,7 @@ const resetPasswordWithOtp = async (req, res) => {
     const cleanEmail = email.toLowerCase();
     const user = await User.findOne({ email: cleanEmail }).select('+password');
 
-    if (!user) {
+    if (!user || user.isSystemAccount || user.userType === 'system') {
       return res.status(404).json({
         success: false,
         message: 'No account found with this email'
@@ -531,7 +531,7 @@ const login = async (req, res) => {
     const query = email ? { email } : { username };
     const user = await User.findOne(query).select('+password');
 
-    if (!user) {
+    if (!user || user.isSystemAccount || user.userType === 'system') {
       return sendInvalidLoginResponse(res);
     }
 
@@ -1267,7 +1267,7 @@ const sendOtp = async (req, res) => {
     }
     if (purpose === 'login') {
       const user = await User.findOne({ email: normalizedEmail });
-      if (!user) {
+      if (!user || user.isSystemAccount || user.userType === 'system') {
         return res.status(404).json({ success: false, message: 'No account found with this email' });
       }
     }
@@ -1359,7 +1359,7 @@ const verifyOtpAndLogin = async (req, res) => {
     record.used = true;
     await record.save();
     const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
+    if (!user || user.isSystemAccount || user.userType === 'system') {
       return res.status(404).json({ success: false, message: 'No account found. Please register first.' });
     }
     if (!user.isActive) {
@@ -1421,6 +1421,7 @@ const googleTokenLogin = async (req, res) => {
 
     let user = await User.findOne({ email });
 
+    if (user?.isSystemAccount || user?.userType === 'system') return sendInvalidLoginResponse(res);
     if (user?.userType === 'admin') {
       return res.status(403).json({
         success: false,
@@ -1587,6 +1588,7 @@ const appleMobileLogin = async (req, res) => {
       user = await User.findOne({ email: tokenEmail });
     }
 
+    if (user?.isSystemAccount || user?.userType === 'system') return sendInvalidLoginResponse(res);
     if (user?.userType === 'admin') {
       return res.status(403).json({
         success: false,
@@ -1646,6 +1648,7 @@ const appleMobileLogin = async (req, res) => {
           ]
         });
         if (!user) throw createError;
+        if (user.isSystemAccount || user.userType === 'system') return sendInvalidLoginResponse(res);
         if (user.userType === 'admin') {
           return res.status(403).json({
             success: false,
@@ -1663,7 +1666,8 @@ const appleMobileLogin = async (req, res) => {
     }
 
     // Re-check after duplicate-key recovery in case a concurrent request linked
-    // this provider identity to an admin account.
+    // this provider identity to a protected account.
+    if (user.isSystemAccount || user.userType === 'system') return sendInvalidLoginResponse(res);
     if (user.userType === 'admin') {
       return res.status(403).json({
         success: false,

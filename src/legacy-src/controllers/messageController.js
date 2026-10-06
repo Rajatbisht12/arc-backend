@@ -176,11 +176,11 @@ const sendDirectMessage = async (req, res) => {
     let recipient;
     if (recipientUsername && typeof recipientUsername === 'string' && recipientUsername.trim()) {
       recipient = await User.findOne({ username: recipientUsername.trim(), isActive: true })
-        .select('username userType profile privacySettings blockedUsers isActive');
+        .select('username userType isSystemAccount profile privacySettings blockedUsers isActive');
     } else if (recipientId) {
       const id = typeof recipientId === 'string' ? recipientId.replace(/^direct_/, '').trim() : String(recipientId);
       if (id) recipient = await User.findById(id)
-        .select('username userType profile privacySettings blockedUsers isActive');
+        .select('username userType isSystemAccount profile privacySettings blockedUsers isActive');
     }
     if (!recipientId && !recipientUsername) {
       return res.status(400).json({ success: false, message: 'Recipient (username or id) is required' });
@@ -190,6 +190,9 @@ const sendDirectMessage = async (req, res) => {
         success: false,
         message: 'Recipient not found'
       });
+    }
+    if (recipient.isSystemAccount || recipient.userType === 'system') {
+      return res.status(403).json({ success: false, code: 'SYSTEM_CONVERSATION_READ_ONLY', message: 'Only SquadHunt can send messages in this chat' });
     }
     const recipientIdResolved = recipient._id.toString();
     if (senderId.toString() === recipientIdResolved) {
@@ -888,7 +891,7 @@ const getRecentConversations = async (req, res) => {
     const conversationUserIds = conversations.map((conversation) => conversation._id).filter(Boolean);
     const [conversationUsers, followedUserIds, unreadRows] = await Promise.all([
       User.find({ _id: { $in: conversationUserIds }, isActive: true })
-        .select('username profile.displayName profile.avatar role userType lastSeen privacySettings blockedUsers isActive')
+        .select('username profile.displayName profile.avatar role userType isSystemAccount lastSeen privacySettings blockedUsers isActive')
         .lean(),
       Follow.find({ follower: userObjectId, following: { $in: conversationUserIds } }).distinct('following'),
       Message.aggregate([
@@ -928,6 +931,7 @@ const getRecentConversations = async (req, res) => {
         existingConversation: true,
         blocked
       });
+      if (otherUser.isSystemAccount || otherUser.userType === 'system') privacyAccess.canMessage = false;
       return {
         _id: `direct_${conv._id}`,
         participants: [{
@@ -940,6 +944,7 @@ const getRecentConversations = async (req, res) => {
             avatar: otherUser.profile?.avatar
           },
           userType: otherUser.userType,
+          isSystemAccount: otherUser.isSystemAccount === true,
           role: otherUser.role || otherUser.userType,
           canSeeOnlineStatus: privacyAccess.canSeeOnlineStatus,
           activityStatus: privacyAccess.canSeeOnlineStatus
@@ -3312,9 +3317,12 @@ const sendGroupInviteDM = async (req, res) => {
 
     // Verify target user exists and is active
     const targetUser = await User.findById(targetUserId)
-      .select('username userType profile privacySettings blockedUsers isActive');
+      .select('username userType isSystemAccount profile privacySettings blockedUsers isActive');
     if (!targetUser || !targetUser.isActive) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (targetUser.isSystemAccount || targetUser.userType === 'system') {
+      return res.status(403).json({ success: false, code: 'SYSTEM_CONVERSATION_READ_ONLY', message: 'Only SquadHunt can send messages in this chat' });
     }
 
     const existingConversation = Boolean(await Message.exists({

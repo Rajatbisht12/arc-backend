@@ -4390,9 +4390,12 @@ const getDmPrivacy = async (req, res) => {
     const callerId = req.user._id;
 
     const targetUser = await User.findById(targetUserId)
-      .select('username userType profile privacySettings blockedUsers isActive');
+      .select('username userType isSystemAccount profile privacySettings blockedUsers isActive');
     if (!targetUser || !targetUser.isActive) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (targetUser.isSystemAccount || targetUser.userType === 'system') {
+      return res.status(200).json({ success: true, canMessage: false, code: 'SYSTEM_CONVERSATION_READ_ONLY', reason: 'system_conversation' });
     }
     const { Message } = require('../models/Message');
     const existingConversation = Boolean(await Message.exists({
