@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const UsernameRegistry = require('../models/UsernameRegistry');
 const OtpVerification = require('../models/OtpVerification');
 const Follow = require('../models/Follow');
 const FollowRequest = require('../models/FollowRequest');
@@ -19,6 +20,7 @@ const { normalizeMatchmakingGender } = require('../utils/randomConnectGender');
 const { FINANCIAL_TRANSACTION_OPTIONS, startFinancialSession } = require('../utils/financialTransactions');
 const { TEAM_TYPES, normalizeTeamType } = require('../utils/teamType');
 const { normalizeProfileSocialLinksUpdate } = require('../utils/profileSocialLinks');
+const { normalizeUsernameInput, validateUsernameFormat, isCoreReservedUsername, escapeUsernameRegex } = require('../utils/usernamePolicy');
 
 const INVALID_LOGIN_MESSAGE = 'Invalid email or password.';
 
@@ -67,46 +69,13 @@ const resetLoginFailureCounters = async (res) => {
   }
 };
 
-const USERNAME_PATTERN = /^[a-zA-Z0-9_]+$/;
-const RESERVED_USERNAMES = new Set([
-  'admin',
-  'administrator',
-  'api',
-  'app',
-  'arc',
-  'auth',
-  'help',
-  'login',
-  'moderator',
-  'official',
-  'profile',
-  'register',
-  'root',
-  'settings',
-  'squadhunt',
-  'support',
-  'system',
-  'team',
-  'teams',
-  'user',
-  'users',
-]);
-
-const normalizeUsernameInput = (username) => String(username || '').replace(/\s/g, '').trim();
-
 const validateUsernameCandidate = (username) => {
-  if (!username) return 'Username is required';
-  if (username.length < 3 || username.length > 20) return 'Username must be between 3 and 20 characters';
-  if (!USERNAME_PATTERN.test(username)) return 'Username can only contain letters, numbers and underscores';
-  if (RESERVED_USERNAMES.has(username.toLowerCase())) return 'This username is reserved';
-  return '';
+  return validateUsernameFormat(username) || (isCoreReservedUsername(username) ? 'This username is reserved and cannot be used.' : '');
 };
-
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const buildUsernameLookup = (username, excludeUserId) => {
   const query = {
-    username: { $regex: `^${escapeRegex(username)}$`, $options: 'i' },
+    username: { $regex: `^${escapeUsernameRegex(username)}$`, $options: 'i' },
   };
   if (excludeUserId) query._id = { $ne: excludeUserId };
   return query;
@@ -117,8 +86,13 @@ const findExistingUsername = (username, excludeUserId) => {
 };
 
 const isUsernameDuplicateError = (error) => {
-  return error?.code === 11000 && (error?.keyPattern?.username || error?.keyValue?.username);
+  return error?.code === 'USERNAME_TAKEN' ||
+    (error?.code === 11000 && (error?.keyPattern?.username || error?.keyValue?.username || error?.keyPattern?.normalizedUsername));
 };
+
+const sendUsernameReserved = (res) => res.status(409).json({
+  success: false, code: 'USERNAME_RESERVED', message: 'This username is reserved and cannot be used.'
+});
 
 const sendUsernameDuplicate = (res) => {
   return res.status(400).json({
@@ -138,18 +112,19 @@ const checkUsernameAvailability = async (req, res) => {
       return res.status(400).json({
         success: false,
         available: false,
+        ...(isCoreReservedUsername(cleanUsername) ? { reason: 'reserved', code: 'USERNAME_RESERVED' } : {}),
         message: validationError
       });
     }
 
-    // Check if username exists
-    const existingUser = await findExistingUsername(cleanUsername);
-    
-    if (existingUser) {
+    const { checkUsername } = require('../services/usernameRegistryService');
+    const status = await checkUsername(cleanUsername);
+    if (!status.available) {
       return res.json({
         success: true,
         available: false,
-        message: 'Username is already taken'
+        reason: status.code === 'USERNAME_RESERVED' ? 'reserved' : 'taken',
+        message: status.message
       });
     }
 
@@ -234,6 +209,7 @@ const register = async (req, res) => {
     if (usernameValidationError) {
       return res.status(400).json({
         success: false,
+        ...(isCoreReservedUsername(username) ? { code: 'USERNAME_RESERVED' } : {}),
         message: usernameValidationError
       });
     }
@@ -259,6 +235,10 @@ const register = async (req, res) => {
         message: 'User with this email or username already exists'
       });
     }
+
+    // Reject an admin reservation before consuming the registration OTP.
+    const reservedClaim = await UsernameRegistry.findOne({ normalizedUsername: username.toLowerCase(), kind: 'reservation' }).select('_id').lean();
+    if (reservedClaim) return sendUsernameReserved(res);
 
     // Verify email OTP for registration
     if (!otp || String(otp).trim().length !== 6) {
@@ -353,6 +333,7 @@ const register = async (req, res) => {
     });
 
   } catch (error) {
+    if (error?.code === 'USERNAME_RESERVED') return sendUsernameReserved(res);
     if (isUsernameDuplicateError(error)) {
       return sendUsernameDuplicate(res);
     }
@@ -654,6 +635,7 @@ const updateProfile = async (req, res) => {
         if (usernameValidationError) {
           return res.status(400).json({
             success: false,
+            ...(isCoreReservedUsername(updates.username) ? { code: 'USERNAME_RESERVED' } : {}),
             message: usernameValidationError
           });
         }
@@ -760,6 +742,7 @@ const updateProfile = async (req, res) => {
     });
 
   } catch (error) {
+    if (error?.code === 'USERNAME_RESERVED') return sendUsernameReserved(res);
     if (isUsernameDuplicateError(error)) {
       return sendUsernameDuplicate(res);
     }
@@ -1157,6 +1140,7 @@ const completeProfile = async (req, res) => {
     if (usernameValidationError) {
       return res.status(400).json({
         success: false,
+        ...(isCoreReservedUsername(username) ? { code: 'USERNAME_RESERVED' } : {}),
         message: usernameValidationError
       });
     }
@@ -1230,6 +1214,7 @@ const completeProfile = async (req, res) => {
     });
 
   } catch (error) {
+    if (error?.code === 'USERNAME_RESERVED') return sendUsernameReserved(res);
     if (isUsernameDuplicateError(error)) {
       return sendUsernameDuplicate(res);
     }

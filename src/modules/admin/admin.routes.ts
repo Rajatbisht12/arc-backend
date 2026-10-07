@@ -9,6 +9,9 @@ import pushRoutes from "./push.routes";
 import { premiumMembershipController } from "./premium-membership.legacy-adapters";
 import { adminBankDetailsController } from "./admin-bank-details.legacy-adapters";
 import { adminMonetizationController } from "./admin-monetization.legacy-adapters";
+import { backendControllerPath } from "../legacy/legacy.paths";
+import path from "path";
+const usernameReservationController = require(path.join(backendControllerPath, "usernameReservationController.js"));
 
 const router = Router();
 export const rejectStructuredAdminQuery = (req: Request, res: Response, next: NextFunction) => {
@@ -85,6 +88,9 @@ router.get("/health", auditLog("VIEW_SYSTEM_HEALTH"), adminController.getSystemH
 router.get("/activities", auditLog("VIEW_RECENT_ACTIVITIES"), adminController.getRecentActivities);
 router.get("/audit-logs", auditLog("VIEW_AUDIT_LOGS"), requireAdminPermission("audit:read"), adminController.getAuditLogs);
 router.get("/users", auditLog("VIEW_USERS"), requireAdminPermission("users:read"), adminController.getUsers);
+router.get("/reserved-usernames", auditLog("VIEW_RESERVED_USERNAMES"), requireAdminPermission("users:read"), usernameReservationController.list);
+router.post("/reserved-usernames", auditLog("ADMIN_RESERVED_USERNAME"), requireAdminPermission("users:manage"), durableMutationAudit("ADMIN_RESERVED_USERNAME"), usernameReservationController.reserve);
+router.delete("/reserved-usernames/:id", auditLog("ADMIN_REMOVED_USERNAME_RESERVATION"), requireAdminPermission("users:manage"), durableMutationAudit("ADMIN_REMOVED_USERNAME_RESERVATION"), usernameReservationController.remove);
 router.get("/users/:userId/inspection", auditLog("INSPECT_USER_PROFILE"), requireAdminPermission("users:read"), adminController.getUserInspection);
 router.put("/users/:userId/status", auditLog("UPDATE_USER_STATUS"), requireAdminPermission("users:manage"), adminController.updateUserStatus);
 router.put("/users/:userId/controls", auditLog("UPDATE_USER_CONTROLS"), requireAdminPermission("users:manage"), adminController.updateUserControls);
