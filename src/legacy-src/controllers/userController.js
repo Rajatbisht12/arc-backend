@@ -989,11 +989,12 @@ const invalidateFollowCaches = async (currentUserId, targetUserId) => {
 };
 
 const persistFollow = async (followerId, targetId) => {
-  await Promise.all([
+  const [created] = await Promise.all([
     Follow.follow(followerId, targetId),
     User.updateOne({ _id: followerId }, { $addToSet: { following: targetId } }),
     User.updateOne({ _id: targetId }, { $addToSet: { followers: followerId } })
   ]);
+  return created;
 };
 
 const persistUnfollow = async (followerId, targetId) => {
@@ -1004,35 +1005,91 @@ const persistUnfollow = async (followerId, targetId) => {
   ]);
 };
 
+const emitFollowStateUpdate = ({ req, requesterId, targetUserId, status, requestId = '', followStatus, canFollow }) => {
+  const io = req?.app?.get?.('io') || global._arcSocketIO;
+  if (!io) return;
+  const event = {
+    requestId: String(requestId),
+    requesterId: String(requesterId),
+    targetUserId: String(targetUserId),
+    status,
+    followStatus: followStatus || (status === 'accepted' ? 'accepted' : status === 'pending' ? 'pending' : 'none'),
+    followRequestPending: (followStatus || status) === 'pending',
+    ...(typeof canFollow === 'boolean' ? { canFollow } : {}),
+    updatedAt: new Date().toISOString()
+  };
+  io.to(`user-${targetUserId}`).emit('follow-request-updated', event);
+  io.to(`user-${requesterId}`).emit('follow-request-updated', event);
+};
+
 const publishFollowRequestUpdate = async ({ req, request, status }) => {
   if (!request?._id || !request?.target) return;
   const updatedAt = new Date();
   const followRequestId = String(request._id);
-  await Notification.updateMany(
-    {
-      recipient: request.target,
-      type: 'follow',
-      'data.customData.followRequestId': followRequestId,
-      deletedAt: null
-    },
-    {
+  const notificationFilter = {
+    recipient: request.target,
+    sender: request.requester,
+    type: 'follow',
+    'data.customData.followRequestId': followRequestId,
+    'data.customData.eventType': 'follow_request',
+    deletedAt: null
+  };
+  let notification = null;
+  if (status === 'accepted') {
+    const requester = await User.findById(request.requester).select('username profile.displayName').lean();
+    notification = await Notification.findOneAndUpdate(notificationFilter, {
       $set: {
-        isRead: true,
-        readAt: updatedAt,
+        title: 'New Follower',
+        message: `${requester?.username || 'Someone'} started following you`,
+        'data.deepLink': requester?.username ? `/user/${requester.username}` : `/user/${request.requester}`,
+        'data.customData.eventType': 'new_follower',
         'data.customData.followRequestStatus': status,
-        'data.customData.followRequestHandledAt': updatedAt
+        'data.customData.followRequestHandledAt': updatedAt,
+        pushDeliveryState: 'completed',
+        pushDeliveryNextAttemptAt: null
       }
-    }
-  );
+    }, { new: true });
+  } else {
+    notification = await Notification.findOneAndUpdate(notificationFilter, {
+      $set: {
+        deletedAt: updatedAt,
+        'data.customData.followRequestStatus': status,
+        'data.customData.followRequestHandledAt': updatedAt,
+        pushDeliveryState: 'completed',
+        pushDeliveryNextAttemptAt: null
+      }
+    }, { new: true });
+  }
   const io = req?.app?.get?.('io') || global._arcSocketIO;
   if (io) {
-    io.to(`user-${request.target}`).emit('follow-request-updated', {
-      requestId: followRequestId,
-      requesterId: String(request.requester || ''),
-      targetUserId: String(request.target),
+    const [requester, targetUser, isFollowing, pendingRequest] = await Promise.all([
+      User.findById(request.requester).select('_id userType blockedUsers').lean(),
+      User.findById(request.target).select('_id privacySettings blockedUsers').lean(),
+      Follow.isFollowing(request.requester, request.target),
+      FollowRequest.exists({ requester: request.requester, target: request.target, status: 'pending' })
+    ]);
+    const followStatus = isFollowing ? 'accepted' : pendingRequest ? 'pending' : 'none';
+    const privacy = requester && targetUser && followStatus === 'none'
+      ? await resolvePrivacyAccess({ viewer: requester, targetUser })
+      : null;
+    emitFollowStateUpdate({
+      req,
+      requesterId: request.requester,
+      targetUserId: request.target,
       status,
-      updatedAt: updatedAt.toISOString()
+      requestId: followRequestId,
+      followStatus,
+      canFollow: followStatus === 'none' && Boolean(privacy?.access?.canFollow)
     });
+    if (notification) {
+      io.to(`user-${request.target}`).emit(status === 'accepted' ? 'notification-updated' : 'notification-deleted', {
+        notificationId: String(notification._id),
+        recipientId: String(request.target),
+        requestId: followRequestId,
+        status,
+        ...(status === 'accepted' ? { notification } : {})
+      });
+    }
   }
 };
 
@@ -1061,34 +1118,43 @@ const toggleFollow = async (req, res) => {
 
     const isFollowing = await Follow.isFollowing(currentUserId, targetUserId);
     if (req.method === 'DELETE') {
-      const cancelledRequests = await FollowRequest.find({
-        requester: currentUserId,
-        target: targetUserId,
-        status: 'pending'
-      }).select('_id requester target').lean();
-      await Promise.all([
-        isFollowing ? persistUnfollow(currentUserId, targetUserId) : Promise.resolve(),
-        FollowRequest.updateMany(
+      const retractOnly = req.query?.expected === 'pending';
+      const cancelledRequests = [];
+      let cancelledRequest;
+      do {
+        cancelledRequest = await FollowRequest.findOneAndUpdate(
           { requester: currentUserId, target: targetUserId, status: 'pending' },
-          { $set: { status: 'cancelled', resolvedAt: new Date() } }
-        )
-      ]);
+          { $set: { status: 'cancelled', resolvedAt: new Date() } },
+          { new: true }
+        );
+        if (cancelledRequest) cancelledRequests.push(cancelledRequest);
+      } while (cancelledRequest);
+      // Acceptance can finish while the cancellation CAS is running. Check the
+      // canonical Follow collection again before deciding this was only a
+      // request withdrawal.
+      const shouldUnfollow = !retractOnly && (isFollowing || (!cancelledRequests.length && await Follow.isFollowing(currentUserId, targetUserId)));
+      if (shouldUnfollow) await persistUnfollow(currentUserId, targetUserId);
       await Promise.all(cancelledRequests.map((request) => (
         publishFollowRequestUpdate({ req, request, status: 'cancelled' }).catch((syncError) => {
           log.error('Follow request cancellation notification sync failed', { error: String(syncError) });
         })
       )));
+      if (shouldUnfollow) emitFollowStateUpdate({ req, requesterId: currentUserId, targetUserId, status: 'cancelled' });
       await invalidateFollowCaches(currentUserId, targetUserId);
+      const stillFollowing = retractOnly && await Follow.isFollowing(currentUserId, targetUserId);
       const postUnfollowPrivacy = await resolvePrivacyAccess({ viewer: req.user, targetUser });
       if (!postUnfollowPrivacy.access.canSeeOnlineStatus) {
         removePresenceSubscription(req.app?.get?.('io') || global._arcSocketIO, currentUserId, targetUserId);
       }
       return res.status(200).json({
         success: true,
-        message: isFollowing ? 'User unfollowed' : 'Follow request cancelled',
+        message: stillFollowing ? 'Follow request already accepted' : shouldUnfollow ? 'User unfollowed' : 'Follow request cancelled',
         data: {
-          isFollowing: false,
-          followStatus: 'none',
+          isFollowing: Boolean(stillFollowing),
+          followStatus: stillFollowing ? 'accepted' : 'none',
+          followRequestPending: false,
+          canFollow: !stillFollowing && postUnfollowPrivacy.access.canFollow,
+          privacyAccess: { canFollow: !stillFollowing && postUnfollowPrivacy.access.canFollow, followRequestPending: false },
           followersCount: await Follow.getFollowerCount(targetUserId)
         }
       });
@@ -1101,6 +1167,9 @@ const toggleFollow = async (req, res) => {
         data: {
           isFollowing: true,
           followStatus: 'accepted',
+          followRequestPending: false,
+          canFollow: false,
+          privacyAccess: { canFollow: false, followRequestPending: false },
           followersCount: await Follow.getFollowerCount(targetUserId)
         }
       });
@@ -1110,7 +1179,10 @@ const toggleFollow = async (req, res) => {
     if (relationship.blocked) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    if (!relationship.access.canFollow) {
+    const existingPendingRequest = relationship.settings.profileVisibility !== 'public'
+      ? await FollowRequest.findOne({ requester: currentUserId, target: targetUserId, status: 'pending' })
+      : null;
+    if (!relationship.access.canFollow && !existingPendingRequest) {
       return res.status(403).json({
         success: false,
         code: 'FOLLOW_REQUESTS_DISABLED',
@@ -1120,7 +1192,7 @@ const toggleFollow = async (req, res) => {
     }
 
     if (relationship.settings.profileVisibility !== 'public') {
-      let request = await FollowRequest.findOne({ requester: currentUserId, target: targetUserId, status: 'pending' });
+      let request = existingPendingRequest;
       if (!request) {
         try {
           request = await FollowRequest.findOneAndUpdate(
@@ -1133,48 +1205,69 @@ const toggleFollow = async (req, res) => {
           request = await FollowRequest.findOne({ requester: currentUserId, target: targetUserId, status: 'pending' });
           if (!request) throw error;
         }
-        await createAndEmitNotification({
-          recipient: targetUserId,
-          sender: currentUserId,
-          type: 'follow',
-          title: 'New follow request',
-          message: `${req.user.profile?.displayName || req.user.username || 'Someone'} requested to follow you.`,
-          data: {
-            deepLink: '/settings/privacy?section=follow-requests',
-            customData: {
-              eventType: 'follow_request',
-              followRequestId: String(request._id),
-              notificationDedupeKey: `follow-request:${request._id}`,
-              pushRequestId: `follow-request:${request._id}`
+        const beforeDelivery = await FollowRequest.findById(request._id).select('status').lean();
+        if (beforeDelivery?.status === 'pending') {
+          emitFollowStateUpdate({ req, requesterId: currentUserId, targetUserId, status: 'pending', requestId: request._id });
+          await createAndEmitNotification({
+            recipient: targetUserId,
+            sender: currentUserId,
+            type: 'follow',
+            title: 'New follow request',
+            message: `${req.user.profile?.displayName || req.user.username || 'Someone'} requested to follow you.`,
+            data: {
+              deepLink: '/settings/privacy?section=follow-requests',
+              customData: {
+                eventType: 'follow_request',
+                followRequestId: String(request._id),
+                notificationDedupeKey: `follow-request:${request._id}`,
+                pushRequestId: `follow-request:${request._id}`
+              }
             }
-          }
-        }).catch((notificationError) => {
-          log.error('Follow request notification delivery failed', { error: String(notificationError) });
-        });
+          }).catch((notificationError) => {
+            log.error('Follow request notification delivery failed', { error: String(notificationError) });
+          });
+        }
+        // Acceptance or withdrawal can win while notification delivery is in
+        // flight. Reconcile the durable row after delivery so it cannot linger
+        // as an actionable request once the request has been resolved.
       }
-      return res.status(202).json({
+      const latestRequest = await FollowRequest.findById(request._id).select('status requester target').lean();
+      if (latestRequest && latestRequest.status !== 'pending') {
+        await publishFollowRequestUpdate({ req, request: latestRequest, status: latestRequest.status });
+      }
+      const followStatus = latestRequest?.status === 'accepted' ? 'accepted' : latestRequest?.status === 'pending' ? 'pending' : 'none';
+      return res.status(followStatus === 'pending' ? 202 : 200).json({
         success: true,
-        message: 'Follow request sent',
+        message: followStatus === 'pending' ? 'Follow request sent' : followStatus === 'accepted' ? 'Already following this user' : 'Follow request no longer pending',
         data: {
-          isFollowing: false,
-          followStatus: 'pending',
+          isFollowing: followStatus === 'accepted',
+          followStatus,
+          followRequestPending: followStatus === 'pending',
+          canFollow: followStatus === 'none' && relationship.access.canFollow,
+          privacyAccess: { canFollow: followStatus === 'none' && relationship.access.canFollow, followRequestPending: followStatus === 'pending' },
           followRequestId: request._id,
           followersCount: await Follow.getFollowerCount(targetUserId)
         }
       });
     }
 
-    await persistFollow(currentUserId, targetUserId);
+    const created = await persistFollow(currentUserId, targetUserId);
     await invalidateFollowCaches(currentUserId, targetUserId);
-    await createFollowNotification(targetUserId, currentUserId).catch((notificationError) => {
-      log.error('Follow notification delivery failed', { error: String(notificationError) });
-    });
+    emitFollowStateUpdate({ req, requesterId: currentUserId, targetUserId, status: 'accepted' });
+    if (created) {
+      await createFollowNotification(targetUserId, currentUserId).catch((notificationError) => {
+        log.error('Follow notification delivery failed', { error: String(notificationError) });
+      });
+    }
     return res.status(200).json({
       success: true,
       message: 'User followed',
       data: {
         isFollowing: true,
         followStatus: 'accepted',
+        followRequestPending: false,
+        canFollow: false,
+        privacyAccess: { canFollow: false, followRequestPending: false },
         followersCount: await Follow.getFollowerCount(targetUserId)
       }
     });
@@ -4243,33 +4336,64 @@ const getFollowRequests = async (req, res) => {
 
 const resolveFollowRequest = async (req, res, status) => {
   try {
-    const resolvedAt = new Date();
-    const request = await FollowRequest.findOneAndUpdate({
-      _id: req.params.requestId,
-      target: req.user._id,
-      status: 'pending'
-    }, {
-      $set: { status, resolvedAt }
-    }, { new: true });
-    if (!request) return res.status(404).json({ success: false, message: 'Follow request not found' });
-
+    let request;
     if (status === 'accepted') {
-      const requesterStillActive = await User.exists({ _id: request.requester, isActive: true });
-      if (!requesterStillActive) {
-        request.status = 'cancelled';
-        await request.save();
-        await publishFollowRequestUpdate({ req, request, status: 'cancelled' }).catch(() => undefined);
-        return res.status(404).json({ success: false, message: 'Follow request not found' });
-      }
+      // The request CAS and the new Follow edge must become visible together.
+      // Otherwise a concurrent DELETE can miss both and report NONE just
+      // before the acceptance inserts the edge.
+      const session = await mongoose.startSession({ causalConsistency: false });
       try {
-        await persistFollow(request.requester, request.target);
+        await session.withTransaction(async () => {
+          const resolvedAt = new Date();
+          request = await FollowRequest.findOneAndUpdate({
+            _id: req.params.requestId,
+            target: req.user._id,
+            status: 'pending'
+          }, { $set: { status, resolvedAt } }, { new: true, session });
+          if (!request) return;
+          const requesterStillActive = await User.exists({ _id: request.requester, isActive: true }).session(session);
+          if (!requesterStillActive) {
+            await FollowRequest.updateOne(
+              { _id: request._id, status: 'accepted' },
+              { $set: { status: 'cancelled', resolvedAt } },
+              { session }
+            );
+            request.status = 'cancelled';
+            return;
+          }
+          await Follow.updateOne(
+            { follower: request.requester, following: request.target },
+            { $setOnInsert: { follower: request.requester, following: request.target } },
+            { upsert: true, session }
+          );
+          await User.updateOne({ _id: request.requester }, { $addToSet: { following: request.target } }, { session });
+          await User.updateOne({ _id: request.target }, { $addToSet: { followers: request.requester } }, { session });
+        }, { readPreference: 'primary', readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } });
       } catch (error) {
-        await FollowRequest.updateOne(
-          { _id: request._id, status: 'accepted', resolvedAt },
-          { $set: { status: 'pending' }, $unset: { resolvedAt: 1 } }
-        );
-        throw error;
+        if (!error?.hasErrorLabel?.('UnknownTransactionCommitResult')) throw error;
+        // A commit acknowledgement can be lost after the writes succeeded.
+        // Read the durable relationship before deciding whether to retry.
+        const committed = await FollowRequest.findOne({
+          _id: req.params.requestId,
+          target: req.user._id,
+          status: 'accepted'
+        });
+        if (!committed || !await Follow.isFollowing(committed.requester, committed.target)) throw error;
+        request = committed;
+      } finally {
+        await session.endSession();
       }
+    } else {
+      request = await FollowRequest.findOneAndUpdate({
+        _id: req.params.requestId,
+        target: req.user._id,
+        status: 'pending'
+      }, { $set: { status, resolvedAt: new Date() } }, { new: true });
+    }
+    if (!request) return res.status(404).json({ success: false, message: 'Follow request not found' });
+    if (request.status === 'cancelled') {
+      await publishFollowRequestUpdate({ req, request, status: 'cancelled' }).catch(() => undefined);
+      return res.status(404).json({ success: false, message: 'Follow request not found' });
     }
     await invalidateFollowCaches(request.requester, request.target);
     await publishFollowRequestUpdate({ req, request, status }).catch((syncError) => {
@@ -4444,6 +4568,8 @@ const getDmPrivacy = async (req, res) => {
 };
 
 module.exports = {
+  // Exported for transition tests; routes only expose the handlers below.
+  publishFollowRequestUpdate,
   getUsers,
   getUser,
   getUserAvailability,

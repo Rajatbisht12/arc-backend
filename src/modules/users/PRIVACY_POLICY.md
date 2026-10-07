@@ -42,10 +42,23 @@ return HTTP 403 with the same minimal identity/access metadata where useful.
 - `GET /api/users/follow-requests/incoming`
 - `POST /api/users/follow-requests/:requestId/accept`
 - `POST /api/users/follow-requests/:requestId/reject`
+- `POST /api/users/:id/follow` creates a pending request for a non-public account
+- `DELETE /api/users/:id/follow` retracts a pending request or unfollows
+- `DELETE /api/users/:id/follow?expected=pending` retracts only a pending
+  request; if acceptance won the race it returns `followStatus: accepted`
+  without unfollowing
 
 Following a non-public account creates a pending request. A public account is
 followed immediately. `allowFollowRequests=false` rejects new follows at the
 server even if a client bypasses its disabled button.
+
+Follow mutation responses include `followStatus` (`none`, `pending`, or
+`accepted`), `followRequestPending`, and `canFollow`. `follow-request-updated`
+is emitted to both the requester and target rooms with those state fields.
+On acceptance, the target's linked request notification becomes a follower
+notification without changing its read state. On rejection or retraction it
+is soft-deleted. The target room receives `notification-updated` or
+`notification-deleted` with the stable notification and request IDs.
 
 The `Follow` collection is the only accepted-relationship authority. The
 legacy `User.followers[]` and `User.following[]` arrays are compatibility data

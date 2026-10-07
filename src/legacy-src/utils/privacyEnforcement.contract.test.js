@@ -33,7 +33,7 @@ assert(presencePrivacy.includes("'privacy-settings-updated'"));
 assert(user.includes('invalidateUserCache(req.user._id)'));
 assert(user.includes('FollowRequest.updateMany'));
 assert(user.includes('Follow.deleteMany'));
-assert(user.includes("followStatus: 'pending'"));
+assert(user.includes("followStatus = latestRequest?.status === 'accepted' ? 'accepted' : latestRequest?.status === 'pending' ? 'pending' : 'none'"));
 assert(user.includes('privacyAccess: privacyRelationship.access') || user.includes('...privacyRelationship.access'));
 assert(user.includes('req.body.profileVisibility !== undefined\n        ? { profileVisibility: req.body.profileVisibility }'));
 assert(user.includes('req.body.allowMessageFrom !== undefined\n        ? { allowMessageFrom: req.body.allowMessageFrom }'));
