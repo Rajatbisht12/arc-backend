@@ -2,6 +2,7 @@ const Post = require('../models/Post');
 const mongoose = require('mongoose');
 const { randomUUID } = require('crypto');
 const User = require('../models/User');
+const { usernameOwnerIds } = require('../services/usernameLookupService');
 const Notification = require('../models/Notification');
 const BoostCampaign = require('../models/BoostCampaign');
 const BoostDeliveryAttribution = require('../models/BoostDeliveryAttribution');
@@ -211,8 +212,7 @@ const createPost = async (req, res) => {
         const matches = (text && typeof text === 'string') ? text.match(mentionRegex) : null;
         if (matches) {
           const usernames = matches.map(m => m.substring(1));
-          const users = await User.find({ username: { $in: usernames } }).select('_id');
-          mentionedUserIds = users.map(u => u._id.toString());
+          mentionedUserIds = (await usernameOwnerIds(usernames)).map(String);
         }
       }
     } else {
@@ -221,8 +221,7 @@ const createPost = async (req, res) => {
       const matches = (text && typeof text === 'string') ? text.match(mentionRegex) : null;
       if (matches) {
         const usernames = matches.map(m => m.substring(1));
-        const users = await User.find({ username: { $in: usernames } }).select('_id');
-        mentionedUserIds = users.map(u => u._id.toString());
+        mentionedUserIds = (await usernameOwnerIds(usernames)).map(String);
       }
     }
 

@@ -16,6 +16,7 @@ const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
 const { attachIsSavedFlags } = require('../utils/savedFlags');
 const { getJson, setJson } = require('../utils/redisCache');
 const { profileCacheKey, invalidateProfileCache } = require('../utils/profileCache');
+const { usernameOwnerFilter } = require('../services/usernameLookupService');
 const { publishPrivacySettingsUpdate, evictPresenceAudience, removePresenceSubscription } = require('../utils/presencePrivacy');
 const { invalidateUserCache } = require('../middleware/auth');
 const log = require('../utils/logger');
@@ -69,10 +70,10 @@ const normalizeTournamentHistoryIdentifier = (value) => {
   return /^[a-zA-Z0-9_]{3,20}$/.test(identifier) ? identifier : '';
 };
 
-const findTeamByIdentifier = (identifier) => (
+const findTeamByIdentifier = async (identifier) => (
   mongoose.Types.ObjectId.isValid(identifier)
     ? User.findById(identifier)
-    : User.findOne({ username: identifier })
+    : User.findOne(await usernameOwnerFilter(identifier))
 );
 
 const sendTeamInvitationError = (res, error, fallbackMessage) => {
@@ -310,7 +311,7 @@ const getLiveTournamentHistory = async (req, res) => {
       user = await User.findOne({ _id: identifier, isActive: true })
         .select('_id username userType isActive blockedUsers privacySettings profile');
     } else {
-      user = await User.findOne({ username: identifier, isActive: true })
+      user = await User.findOne(await usernameOwnerFilter(identifier, { isActive: true }))
         .select('_id username userType isActive blockedUsers privacySettings profile');
     }
 
@@ -436,7 +437,7 @@ const getUserTournamentHistory = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ username, userType: 'player', isActive: true })
+    const user = await User.findOne(await usernameOwnerFilter(username, { userType: 'player', isActive: true }))
       .select('_id username userType isActive blockedUsers privacySettings profile playerInfo.tournamentHistory')
       .lean();
     if (!user) {
@@ -550,7 +551,7 @@ const getUser = async (req, res) => {
       user = await User.findById(identifier);
     } else {
       // It's a username
-      user = await User.findOne({ username: identifier });
+      user = await User.findOne(await usernameOwnerFilter(identifier));
     }
 
     if (!user || !user.isActive) {
@@ -927,7 +928,7 @@ const getUser = async (req, res) => {
 const getUserAvailability = async (req, res) => {
   try {
     const exists = await User.exists({
-      username: req.params.identifier,
+      ...(await usernameOwnerFilter(req.params.identifier)),
       isActive: true
     });
 
@@ -949,6 +950,24 @@ const getUserAvailability = async (req, res) => {
       message: 'Failed to verify profile availability',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  }
+};
+
+// Exact mention identity probe for the composer. This avoids taking an
+// arbitrary first prefix-search result and does not load a full profile.
+const getMentionUser = async (req, res) => {
+  try {
+    const user = await User.findOne(await usernameOwnerFilter(req.params.username, {
+      isActive: true,
+      isSuperUser: { $ne: true },
+      moderationStatus: { $nin: ['suspended', 'banned', 'soft_deleted'] }
+    })).select('_id username userType blockedUsers isActive privacySettings').lean();
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    const relationship = await resolvePrivacyAccess({ viewer: req.user, targetUser: user });
+    if (relationship.blocked) return res.status(404).json({ success: false, message: 'User not found' });
+    return res.status(200).json({ success: true, data: { user: { _id: user._id, username: user.username } } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to resolve username' });
   }
 };
 
@@ -1186,7 +1205,7 @@ const getTargetPrivacy = async (req, identifier) => {
   if (!normalizedIdentifier) return null;
   const target = /^[0-9a-fA-F]{24}$/.test(normalizedIdentifier)
     ? await User.findById(normalizedIdentifier).select('username userType profile privacySettings blockedUsers isActive')
-    : await User.findOne({ username: normalizedIdentifier }).select('username userType profile privacySettings blockedUsers isActive');
+    : await User.findOne(await usernameOwnerFilter(normalizedIdentifier)).select('username userType profile privacySettings blockedUsers isActive');
   if (!target || !target.isActive) return null;
   const relationship = await resolvePrivacyAccess({ viewer: req.user, targetUser: target });
   return { target, relationship };
@@ -1388,10 +1407,10 @@ const getUserPosts = async (req, res) => {
       user = await User.findById(identifier);
       // If not found by id, fall back to username (rare edge case: username looks like ObjectId)
       if (!user) {
-        user = await User.findOne({ username: identifier });
+        user = await User.findOne(await usernameOwnerFilter(identifier));
       }
     } else {
-      user = await User.findOne({ username: identifier });
+      user = await User.findOne(await usernameOwnerFilter(identifier));
     }
     
     if (!user || !user.isActive) {
@@ -1480,9 +1499,9 @@ const getUserClips = async (req, res) => {
     let user;
     if (identifier && identifier.match(/^[0-9a-fA-F]{24}$/)) {
       user = await User.findById(identifier);
-      if (!user) user = await User.findOne({ username: identifier });
+      if (!user) user = await User.findOne(await usernameOwnerFilter(identifier));
     } else {
-      user = await User.findOne({ username: identifier });
+      user = await User.findOne(await usernameOwnerFilter(identifier));
     }
 
     if (!user || !user.isActive) {
@@ -1770,7 +1789,7 @@ const addStaffMemberByUsername = async (req, res) => {
     }
 
     // Find member by username
-    const member = await User.findOne({ username, userType: 'player', isActive: true });
+    const member = await User.findOne(await usernameOwnerFilter(username, { userType: 'player', isActive: true }));
     if (!member) {
       return res.status(404).json({
         success: false,
@@ -2310,7 +2329,7 @@ const cancelStaffInviteByUsername = async (req, res) => {
     }
 
     // Find the user by username
-    const user = await User.findOne({ username: username });
+    const user = await User.findOne(await usernameOwnerFilter(username));
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -3952,7 +3971,7 @@ const blockUser = async (req, res) => {
     if (!targetUsername) {
       return res.status(400).json({ success: false, message: 'Username is required' });
     }
-    const targetUser = await User.findOne({ username: targetUsername });
+    const targetUser = await User.findOne(await usernameOwnerFilter(targetUsername));
     if (!targetUser) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -4009,7 +4028,7 @@ const unblockUser = async (req, res) => {
     if (!targetUsername) {
       return res.status(400).json({ success: false, message: 'Username is required' });
     }
-    const targetUser = await User.findOne({ username: targetUsername });
+    const targetUser = await User.findOne(await usernameOwnerFilter(targetUsername));
     if (!targetUser) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -4428,6 +4447,7 @@ module.exports = {
   getUsers,
   getUser,
   getUserAvailability,
+  getMentionUser,
   getAvatar,
   blockUser,
   unblockUser,

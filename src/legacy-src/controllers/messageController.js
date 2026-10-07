@@ -22,6 +22,7 @@ const { revokeChatRoomAccess } = require('../utils/realtimePrivacy');
 const { normalizePagination } = require('../utils/pagination');
 const { invalidateUserCache } = require('../middleware/auth');
 const { invalidateProfileCache } = require('../utils/profileCache');
+const { usernameOwnerFilter } = require('../services/usernameLookupService');
 const {
   isCurrentGroupMember,
   getGroupMembershipWindow,
@@ -176,7 +177,7 @@ const sendDirectMessage = async (req, res) => {
     // Resolve recipient by username (preferred) or by id
     let recipient;
     if (recipientUsername && typeof recipientUsername === 'string' && recipientUsername.trim()) {
-      recipient = await User.findOne({ username: recipientUsername.trim(), isActive: true })
+      recipient = await User.findOne(await usernameOwnerFilter(recipientUsername, { isActive: true }))
         .select('username userType isSystemAccount profile privacySettings blockedUsers isActive');
     } else if (recipientId) {
       const id = typeof recipientId === 'string' ? recipientId.replace(/^direct_/, '').trim() : String(recipientId);
@@ -260,7 +261,7 @@ const sendDirectMessage = async (req, res) => {
     // Handle shared profile (rich preview in DM)
     let sharedProfileObj = null;
     if (sharedProfileUsername) {
-      const profileUser = await User.findOne({ username: sharedProfileUsername, isActive: true })
+      const profileUser = await User.findOne(await usernameOwnerFilter(sharedProfileUsername, { isActive: true }))
         .select('_id username userType profile privacySettings blockedUsers isActive')
         .lean();
       if (!profileUser) {

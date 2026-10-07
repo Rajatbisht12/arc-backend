@@ -84,6 +84,7 @@ const cancelByUsernameValidation = [
 
 router.get("/", optionalAuth, userController.getUsers);
 router.get("/search", optionalAuth, userController.getUsers);
+router.get("/resolve-mention/:username", protect, [param("username").matches(/^[A-Za-z0-9_]{3,20}$/)], handleValidationErrors, userController.getMentionUser);
 router.post("/create-team", protect, userController.createTeam);
 router.get("/avatar/:userId", avatarProxyLimiter, userController.getAvatar);
 router.get("/blocked", protect, userController.getBlockedUsers);

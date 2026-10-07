@@ -29,6 +29,8 @@ const pagination = (req: { query: Record<string, unknown> }) => ({
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const User = require(path.join(backendRootPath, "models", "User.js"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
+const { usernameOwnerFilter } = require(path.join(backendRootPath, "services", "usernameLookupService.js"));
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const PushDevice = require(path.join(backendRootPath, "models", "PushDevice.js"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const PushDeliveryAttempt = require(path.join(backendRootPath, "models", "PushDeliveryAttempt.js"));
@@ -383,10 +385,10 @@ router.post(
   async (req, res) => {
     try {
       const userId = safeString(req.body?.userId, 24);
-      const username = safeString(req.body?.username, 100).toLowerCase();
+      const username = safeString(req.body?.username, 100);
       if (!userId && !username) return res.status(400).json({ success: false, message: "userId or username is required" });
       if (userId && !OBJECT_ID_PATTERN.test(userId)) return res.status(400).json({ success: false, message: "Invalid userId" });
-      const user = await User.findOne(userId ? { _id: userId } : { username }).select("_id username isActive").lean();
+      const user = await User.findOne(userId ? { _id: userId } : await usernameOwnerFilter(username)).select("_id username isActive").lean();
       if (!user || user.isActive === false) return res.status(404).json({ success: false, message: "Active user not found" });
 
       const installationId = safeString(req.body?.installationId, 200);

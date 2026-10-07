@@ -15,9 +15,13 @@ test('resolves names in one user lookup and stores stable user IDs', async () =>
   ];
   const User = { find(query) {
     lookups += 1;
-    return { select() { return { lean: async () => users.filter((user) => query.$or.some(({ username }) => username.test(user.username))) }; } };
+    return { select() { return { lean: async () => users.filter((user) => query._id.$in.includes(user._id)) }; } };
   } };
-  assert.deepEqual(await resolveCommentMentions('@zoro @Zoya @zoro @nobody', User), users);
+  const resolveIds = async (names) => {
+    assert.deepEqual(names, ['zoro', 'Zoya', 'nobody']);
+    return ['user-z', 'user-y'];
+  };
+  assert.deepEqual(await resolveCommentMentions('@zoro @Zoya @zoro @nobody', User, resolveIds), users);
   assert.equal(lookups, 1);
 });
 

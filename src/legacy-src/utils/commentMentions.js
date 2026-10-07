@@ -1,4 +1,5 @@
 const MAX_COMMENT_MENTIONS = 5;
+const { usernameOwnerIds } = require('../services/usernameLookupService');
 
 // The boundary excludes email addresses and usernames embedded in other words.
 const mentionPattern = /(^|[^A-Za-z0-9_.@])@([A-Za-z0-9_]{3,20})(?![A-Za-z0-9_])/g;
@@ -12,7 +13,7 @@ const extractCommentUsernames = (text) => {
   return [...names.values()];
 };
 
-const resolveCommentMentions = async (text, User) => {
+const resolveCommentMentions = async (text, User, resolveIds = usernameOwnerIds) => {
   const usernames = extractCommentUsernames(text);
   if (usernames.length > MAX_COMMENT_MENTIONS) {
     const error = new Error(`A comment can mention at most ${MAX_COMMENT_MENTIONS} people`);
@@ -20,11 +21,12 @@ const resolveCommentMentions = async (text, User) => {
     throw error;
   }
   if (!usernames.length) return [];
+  const ownerIds = await resolveIds(usernames);
   const users = await User.find({
+    _id: { $in: ownerIds },
     isActive: true,
     moderationStatus: { $nin: ['suspended', 'banned', 'soft_deleted'] },
     isSuperUser: { $ne: true },
-    $or: usernames.map((username) => ({ username: new RegExp(`^${username}$`, 'i') })),
   }).select('_id username blockedUsers privacySettings userType isActive').lean();
   const byName = new Map(users.map((user) => [user.username.toLowerCase(), user]));
   return usernames.map((username) => byName.get(username.toLowerCase())).filter(Boolean);

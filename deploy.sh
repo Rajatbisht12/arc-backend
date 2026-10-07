@@ -435,6 +435,14 @@ else
   run_preflight verify
 fi
 
+# Mixed-case profile resolution uses the normalized username registry. Audit,
+# backfill, and verify every existing player/team claim before new code serves
+# requests; the migration aborts on a normalization collision without touching
+# either conflicting account.
+echo "==> Verifying username registry before the new revision receives traffic..."
+run_preflight username-apply
+run_preflight username-verify
+
 # 7. Deploy
 echo "==> Updating ECS service..."
 aws ecs update-service \

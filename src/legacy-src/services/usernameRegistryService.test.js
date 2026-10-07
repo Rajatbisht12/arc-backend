@@ -5,6 +5,9 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const User = require('../models/User');
 const UsernameRegistry = require('../models/UsernameRegistry');
 const { checkUsername } = require('./usernameRegistryService');
+const { usernameOwnerId, usernameOwnerFilter, usernameOwnerIds } = require('./usernameLookupService');
+const { profileCacheKey } = require('../utils/profileCache');
+const { getUser, getUserAvailability, getMentionUser } = require('../controllers/userController');
 const reservations = require('../controllers/usernameReservationController');
 const { checkUsernameAvailability } = require('../controllers/authController');
 const { requireAdminPermission } = require('../middleware/adminAuth');
@@ -60,16 +63,54 @@ test('reservation blocks case variants for players, teams, OAuth-style save, and
 });
 
 test('existing accounts cannot be stolen and protected system username stays reserved', async () => {
-  const user = await User.create(userData('zoro'));
+  const user = await User.create(userData('zoro_claim'));
   const res = response();
-  await reservations.reserve({ body: { username: 'ZORO' }, user: { username: 'admin' } }, res);
+  await reservations.reserve({ body: { username: 'ZORO_CLAIM' }, user: { username: 'admin' } }, res);
   assert.equal(res.statusCode, 409);
   assert.equal(res.body.code, 'USERNAME_IN_USE');
-  assert.equal((await User.findById(user._id).lean()).username, 'zoro');
+  assert.equal((await User.findById(user._id).lean()).username, 'zoro_claim');
   assert.equal((await checkUsername('SquadHunt')).code, 'USERNAME_RESERVED');
   await assert.rejects(User.create(userData('squadhunt')), /reserved system username/);
-  await assert.rejects(User.create(userData('ZORO')), { code: 'USERNAME_TAKEN' });
+  await assert.rejects(User.create(userData('ZORO_CLAIM')), { code: 'USERNAME_TAKEN' });
   await assert.rejects(User.updateOne({ _id: user._id }, { $set: { username: 'unprotected' } }), /protected username update path/);
+});
+
+test('username resolution, availability and cache keys share the case-insensitive namespace', async () => {
+  const player = await User.create(userData('zoro'));
+  const team = await User.create(userData('TeamAlpha', 'team'));
+  const viewer = await User.create(userData('mention_viewer'));
+  for (const variant of ['zoro', 'Zoro', 'ZoRo', 'ZORO', 'zOrO']) {
+    assert.equal(String(await usernameOwnerId(variant)), String(player._id));
+    assert.equal(String((await User.findOne(await usernameOwnerFilter(variant)))._id), String(player._id));
+    const availability = response();
+    await getUserAvailability({ params: { identifier: variant } }, availability);
+    assert.equal(availability.statusCode, 200);
+    const profile = response();
+    await getUser({ params: { identifier: variant } }, profile);
+    assert.equal(profile.statusCode, 200);
+    assert.equal(String(profile.body.data.user._id), String(player._id));
+    const mention = response();
+    await getMentionUser({ params: { username: variant }, user: viewer }, mention);
+    assert.equal(mention.statusCode, 200);
+    assert.equal(String(mention.body.data.user._id), String(player._id));
+    assert.equal(profileCacheKey(variant), 'profile:zoro');
+    assert.equal((await checkUsername(variant)).available, false);
+  }
+  for (const variant of ['TeamAlpha', 'teamalpha', 'TEAMALPHA', 'tEaMaLpHa']) {
+    assert.equal(String(await usernameOwnerId(variant)), String(team._id));
+    const profile = response();
+    await getUser({ params: { identifier: variant } }, profile);
+    assert.equal(profile.statusCode, 200);
+    assert.equal(String(profile.body.data.user._id), String(team._id));
+  }
+  assert.deepEqual(new Set(await usernameOwnerIds(['@invalid', 'ZoRo', 'TEAMALPHA'])),
+    new Set([String(player._id), String(team._id)]));
+  const missing = response();
+  await getUserAvailability({ params: { identifier: 'this_user_does_not_ex' } }, missing);
+  assert.equal(missing.statusCode, 404);
+  const missingProfile = response();
+  await getUser({ params: { identifier: 'this_user_does_not_ex' } }, missingProfile);
+  assert.equal(missingProfile.statusCode, 404);
 });
 
 test('a rename and reservation compete for one normalized key', async () => {

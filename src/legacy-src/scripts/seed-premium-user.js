@@ -13,6 +13,7 @@
 
 const mongoose = require('mongoose');
 const User = require('../models/User');
+const { usernameOwnerFilter } = require('../services/usernameLookupService');
 const premiumMembershipService = require('../services/premiumMembershipService');
 require('dotenv').config();
 
@@ -52,7 +53,7 @@ const seedPremiumUser = async () => {
   );
   console.log('Connected to database');
 
-  const user = await User.findOne({ username: username.trim() });
+  const user = await User.findOne(await usernameOwnerFilter(username));
   if (!user) {
     console.error(`User "${username}" not found.`);
     await mongoose.disconnect();

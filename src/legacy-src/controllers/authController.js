@@ -21,6 +21,7 @@ const { FINANCIAL_TRANSACTION_OPTIONS, startFinancialSession } = require('../uti
 const { TEAM_TYPES, normalizeTeamType } = require('../utils/teamType');
 const { normalizeProfileSocialLinksUpdate } = require('../utils/profileSocialLinks');
 const { normalizeUsernameInput, validateUsernameFormat, isCoreReservedUsername, escapeUsernameRegex } = require('../utils/usernamePolicy');
+const { usernameOwnerFilter } = require('../services/usernameLookupService');
 
 const INVALID_LOGIN_MESSAGE = 'Invalid email or password.';
 
@@ -509,7 +510,7 @@ const login = async (req, res) => {
     }
 
     // Find user by email or username and include password for comparison
-    const query = email ? { email } : { username };
+    const query = email ? { email } : await usernameOwnerFilter(username);
     const user = await User.findOne(query).select('+password');
 
     if (!user || user.isSystemAccount || user.userType === 'system') {

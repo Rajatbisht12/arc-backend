@@ -1,5 +1,6 @@
 const Tournament = require('../models/Tournament');
 const User = require('../models/User');
+const { usernameOwnerFilter } = require('../services/usernameLookupService');
 const TournamentHostActiveLock = require('../models/TournamentHostActiveLock');
 const { createAndEmitNotification } = require('../utils/notificationEmitter');
 const { enqueueBulkNotifications } = require('../utils/jobQueue');
@@ -2200,7 +2201,7 @@ const getTournamentByName = async (req, res) => {
 
     // Express already decodes route parameters. Decoding again corrupts valid
     // percent characters and can throw URIError for otherwise valid names.
-    const host = await User.findOne({ username: hostUsername, isActive: true })
+    const host = await User.findOne(await usernameOwnerFilter(hostUsername, { isActive: true }))
       .select('_id')
       .lean();
     if (!host) {
