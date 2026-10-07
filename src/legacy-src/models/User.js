@@ -917,6 +917,25 @@ for (const operation of ['updateOne', 'updateMany', 'replaceOne', 'findOneAndRep
   });
 }
 
+// Hard deletion releases only this user's namespace claim. Owner-initiated
+// account closure is a soft delete and intentionally keeps its username.
+userSchema.pre('deleteOne', { query: true, document: false }, async function(next) {
+  try {
+    const query = this.model.findOne(this.getQuery()).select('_id username');
+    const session = this.getOptions().session;
+    if (session) query.session(session);
+    this._deletedUsernameOwner = await query.lean();
+    next();
+  } catch (error) { next(error); }
+});
+userSchema.post('deleteOne', { query: true, document: false }, async function(result) {
+  if (result?.deletedCount !== 1 || !this._deletedUsernameOwner) return;
+  const { releaseUserClaim } = require('../services/usernameRegistryService');
+  await releaseUserClaim(this._deletedUsernameOwner.username, this._deletedUsernameOwner._id, {
+    session: this.getOptions().session
+  });
+});
+
 // Hash password before saving
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();

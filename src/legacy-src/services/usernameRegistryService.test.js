@@ -24,7 +24,7 @@ const userData = (username, userType = 'player') => ({
   password: 'password123', userType, profile: { displayName: username }
 });
 const response = () => ({
-  statusCode: 200, body: null,
+  statusCode: 200, body: null, locals: {},
   status(code) { this.statusCode = code; return this; },
   json(body) { this.body = body; return this; }
 });
@@ -108,4 +108,43 @@ test('a failed user insert does not strand its username claim', async () => {
   second.email = first.email;
   await assert.rejects(User.create(second), { code: 11000 });
   assert.equal(await UsernameRegistry.countDocuments({ normalizedUsername: 'failed_claim' }), 0);
+});
+
+test('hard deletion releases a user claim; soft deletion keeps it', async () => {
+  const hardDeleted = await User.create(userData('hard_deleted_name'));
+  assert.equal(await UsernameRegistry.countDocuments({ normalizedUsername: 'hard_deleted_name', kind: 'user' }), 1);
+  await User.deleteOne({ _id: hardDeleted._id });
+  assert.equal(await UsernameRegistry.countDocuments({ normalizedUsername: 'hard_deleted_name' }), 0);
+  const reserveAfterHardDelete = response();
+  await reservations.reserve({ body: { username: 'hard_deleted_name' }, user: { username: 'admin' } }, reserveAfterHardDelete);
+  assert.equal(reserveAfterHardDelete.statusCode, 201);
+
+  const softDeleted = await User.create(userData('soft_deleted_name'));
+  await User.updateOne({ _id: softDeleted._id }, { $set: { isActive: false, deletedAt: new Date() } });
+  const reserveAfterSoftDelete = response();
+  await reservations.reserve({ body: { username: 'soft_deleted_name' }, user: { username: 'admin' } }, reserveAfterSoftDelete);
+  assert.equal(reserveAfterSoftDelete.statusCode, 409);
+  assert.equal(reserveAfterSoftDelete.body.code, 'USERNAME_IN_USE');
+});
+
+test('admin reservation safely recovers an old orphan claim from legacy hard deletion', async () => {
+  const oldUser = await User.create(userData('legacy_deleted_name'));
+  // Simulate the old admin controller, which deleted User without its claim.
+  await User.collection.deleteOne({ _id: oldUser._id });
+  await UsernameRegistry.collection.updateOne(
+    { normalizedUsername: 'legacy_deleted_name' },
+    { $set: { createdAt: new Date(Date.now() - 120_000) } }
+  );
+  const res = response();
+  await reservations.reserve({ body: { username: 'legacy_deleted_name' }, user: { username: 'admin' } }, res);
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.recoveredOrphanClaim, true);
+  assert.equal((await UsernameRegistry.findOne({ normalizedUsername: 'legacy_deleted_name' }).lean()).kind, 'reservation');
+
+  const recentUser = await User.create(userData('recent_deleted_name'));
+  await User.collection.deleteOne({ _id: recentUser._id });
+  const recent = response();
+  await reservations.reserve({ body: { username: 'recent_deleted_name' }, user: { username: 'admin' } }, recent);
+  assert.equal(recent.statusCode, 409);
+  assert.equal(recent.body.code, 'USERNAME_CLAIM_PENDING');
 });
