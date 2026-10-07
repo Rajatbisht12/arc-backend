@@ -28,11 +28,16 @@ test('batch response reconciles unread count and syncs badge only after a real u
   assert.match(batch, /updatedCount: modifiedCount, unreadCount/);
 });
 
-test('only temporary incoming calls are soft-deleted as they become read', () => {
-  assert.match(batch, /temporaryCallNotificationFilter/);
-  assert.match(batch, /\$set: \{ isRead: true, readAt, deletedAt: readAt \}/);
-  assert.match(batch, /\$nor: \[temporaryCallNotificationFilter\]/);
+test('read keeps call rows until recipient-scoped screen-exit cleanup', () => {
+  const clear = source.slice(source.indexOf('router.post("/clear-read-calls"'), source.indexOf('router.post("/mark-read"'));
   assert.match(batch, /\$set: \{ isRead: true, readAt \}/);
+  assert.doesNotMatch(batch, /\$set: \{ isRead: true, readAt, deletedAt/);
+  assert.match(clear, /router\.post\("\/clear-read-calls", protect/);
+  assert.match(clear, /recipient: userId/);
+  assert.match(clear, /isRead: true/);
+  assert.match(clear, /temporaryCallNotificationFilter/);
+  assert.match(clear, /\$set: \{ deletedAt: new Date\(\) \}/);
+  assert.match(clear, /countVisibleUnreadNotifications\(userId, platform, appVersion\)/);
   assert.match(source, /const markTrackedNotificationRead = async/);
   assert.match(source, /await markTrackedNotificationRead\(owned\.notification, userId\)/);
 });

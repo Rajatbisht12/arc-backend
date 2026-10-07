@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 import { Notification, User, protect } from "./notifications.legacy-adapters";
 import { backendRootPath } from "../legacy/legacy.paths";
 import { logger } from "../../config/logger";
-import { isTemporaryCallNotification, temporaryCallNotificationFilter } from "./temporaryCallNotifications";
+import { temporaryCallNotificationFilter } from "./temporaryCallNotifications";
 
 const router = Router();
 
@@ -754,10 +754,9 @@ const resolveOwnedBroadcastDelivery = async (notificationId: string, userId: str
 
 const markTrackedNotificationRead = async (notification: { _id: unknown; type?: unknown; data?: unknown }, userId: string) => {
   const readAt = new Date();
-  const temporaryCall = isTemporaryCallNotification(notification as Parameters<typeof isTemporaryCallNotification>[0]);
   const result = await Notification.updateMany(
-    { _id: notification._id, recipient: userId, deletedAt: null, ...(temporaryCall ? {} : { isRead: false }) },
-    { $set: temporaryCall ? { isRead: true, readAt, deletedAt: readAt } : { isRead: true, readAt } }
+    { _id: notification._id, recipient: userId, deletedAt: null, isRead: false },
+    { $set: { isRead: true, readAt } }
   );
   if (Number((result as { modifiedCount?: number }).modifiedCount || 0) > 0) {
     scheduleUnreadBadgeSync(userId, "notification_opened");
@@ -968,9 +967,7 @@ router.get("/", protect, async (req, res) => {
       archivedAt: archived ? { $ne: null } : null,
       // Exclude message-received notifications from the Notifications history —
       // paginating AFTER this exclusion keeps page counts / hasMore correct.
-      type: { $nin: NOTIFICATION_LIST_EXCLUDED_TYPES },
-      // Hide historical incoming-call rows already marked read by older builds.
-      $nor: [{ ...temporaryCallNotificationFilter, isRead: true }]
+      type: { $nin: NOTIFICATION_LIST_EXCLUDED_TYPES }
     }, platform, appVersion);
     let filter: Record<string, unknown> = baseFilter;
     if (isRead !== undefined) {
@@ -1040,6 +1037,43 @@ router.get("/", protect, async (req, res) => {
   }
 });
 
+// Read incoming-call invitations remain visible for the duration of a visit to
+// Notifications. The App invokes this on screen exit, after its qualified
+// viewport reads have settled. Unseen/unread calls and ordinary rows are kept.
+router.post("/clear-read-calls", protect, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
+    if (safeString(req.body?.ownerUserId, 80) !== String(userId)) {
+      return res.status(409).json({ success: false, message: "Notification session changed" });
+    }
+    const platform = safeString(req.body?.platform ?? req.query.platform, 40).toLowerCase();
+    if (platform && !VALID_PLATFORMS.has(platform)) {
+      return res.status(400).json({ success: false, message: "platform filter is invalid" });
+    }
+    const appVersion = safeString(req.body?.appVersion ?? req.query.appVersion, 40);
+    const result = await Notification.updateMany(
+      withClientVisibility({
+        recipient: userId,
+        isRead: true,
+        deletedAt: null,
+        archivedAt: null,
+        ...temporaryCallNotificationFilter
+      }, platform, appVersion),
+      { $set: { deletedAt: new Date() } }
+    );
+    return res.status(200).json({
+      success: true,
+      data: {
+        deletedCount: Number((result as { modifiedCount?: number }).modifiedCount || 0),
+        unreadCount: await countVisibleUnreadNotifications(userId, platform, appVersion)
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Failed to clear read call notifications" });
+  }
+});
+
 // A viewport may expose several rows at once. Update only the authenticated
 // recipient's visible, non-message notifications in one idempotent write.
 router.post("/mark-read", protect, async (req, res) => {
@@ -1066,18 +1100,11 @@ router.post("/mark-read", protect, async (req, res) => {
         type: { $nin: NOTIFICATION_LIST_EXCLUDED_TYPES }
       }, platform, appVersion);
     const readAt = new Date();
-    // Soft-delete only call invitations in the same read transition. The
-    // authenticated recipient restriction applies to both bounded writes.
-    const callResult = await Notification.updateMany(
-      { ...baseReadFilter, ...temporaryCallNotificationFilter },
-      { $set: { isRead: true, readAt, deletedAt: readAt } }
-    );
     const result = await Notification.updateMany(
-      { ...baseReadFilter, $nor: [temporaryCallNotificationFilter] },
+      baseReadFilter,
       { $set: { isRead: true, readAt } }
     );
-    const modifiedCount = Number((callResult as { modifiedCount?: number }).modifiedCount || 0)
-      + Number((result as { modifiedCount?: number }).modifiedCount || 0);
+    const modifiedCount = Number((result as { modifiedCount?: number }).modifiedCount || 0);
     const unreadCount = await countVisibleUnreadNotifications(userId, platform, appVersion);
     if (modifiedCount > 0) scheduleUnreadBadgeSync(userId, "notifications_viewed");
     return res.status(200).json({
@@ -1104,16 +1131,7 @@ router.put("/:id/read", protect, async (req, res) => {
       return res.status(404).json({ success: false, message: "Notification not found" });
     }
     const alreadyRead = notification.isRead === true;
-    if (!alreadyRead) {
-      if (isTemporaryCallNotification(notification)) {
-        notification.isRead = true;
-        notification.readAt = new Date();
-        notification.deletedAt = notification.readAt;
-        await notification.save();
-      } else {
-        await notification.markAsRead();
-      }
-    }
+    if (!alreadyRead) await notification.markAsRead();
     const unreadCount = await countVisibleUnreadNotifications(userId, platform, appVersion);
     scheduleUnreadBadgeSync(userId, "notification_read");
     return res.status(200).json({
@@ -1140,11 +1158,7 @@ router.put("/read-all", protect, async (req, res) => {
       { recipient: userId, isRead: false, deletedAt: null, archivedAt: null }, platform, appVersion
     );
     await Notification.updateMany(
-      { ...baseReadFilter, ...temporaryCallNotificationFilter },
-      { $set: { isRead: true, readAt, deletedAt: readAt } }
-    );
-    await Notification.updateMany(
-      { ...baseReadFilter, $nor: [temporaryCallNotificationFilter] },
+      baseReadFilter,
       { $set: { isRead: true, readAt } }
     );
     scheduleUnreadBadgeSync(userId, "notifications_read_all");
