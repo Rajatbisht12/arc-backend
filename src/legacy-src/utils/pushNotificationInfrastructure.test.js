@@ -95,6 +95,32 @@ const callNotification = {
   }
 };
 const [callMessage] = buildExpoMessages(['ExpoPushToken[test-token]'], callNotification, 1);
+assert.equal(callMessage.data.eventType, 'incoming_call');
+assert.equal(callMessage.data.callId, '507f1f77bcf86cd799439014');
+assert.equal(callMessage.data.callType, 'video');
+const groupCallNotification = {
+  ...callNotification,
+  data: {
+    deepLink: '/conversation/507f191e810c19729de860ea?name=Arc%20Friends',
+    customData: {
+      eventType: 'incoming_group_call',
+      callId: 'group-call-1',
+      callType: 'voice',
+      callerId: '507f1f77bcf86cd799439015',
+      callerName: 'Test Caller',
+      chatId: '507f191e810c19729de860ea',
+      groupName: 'Arc Friends',
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      pushOptions: { ttl: 30, priority: 'high' }
+    }
+  }
+};
+const [groupCallMessage] = buildExpoMessages([{ token: 'ExpoPushToken[group-test]', platform: 'android' }], groupCallNotification, 1);
+assert.equal(groupCallMessage.title, groupCallNotification.title);
+assert.equal(groupCallMessage.data.eventType, 'incoming_group_call');
+assert.equal(groupCallMessage.data.callId, 'group-call-1');
+assert.equal(groupCallMessage.data.chatId, '507f191e810c19729de860ea');
+assert.ok(groupCallMessage.ttl <= 30);
 assert.equal(callMessage.categoryId, 'incoming_call');
 assert.equal(callMessage.channelId, 'calls');
 assert.equal(callMessage.ttl, 30);

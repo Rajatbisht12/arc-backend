@@ -330,6 +330,83 @@ const dispatchIncomingCallNotification = async ({
   });
 };
 
+export const buildIncomingGroupCallNotification = ({
+  callId,
+  callType,
+  callerId,
+  callerName,
+  chatRoomId,
+  groupName,
+  now = new Date()
+}: {
+  callId: string;
+  callType: "voice" | "video";
+  callerId: string;
+  callerName: string;
+  chatRoomId: string;
+  groupName: string;
+  now?: Date;
+}) => {
+  const safeGroupName = groupName || "Group";
+  const deepLink = `/conversation/${chatRoomId}?name=${encodeURIComponent(safeGroupName)}`;
+  return {
+    type: "call" as const,
+    title: `Incoming group ${callType} call`,
+    message: `${callerName || "Someone"} started a ${callType} call in ${safeGroupName}`,
+    data: {
+      deepLink,
+      targetPlatforms: ["android", "ios"],
+      customData: {
+        eventType: "incoming_group_call",
+        callId,
+        callType,
+        callerId,
+        callerName,
+        chatRoomId,
+        chatId: chatRoomId,
+        groupName: safeGroupName,
+        notificationDedupeKey: `incoming-group-call:${callId}`,
+        pushRequestId: `incoming-group-call:${callId}`,
+        pushTargetPlatforms: ["android", "ios"],
+        expiresAt: new Date(now.getTime() + GROUP_CALL_RING_TIMEOUT_MS).toISOString(),
+        pushOptions: {
+          ttl: Math.ceil(GROUP_CALL_RING_TIMEOUT_MS / 1000),
+          priority: "high",
+          collapseKey: `group-call-${callId}`
+        }
+      }
+    }
+  };
+};
+
+const dispatchIncomingGroupCallNotifications = async (
+  recipientIds: string[],
+  notification: ReturnType<typeof buildIncomingGroupCallNotification>,
+  callId: string,
+  callerId: string
+) => {
+  const emitter = safeRequire<{ createAndEmitNotification?: (payload: Record<string, unknown>) => Promise<unknown> }>(
+    path.join(backendRootPath, "utils", "notificationEmitter.js")
+  );
+  if (!emitter?.createAndEmitNotification) {
+    logger.error("Group call notification emitter unavailable", { callId });
+    return;
+  }
+  // Bounded fan-out keeps a large group from spawning unbounded provider work.
+  for (let offset = 0; offset < recipientIds.length; offset += 10) {
+    const results = await Promise.allSettled(recipientIds.slice(offset, offset + 10).map(recipient =>
+      emitter.createAndEmitNotification!({ recipient, sender: callerId, ...notification })
+    ));
+    results.forEach((result, index) => {
+      if (result.status === "rejected") logger.error("Group call notification failed", {
+        callId,
+        recipientId: recipientIds[offset + index],
+        error: String(result.reason)
+      });
+    });
+  }
+};
+
 const getRandomConnectionModel = (): RandomConnectionModel | null =>
   safeRequire<RandomConnectionModel>(path.join(backendModelPath, "RandomConnection.js"));
 
@@ -395,11 +472,14 @@ const getGroupCallRoomInfo = async (
 ): Promise<{ name: string; memberIds: string[] }> => {
   const messageModels = safeRequire<any>(path.join(backendModelPath, "Message.js"));
   const room = messageModels?.ChatRoom
-    ? await messageModels.ChatRoom.findById(chatRoomId).select("name members.user").lean()
+    ? await messageModels.ChatRoom.findById(chatRoomId).select("name creator members.user").lean()
     : null;
   return {
     name: room?.name || "Group",
-    memberIds: ((room?.members || []) as any[]).map((m) => String(m.user)),
+    memberIds: [...new Set([
+      ...(room?.creator ? [String(room.creator)] : []),
+      ...((room?.members || []) as any[]).map((m) => String(m.user))
+    ])],
   };
 };
 
@@ -1162,9 +1242,23 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       fromUsername: initiator?.displayName || initiator?.username || "Someone",
       groupName: roomInfo.name,
     };
-    roomInfo.memberIds
-      .filter((id) => id !== userIdStr)
-      .forEach((id) => io.to(`user-${id}`).emit("group-call-incoming", incomingPayload));
+    const recipients = roomInfo.memberIds.filter((id) => id !== userIdStr);
+    recipients.forEach((id) => io.to(`user-${id}`).emit("group-call-incoming", incomingPayload));
+    if (recipients.length) {
+      void dispatchIncomingGroupCallNotifications(
+        recipients,
+        buildIncomingGroupCallNotification({
+          callId,
+          callType: data.callType,
+          callerId: userIdStr,
+          callerName: initiator?.displayName || initiator?.username || "Someone",
+          chatRoomId,
+          groupName: roomInfo.name
+        }),
+        callId,
+        userIdStr
+      );
+    }
 
     // Remember who was rung so the terminal event can reach exactly them, and
     // arm a server-side timeout so a caller who loses the network (rather than
