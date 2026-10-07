@@ -1,6 +1,7 @@
 const { del } = require('./redisCache');
+const { canonicalUsername } = require('./usernamePolicy');
 
-const profileCacheKey = (identifier) => `profile:${identifier}`;
+const profileCacheKey = (identifier) => `profile:${canonicalUsername(identifier)}`;
 
 const invalidateProfileCache = async (...identifiers) => {
   const uniqueIdentifiers = [...new Set(

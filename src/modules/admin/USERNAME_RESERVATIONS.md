@@ -4,6 +4,8 @@ The Admin Panel manages reservations at `/reserved-usernames` (or `/admin/reserv
 
 `UsernameRegistry` is a single normalized namespace for both live user claims and admin reservations. Its unique `normalizedUsername` index prevents a reservation from racing successfully with a new signup or rename. The canonical key uses the existing username rule: whitespace stripped, ASCII letters/digits/underscores only, 3–20 characters, then lowercase. An already-used name is rejected without changing the account.
 
+Profile, mention, and other username-to-user lookups resolve that same indexed key to a User ID, so URL casing does not affect identity. `deploy.sh` now applies and verifies the registry migration before switching the service to a release that depends on it; collisions fail the deployment for manual resolution, and no account is renamed.
+
 Production disables automatic index creation. `deploy.sh` invokes the read-only registry audit before the mutating preflight, creates/verifies the index and backfills existing user claims before the new service receives traffic, then reconciles again after the rolling deployment. A case-insensitive collision between existing accounts or a conflicting registry row fails the audit for manual review. Do not bypass it or remove an account automatically.
 
 For manual local environments with `MONGODB_URI` configured:
