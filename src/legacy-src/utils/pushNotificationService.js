@@ -778,15 +778,17 @@ const buildExpoMessages = (tokens, notification, unreadCount = 0) => {
   const isBadgeSync = callEventType === 'badge_sync';
   const isIncomingCall = callEventType === 'incoming_call' ||
     (notification?.type === 'call' && !callEventType);
+  const isGroupCallInvitation = callEventType === 'incoming_group_call';
+  const isEphemeralCallInvitation = isIncomingCall || isGroupCallInvitation;
   const isCallStateUpdate = callEventType === 'call_state_update';
   const configuredTtl = Number.isFinite(Number(pushOptions.ttl))
     ? Math.max(0, Math.min(2419200, Number(pushOptions.ttl)))
-    : (isIncomingCall ? 30 : 2419200);
-  const callDeadline = isIncomingCall ? getIncomingCallDeadline(notification) : null;
+    : (isEphemeralCallInvitation ? 30 : 2419200);
+  const callDeadline = isEphemeralCallInvitation ? getIncomingCallDeadline(notification) : null;
   const remainingCallTtl = callDeadline
     ? Math.max(0, Math.floor((callDeadline.getTime() - Date.now()) / 1000))
     : configuredTtl;
-  const ttl = isIncomingCall ? Math.min(configuredTtl, remainingCallTtl) : configuredTtl;
+  const ttl = isEphemeralCallInvitation ? Math.min(configuredTtl, remainingCallTtl) : configuredTtl;
   const priority = ['default', 'normal', 'high'].includes(pushOptions.priority)
     ? pushOptions.priority
     : (notification?.data?.customData?.priority === 'normal' ? 'normal' : 'high');

@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { Notification, User, protect } from "./notifications.legacy-adapters";
 import { backendRootPath } from "../legacy/legacy.paths";
 import { logger } from "../../config/logger";
+import { isTemporaryCallNotification, temporaryCallNotificationFilter } from "./temporaryCallNotifications";
 
 const router = Router();
 
@@ -751,6 +752,18 @@ const resolveOwnedBroadcastDelivery = async (notificationId: string, userId: str
   };
 };
 
+const markTrackedNotificationRead = async (notification: { _id: unknown; type?: unknown; data?: unknown }, userId: string) => {
+  const readAt = new Date();
+  const temporaryCall = isTemporaryCallNotification(notification as Parameters<typeof isTemporaryCallNotification>[0]);
+  const result = await Notification.updateMany(
+    { _id: notification._id, recipient: userId, deletedAt: null, ...(temporaryCall ? {} : { isRead: false }) },
+    { $set: temporaryCall ? { isRead: true, readAt, deletedAt: readAt } : { isRead: true, readAt } }
+  );
+  if (Number((result as { modifiedCount?: number }).modifiedCount || 0) > 0) {
+    scheduleUnreadBadgeSync(userId, "notification_opened");
+  }
+};
+
 const advanceGenericPushDelivery = async (
   notificationId: string,
   userId: string,
@@ -860,10 +873,7 @@ router.post("/:id/open", protect, async (req, res) => {
     const owned = await resolveOwnedBroadcastDelivery(req.params.id, userId);
     if (!owned) return res.status(404).json({ success: false, message: "Notification not found" });
     if (owned.persistentNotification) {
-      await Notification.updateMany(
-        { _id: owned.notification._id, recipient: userId, isRead: false },
-        { $set: { isRead: true, readAt: new Date() } }
-      );
+      await markTrackedNotificationRead(owned.notification, userId);
     }
     const [genericPush, broadcast] = await Promise.all([
       advanceGenericPushDelivery(
@@ -897,10 +907,7 @@ router.post("/:id/click", protect, async (req, res) => {
     if (!owned) return res.status(404).json({ success: false, message: "Notification not found" });
     // A click implies an open. Both operations are idempotent at the recipient-log layer.
     if (owned.persistentNotification) {
-      await Notification.updateMany(
-        { _id: owned.notification._id, recipient: userId, isRead: false },
-        { $set: { isRead: true, readAt: new Date() } }
-      );
+      await markTrackedNotificationRead(owned.notification, userId);
     }
     const [genericPush, , broadcast] = await Promise.all([
       advanceGenericPushDelivery(
@@ -961,7 +968,9 @@ router.get("/", protect, async (req, res) => {
       archivedAt: archived ? { $ne: null } : null,
       // Exclude message-received notifications from the Notifications history —
       // paginating AFTER this exclusion keeps page counts / hasMore correct.
-      type: { $nin: NOTIFICATION_LIST_EXCLUDED_TYPES }
+      type: { $nin: NOTIFICATION_LIST_EXCLUDED_TYPES },
+      // Hide historical incoming-call rows already marked read by older builds.
+      $nor: [{ ...temporaryCallNotificationFilter, isRead: true }]
     }, platform, appVersion);
     let filter: Record<string, unknown> = baseFilter;
     if (isRead !== undefined) {
@@ -1048,18 +1057,27 @@ router.post("/mark-read", protect, async (req, res) => {
       return res.status(400).json({ success: false, message: "platform filter is invalid" });
     }
     const appVersion = safeString(req.body?.appVersion ?? req.query.appVersion, 40);
-    const result = await Notification.updateMany(
-      withClientVisibility({
+    const baseReadFilter = withClientVisibility({
         _id: { $in: notificationIds },
         recipient: userId,
         isRead: false,
         deletedAt: null,
         archivedAt: null,
         type: { $nin: NOTIFICATION_LIST_EXCLUDED_TYPES }
-      }, platform, appVersion),
-      { $set: { isRead: true, readAt: new Date() } }
+      }, platform, appVersion);
+    const readAt = new Date();
+    // Soft-delete only call invitations in the same read transition. The
+    // authenticated recipient restriction applies to both bounded writes.
+    const callResult = await Notification.updateMany(
+      { ...baseReadFilter, ...temporaryCallNotificationFilter },
+      { $set: { isRead: true, readAt, deletedAt: readAt } }
     );
-    const modifiedCount = Number((result as { modifiedCount?: number }).modifiedCount || 0);
+    const result = await Notification.updateMany(
+      { ...baseReadFilter, $nor: [temporaryCallNotificationFilter] },
+      { $set: { isRead: true, readAt } }
+    );
+    const modifiedCount = Number((callResult as { modifiedCount?: number }).modifiedCount || 0)
+      + Number((result as { modifiedCount?: number }).modifiedCount || 0);
     const unreadCount = await countVisibleUnreadNotifications(userId, platform, appVersion);
     if (modifiedCount > 0) scheduleUnreadBadgeSync(userId, "notifications_viewed");
     return res.status(200).json({
@@ -1086,7 +1104,16 @@ router.put("/:id/read", protect, async (req, res) => {
       return res.status(404).json({ success: false, message: "Notification not found" });
     }
     const alreadyRead = notification.isRead === true;
-    if (!alreadyRead) await notification.markAsRead();
+    if (!alreadyRead) {
+      if (isTemporaryCallNotification(notification)) {
+        notification.isRead = true;
+        notification.readAt = new Date();
+        notification.deletedAt = notification.readAt;
+        await notification.save();
+      } else {
+        await notification.markAsRead();
+      }
+    }
     const unreadCount = await countVisibleUnreadNotifications(userId, platform, appVersion);
     scheduleUnreadBadgeSync(userId, "notification_read");
     return res.status(200).json({
@@ -1108,9 +1135,17 @@ router.put("/read-all", protect, async (req, res) => {
     if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
     const platform = safeString(req.body?.platform ?? req.query.platform, 40).toLowerCase();
     const appVersion = safeString(req.body?.appVersion ?? req.query.appVersion, 40);
+    const readAt = new Date();
+    const baseReadFilter = withClientVisibility(
+      { recipient: userId, isRead: false, deletedAt: null, archivedAt: null }, platform, appVersion
+    );
     await Notification.updateMany(
-      withClientVisibility({ recipient: userId, isRead: false, deletedAt: null, archivedAt: null }, platform, appVersion),
-      { isRead: true, readAt: new Date() }
+      { ...baseReadFilter, ...temporaryCallNotificationFilter },
+      { $set: { isRead: true, readAt, deletedAt: readAt } }
+    );
+    await Notification.updateMany(
+      { ...baseReadFilter, $nor: [temporaryCallNotificationFilter] },
+      { $set: { isRead: true, readAt } }
     );
     scheduleUnreadBadgeSync(userId, "notifications_read_all");
     return res.status(200).json({

@@ -27,3 +27,12 @@ test('batch response reconciles unread count and syncs badge only after a real u
   assert.match(batch, /if \(modifiedCount > 0\) scheduleUnreadBadgeSync/);
   assert.match(batch, /updatedCount: modifiedCount, unreadCount/);
 });
+
+test('only temporary incoming calls are soft-deleted as they become read', () => {
+  assert.match(batch, /temporaryCallNotificationFilter/);
+  assert.match(batch, /\$set: \{ isRead: true, readAt, deletedAt: readAt \}/);
+  assert.match(batch, /\$nor: \[temporaryCallNotificationFilter\]/);
+  assert.match(batch, /\$set: \{ isRead: true, readAt \}/);
+  assert.match(source, /const markTrackedNotificationRead = async/);
+  assert.match(source, /await markTrackedNotificationRead\(owned\.notification, userId\)/);
+});

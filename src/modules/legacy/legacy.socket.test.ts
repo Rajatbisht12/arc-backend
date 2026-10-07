@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { isTemporaryCallNotification } from "../notifications/temporaryCallNotifications";
 
 import {
   buildRandomMediaStatePayload,
   buildIncomingCallNotification,
+  buildIncomingGroupCallNotification,
   releaseDisconnectedUserCallSessions
 } from "./legacy.socket";
 
@@ -70,6 +72,28 @@ const voiceNotification = buildIncomingCallNotification({
 assert.equal(voiceNotification.title, "Someone is calling");
 assert.equal(voiceNotification.message, "Incoming voice call");
 assert.equal("randomRoomId" in voiceNotification.data.customData, false);
+assert.equal(isTemporaryCallNotification(notification), true);
+assert.equal(isTemporaryCallNotification({ type: "call", data: { customData: { eventType: "missed_call" } } }), false);
+assert.equal(isTemporaryCallNotification({ type: "follow", data: { customData: { eventType: "incoming_call" } } }), false);
+
+for (const callType of ["voice", "video"] as const) {
+  const groupNotification = buildIncomingGroupCallNotification({
+    callId: `group-${callType}-1`,
+    callType,
+    callerId: "507f1f77bcf86cd799439011",
+    callerName: "Arc Player",
+    chatRoomId: "507f191e810c19729de860ea",
+    groupName: "Arc Friends",
+    now
+  });
+  assert.equal(groupNotification.title, `Incoming group ${callType} call`);
+  assert.equal(groupNotification.message, `Arc Player started a ${callType} call in Arc Friends`);
+  assert.equal(groupNotification.data.deepLink, "/conversation/507f191e810c19729de860ea?name=Arc%20Friends");
+  assert.deepEqual(groupNotification.data.targetPlatforms, ["android", "ios"]);
+  assert.equal(groupNotification.data.customData.eventType, "incoming_group_call");
+  assert.equal(groupNotification.data.customData.notificationDedupeKey, `incoming-group-call:group-${callType}-1`);
+  assert.equal(groupNotification.data.customData.expiresAt, "2026-07-02T12:00:30.000Z");
+}
 
 const disconnectSession = {
   callId: "call-disconnect-123",
