@@ -1031,6 +1031,46 @@ router.get("/", protect, async (req, res) => {
   }
 });
 
+// A viewport may expose several rows at once. Update only the authenticated
+// recipient's visible, non-message notifications in one idempotent write.
+router.post("/mark-read", protect, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ success: false, message: "Authenticated user is required" });
+    const suppliedIds = req.body?.notificationIds;
+    if (!Array.isArray(suppliedIds) || suppliedIds.length === 0 || suppliedIds.length > 100 ||
+        suppliedIds.some((id: unknown) => !isObjectId(id))) {
+      return res.status(400).json({ success: false, message: "notificationIds must contain 1 to 100 valid IDs" });
+    }
+    const notificationIds = [...new Set(suppliedIds as string[])];
+    const platform = safeString(req.body?.platform ?? req.query.platform, 40).toLowerCase();
+    if (platform && !VALID_PLATFORMS.has(platform)) {
+      return res.status(400).json({ success: false, message: "platform filter is invalid" });
+    }
+    const appVersion = safeString(req.body?.appVersion ?? req.query.appVersion, 40);
+    const result = await Notification.updateMany(
+      withClientVisibility({
+        _id: { $in: notificationIds },
+        recipient: userId,
+        isRead: false,
+        deletedAt: null,
+        archivedAt: null,
+        type: { $nin: NOTIFICATION_LIST_EXCLUDED_TYPES }
+      }, platform, appVersion),
+      { $set: { isRead: true, readAt: new Date() } }
+    );
+    const modifiedCount = Number((result as { modifiedCount?: number }).modifiedCount || 0);
+    const unreadCount = await countVisibleUnreadNotifications(userId, platform, appVersion);
+    if (modifiedCount > 0) scheduleUnreadBadgeSync(userId, "notifications_viewed");
+    return res.status(200).json({
+      success: true,
+      data: { updatedCount: modifiedCount, unreadCount }
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Failed to mark notifications as read" });
+  }
+});
+
 router.put("/:id/read", protect, async (req, res) => {
   try {
     const userId = (req as { user?: { _id?: string } }).user?._id;
