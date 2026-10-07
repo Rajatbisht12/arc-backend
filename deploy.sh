@@ -341,6 +341,10 @@ run_preflight() {
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-random-connect-indexes.js']}]}))" "$CONTAINER_NAME")
   elif [[ "$mode" == "random-connect-verify" ]]; then
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-random-connect-indexes.js','--verify']}]}))" "$CONTAINER_NAME")
+  elif [[ "$mode" == "username-apply" ]]; then
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-username-registry.js']}]}))" "$CONTAINER_NAME")
+  elif [[ "$mode" == "username-verify" ]]; then
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-username-registry.js','--verify']}]}))" "$CONTAINER_NAME")
   else
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[])]}]}))" "$CONTAINER_NAME" "$repair_events")
   fi
@@ -499,6 +503,10 @@ echo "==> Finalizing Random Connect indexes, stale sessions, and push suppressio
 run_preflight random-connect-apply
 run_preflight random-connect-verify
 echo "==> Random Connect production migration verified"
+echo "==> Reconciling username claims created during the rolling deployment..."
+run_preflight username-apply
+run_preflight username-verify
+echo "==> Username registry verified"
 
 QUIESCED=0
 MUTATING_PREFLIGHT_STARTED=0

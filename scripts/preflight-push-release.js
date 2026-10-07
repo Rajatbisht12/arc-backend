@@ -50,7 +50,10 @@ const main = async () => {
     '--audit-only',
     ...(allowBroadcastEventRepair ? ['--allow-event-repair'] : [])
   ]);
+  run('migrate-username-registry.js', ['--audit-only']);
   if (auditOnly) return;
+  run('migrate-username-registry.js');
+  run('migrate-username-registry.js', ['--verify']);
   if (!verifyOnly) {
     run('migrate-bank-details.js', ['--apply']);
     run('migrate-monetization-admin.js', ['--apply']);

@@ -1,5 +1,8 @@
 const assert = require('assert');
 const User = require('./User');
+const usernameRegistryService = require('../services/usernameRegistryService');
+// This contract exercises the password pre-save hook without a database.
+usernameRegistryService.claimForUser = async () => false;
 
 const runPreSaveHooks = (document) => new Promise((resolve, reject) => {
   User.schema.s.hooks.execPre('save', document, [], (error) => {

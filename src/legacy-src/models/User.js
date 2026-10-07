@@ -20,6 +20,7 @@ const {
   isValidTeamRole
 } = require('../utils/teamInvitationPolicy');
 const { TEAM_TYPES, normalizeTeamType } = require('../utils/teamType');
+const { canonicalUsername } = require('../utils/usernamePolicy');
 
 const teamRoleField = {
   type: String,
@@ -832,6 +833,89 @@ userSchema.pre('validate', function(next) {
   if (this.isSystemAccount && !reserved) return next(new Error('System account username cannot be changed'));
   next();
 });
+
+// Model-level enforcement covers password/OAuth signup, profile completion,
+// generated team accounts and maintenance scripts that use User.save().
+userSchema.pre('save', async function(next) {
+  if (!this.isNew && !this.isModified('username')) return next();
+  try {
+    const { claimForUser } = require('../services/usernameRegistryService');
+    const oldUsername = this.isNew ? null : await this.constructor.findById(this._id).select('username').lean();
+    this.$locals.usernameClaimCreated = await claimForUser(this.username, this._id, {
+      system: this.isSystemAccount === true && this.userType === 'system'
+    });
+    this.$locals.previousUsername = oldUsername?.username || null;
+    next();
+  } catch (error) { next(error); }
+});
+userSchema.post('save', async function(doc) {
+  const previous = doc.$locals.previousUsername;
+  if (previous && canonicalUsername(previous) !== canonicalUsername(doc.username)) {
+    const { releaseUserClaim } = require('../services/usernameRegistryService');
+    await releaseUserClaim(previous, doc._id);
+  }
+});
+userSchema.post('save', async function(error, doc, next) {
+  if (doc?.$locals?.usernameClaimCreated) {
+    try {
+      const { releaseUserClaim } = require('../services/usernameRegistryService');
+      await releaseUserClaim(doc.username, doc._id);
+    } catch (cleanupError) { return next(cleanupError); }
+  }
+  next(error);
+});
+
+userSchema.pre('findOneAndUpdate', async function(next) {
+  const update = this.getUpdate() || {};
+  const username = update.$set?.username ?? update.username;
+  if (username === undefined) return next();
+  try {
+    const current = await this.model.findOne(this.getQuery()).select('_id username isSystemAccount userType').lean();
+    if (!current) return next();
+    const { claimForUser } = require('../services/usernameRegistryService');
+    this._usernameClaim = {
+      ownerId: current._id,
+      oldUsername: current.username,
+      newUsername: username,
+      created: await claimForUser(username, current._id, {
+        system: current.isSystemAccount === true && current.userType === 'system'
+      })
+    };
+    next();
+  } catch (error) { next(error); }
+});
+userSchema.post('findOneAndUpdate', async function(doc) {
+  const claim = this._usernameClaim;
+  if (!claim) return;
+  const { releaseUserClaim } = require('../services/usernameRegistryService');
+  if (!doc && claim.created) await releaseUserClaim(claim.newUsername, claim.ownerId);
+  if (doc && canonicalUsername(claim.oldUsername) !== canonicalUsername(claim.newUsername)) {
+    await releaseUserClaim(claim.oldUsername, claim.ownerId);
+  }
+});
+userSchema.post('findOneAndUpdate', async function(error, doc, next) {
+  const claim = this._usernameClaim;
+  if (claim?.created) {
+    try {
+      const { releaseUserClaim } = require('../services/usernameRegistryService');
+      await releaseUserClaim(claim.newUsername, claim.ownerId);
+    } catch (cleanupError) { return next(cleanupError); }
+  }
+  next(error);
+});
+
+// No current public endpoint uses these methods to change usernames. Reject
+// such writes rather than letting a future bulk/update path bypass the registry.
+for (const operation of ['updateOne', 'updateMany', 'replaceOne', 'findOneAndReplace']) {
+  userSchema.pre(operation, function(next) {
+    const update = this.getUpdate?.() || {};
+    if (Object.prototype.hasOwnProperty.call(update, 'username') ||
+        Object.prototype.hasOwnProperty.call(update.$set || {}, 'username')) {
+      return next(new Error('Username changes must use the protected username update path'));
+    }
+    next();
+  });
+}
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {
