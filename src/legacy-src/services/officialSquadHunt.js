@@ -1,6 +1,8 @@
 const { randomBytes } = require('crypto');
 const User = require('../models/User');
 const { Message } = require('../models/Message');
+const Broadcast = require('../models/Broadcast');
+const BroadcastRecipient = require('../models/BroadcastRecipient');
 
 const OFFICIAL_USERNAME = 'SquadHunt';
 
@@ -58,6 +60,12 @@ async function deliverBroadcastDm({ recipientLog, broadcast, recipientId }) {
         recipient: recipientId,
         messageType: 'direct',
         broadcastRecipient: recipientLog._id,
+        broadcastCta: {
+          text: broadcast.cta?.text || '',
+          url: broadcast.cta?.url || '',
+          deepLink: broadcast.cta?.deepLink || '',
+          type: broadcast.cta?.type || 'none'
+        },
         content: { text: broadcast.message, media: [] },
         readBy: [{ user: official._id, readAt: new Date() }]
       });
@@ -71,4 +79,28 @@ async function deliverBroadcastDm({ recipientLog, broadcast, recipientId }) {
   return { official, message, created };
 }
 
-module.exports = { getOfficialSquadHunt, deliverBroadcastDm };
+// Older broadcast DMs predate CTA snapshots. Enrich only the bounded history
+// page being returned; no historical notification or message is mutated.
+async function hydrateBroadcastMessageCtas(messages) {
+  const missing = messages.filter((message) => message.broadcastRecipient && !message.broadcastCta?.text);
+  if (!missing.length) return messages;
+  const recipients = await BroadcastRecipient.find({
+    _id: { $in: missing.map((message) => message.broadcastRecipient) }
+  }).select('_id broadcast').lean();
+  const broadcasts = await Broadcast.find({
+    _id: { $in: recipients.map((recipient) => recipient.broadcast).filter(Boolean) }
+  }).select('_id cta').lean();
+  const ctaByBroadcast = new Map(broadcasts.map((broadcast) => [String(broadcast._id), broadcast.cta]));
+  const ctaByRecipient = new Map(recipients.map((recipient) => [
+    String(recipient._id), ctaByBroadcast.get(String(recipient.broadcast))
+  ]));
+  for (const message of missing) {
+    const cta = ctaByRecipient.get(String(message.broadcastRecipient));
+    if (cta?.text && (cta.url || cta.deepLink || cta.type !== 'none')) {
+      message.broadcastCta = { text: cta.text, url: cta.url || '', deepLink: cta.deepLink || '', type: cta.type || 'none' };
+    }
+  }
+  return messages;
+}
+
+module.exports = { getOfficialSquadHunt, deliverBroadcastDm, hydrateBroadcastMessageCtas };

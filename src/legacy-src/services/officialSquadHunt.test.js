@@ -3,8 +3,23 @@ const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const { Message } = require('../models/Message');
-const { getOfficialSquadHunt, deliverBroadcastDm } = require('./officialSquadHunt');
+const Notification = require('../models/Notification');
+const Broadcast = require('../models/Broadcast');
+const BroadcastRecipient = require('../models/BroadcastRecipient');
+const { getOfficialSquadHunt, deliverBroadcastDm, hydrateBroadcastMessageCtas } = require('./officialSquadHunt');
 const { sendDirectMessage } = require('../controllers/messageController');
+
+test('notification CTA persists separate Web and native destinations', () => {
+  const notification = new Notification({
+    recipient: new mongoose.Types.ObjectId(),
+    type: 'system',
+    message: 'Test broadcast',
+    data: { cta: { text: 'Follow', url: 'https://www.squadhunt.com/zoro', deepLink: 'arc://user/zoro', type: 'profile' } }
+  });
+  const cta = notification.toObject().data.cta;
+  assert.equal(cta.url, 'https://www.squadhunt.com/zoro');
+  assert.equal(cta.deepLink, 'arc://user/zoro');
+});
 
 test('reserved case variants cannot validate as normal users', async () => {
   for (const username of ['SquadHunt', 'squadhunt', 'SQUADHUNT']) {
@@ -53,17 +68,38 @@ test('broadcast delivery reuses the same message for the same recipient ledger',
     return stored;
   };
   try {
-    const first = await deliverBroadcastDm({ recipientLog, broadcast: { message: 'Full broadcast\n\nSecond line' }, recipientId });
+    const first = await deliverBroadcastDm({ recipientLog, broadcast: { message: 'Full broadcast\n\nSecond line', cta: { text: 'Follow', url: 'https://www.squadhunt.com/zoro', deepLink: 'arc://user/zoro', type: 'profile' } }, recipientId });
     const second = await deliverBroadcastDm({ recipientLog, broadcast: { message: 'Full broadcast\n\nSecond line' }, recipientId });
     assert.equal(first.created, true);
     assert.equal(second.created, false);
     assert.equal(creates, 1);
     assert.equal(first.message.content.text, 'Full broadcast\n\nSecond line');
+    assert.equal(first.message.broadcastCta.text, 'Follow');
+    assert.equal(first.message.broadcastCta.deepLink, 'arc://user/zoro');
     assert.equal(String(second.message._id), String(first.message._id));
   } finally {
     User.find = originalUserFind;
     Message.findOne = originalMessageFind;
     Message.create = originalMessageCreate;
+  }
+});
+
+test('old broadcast DM history gains its original CTA without rewriting records', async () => {
+  const recipientId = new mongoose.Types.ObjectId();
+  const broadcastId = new mongoose.Types.ObjectId();
+  const messages = [{ _id: new mongoose.Types.ObjectId(), broadcastRecipient: recipientId, content: { text: 'Original text' } }];
+  const originalRecipientsFind = BroadcastRecipient.find;
+  const originalBroadcastFind = Broadcast.find;
+  BroadcastRecipient.find = () => ({ select: () => ({ lean: async () => [{ _id: recipientId, broadcast: broadcastId }] }) });
+  Broadcast.find = () => ({ select: () => ({ lean: async () => [{ _id: broadcastId, cta: { text: 'Follow', url: 'https://www.squadhunt.com/zoro', deepLink: 'arc://user/zoro', type: 'profile' } }] }) });
+  try {
+    const result = await hydrateBroadcastMessageCtas(messages);
+    assert.equal(result[0].broadcastCta.text, 'Follow');
+    assert.equal(result[0].broadcastCta.url, 'https://www.squadhunt.com/zoro');
+    assert.equal(result[0].content.text, 'Original text');
+  } finally {
+    BroadcastRecipient.find = originalRecipientsFind;
+    Broadcast.find = originalBroadcastFind;
   }
 });
 
