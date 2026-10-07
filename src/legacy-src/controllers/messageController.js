@@ -31,6 +31,7 @@ const {
 const { resolveGroupAddPrivacy } = require('../utils/groupAddPrivacy');
 const { resolvePublicWebOrigin } = require('../utils/publicWebUrl');
 const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
+const { hydrateBroadcastMessageCtas } = require('../services/officialSquadHunt');
 const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
 const {
   createMongooseMessageHistoryRepository,
@@ -493,7 +494,7 @@ const getDirectMessages = async (req, res) => {
       await redactMessageReadReceipts(messages, req.user);
       return res.status(200).json({
         success: true,
-        messages: await resolveClientMediaPayload(messages),
+        messages: await resolveClientMediaPayload(await hydrateBroadcastMessageCtas(messages)),
         initialPosition: window.initialPosition,
         pagination: window.pagination
       });
@@ -542,7 +543,7 @@ const getDirectMessages = async (req, res) => {
     }
     await redactMessageReadReceipts(messages, req.user);
 
-    const clientMessages = await resolveClientMediaPayload(messages.reverse());
+    const clientMessages = await resolveClientMediaPayload(await hydrateBroadcastMessageCtas(messages.reverse()));
     res.status(200).json({
       success: true,
       messages: clientMessages, // oldest first

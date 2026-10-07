@@ -111,6 +111,7 @@ const notificationSchema = new mongoose.Schema({
     cta: {
       text: { type: String },
       url: { type: String },
+      deepLink: { type: String },
       type: { type: String }
     },
     customData: mongoose.Schema.Types.Mixed

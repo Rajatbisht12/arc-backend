@@ -177,6 +177,14 @@ const messageSchema = new mongoose.Schema({
   },
   // Only the broadcast worker sets this. A unique key makes retries safe.
   broadcastRecipient: { type: mongoose.Schema.Types.ObjectId, ref: 'BroadcastRecipient' },
+  // Snapshot the validated broadcast CTA so chat history retains the action
+  // even if the admin later edits its source broadcast.
+  broadcastCta: {
+    text: { type: String, maxlength: 60 },
+    url: { type: String, maxlength: 2048 },
+    deepLink: { type: String, maxlength: 2048 },
+    type: { type: String, maxlength: 40 }
+  },
 
   // Presentation metadata for the non-actionable acknowledgement message
   // created after a roster/staff invitation is accepted or declined. This is
