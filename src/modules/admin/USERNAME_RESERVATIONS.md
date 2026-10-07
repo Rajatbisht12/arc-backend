@@ -15,3 +15,5 @@ npm run verify:username-registry
 ```
 
 No new names are automatically reserved by this migration. The prior built-in protected names remain protected by backend policy, including `SquadHunt`. The official system account's `isSystemAccount`/`userType` security designation is independent of an admin reservation. Removing a reservation for a built-in protected name does not make that built-in name claimable.
+
+Admin hard deletion now releases the deleted user's claim in the same database session. Owner-initiated account closure remains a soft delete and keeps the username claimed. For a claim orphaned by older hard-delete code, a new admin reservation checks that the owner and any case-equivalent account are absent before converting that claim into a reservation. Claims created in the last minute are not reclaimed, so an in-flight signup cannot be mistaken for a deleted account; retry after the grace period if necessary.

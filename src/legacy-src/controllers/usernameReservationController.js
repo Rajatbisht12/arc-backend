@@ -3,6 +3,7 @@ const UsernameRegistry = require('../models/UsernameRegistry');
 const {
   normalizeUsernameInput, canonicalUsername, validateUsernameFormat, escapeUsernameRegex
 } = require('../utils/usernamePolicy');
+const ORPHAN_CLAIM_GRACE_MS = 60_000;
 
 const serialize = (record) => ({
   _id: record._id,
@@ -52,8 +53,37 @@ async function reserve(req, res) {
     return res.status(201).json({ success: true, reservation: serialize(record) });
   } catch (error) {
     if (error?.code === 11000) {
-      const existing = await UsernameRegistry.findOne({ normalizedUsername: canonicalUsername(username) }).select('kind').lean();
-      return res.status(409).json({ success: false, code: existing?.kind === 'user' ? 'USERNAME_IN_USE' : 'ALREADY_RESERVED', message: existing?.kind === 'user' ? 'This username is currently in use by an existing account.' : 'This username is already reserved.' });
+      try {
+        const existing = await UsernameRegistry.findOne({ normalizedUsername: canonicalUsername(username) })
+          .select('_id kind ownerId createdAt').lean();
+        if (existing?.kind === 'user' && existing.ownerId) {
+          // Older hard-delete code left an unowned user claim behind. A recent
+          // claim may still belong to an in-flight signup, so never reclaim it.
+          const owner = await User.exists({ _id: existing.ownerId });
+          if (!owner && existing.createdAt > new Date(Date.now() - ORPHAN_CLAIM_GRACE_MS)) {
+            return res.status(409).json({ success: false, code: 'USERNAME_CLAIM_PENDING', message: 'This recently deleted username is still being finalized. Try again in a minute.' });
+          }
+          if (!owner && existing.createdAt && existing.createdAt <= new Date(Date.now() - ORPHAN_CLAIM_GRACE_MS)) {
+            const stillOwned = await User.exists({ username: { $regex: `^${escapeUsernameRegex(username)}$`, $options: 'i' } });
+            if (!stillOwned) {
+              const repaired = await UsernameRegistry.findOneAndUpdate(
+                { _id: existing._id, normalizedUsername: canonicalUsername(username), kind: 'user', ownerId: existing.ownerId,
+                  createdAt: { $lte: new Date(Date.now() - ORPHAN_CLAIM_GRACE_MS) } },
+                { $set: { username, kind: 'reservation', ownerId: null, reason, reservedBy: String(req.user?.username || 'admin') } },
+                { new: true }
+              );
+              if (repaired) {
+                res.locals.auditBefore = { usernameRegistryId: String(existing._id), kind: 'orphaned_user_claim' };
+                res.locals.auditAfter = { usernameRegistryId: String(repaired._id), kind: 'reservation' };
+                return res.status(201).json({ success: true, reservation: serialize(repaired), recoveredOrphanClaim: true });
+              }
+            }
+          }
+        }
+        return res.status(409).json({ success: false, code: existing?.kind === 'user' ? 'USERNAME_IN_USE' : 'ALREADY_RESERVED', message: existing?.kind === 'user' ? 'This username is currently in use by an existing account.' : 'This username is already reserved.' });
+      } catch (recoveryError) {
+        return res.status(500).json({ success: false, message: 'Could not verify username claim ownership' });
+      }
     }
     return res.status(500).json({ success: false, message: 'Could not reserve username' });
   }

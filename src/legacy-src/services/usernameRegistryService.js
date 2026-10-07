@@ -54,8 +54,8 @@ async function claimForUser(username, ownerId, { system = false } = {}) {
   }
 }
 
-const releaseUserClaim = (username, ownerId) => UsernameRegistry.deleteOne({
+const releaseUserClaim = (username, ownerId, { session } = {}) => UsernameRegistry.deleteOne({
   normalizedUsername: canonicalUsername(username), kind: 'user', ownerId
-});
+}, session ? { session } : {});
 
 module.exports = { checkUsername, claimForUser, releaseUserClaim, lookup, reservedError, takenError };
