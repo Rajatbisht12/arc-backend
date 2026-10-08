@@ -101,6 +101,8 @@ assert(legacyMiddleware.includes('private, no-store, no-cache, must-revalidate')
 assert(legacyMiddleware.includes('res.vary("Authorization")'));
 assert(user.includes('evictPresenceAudience(io, req.user._id)'));
 assert(user.includes('publishPrivacySettingsUpdate(io, req.user._id)'));
+assert(user.includes("presenceIo?.to?.(`user-${currentUserId}`).emit('privacy-settings-updated', { userId: targetUserId })"));
+assert(user.includes("presenceIo?.to?.(`user-${targetUserId}`).emit('privacy-settings-updated', { userId: String(currentUserId) })"));
 assert(!user.includes("io?.emit?.('privacy-settings-updated'"));
 assert(presencePrivacy.includes("io.to?.(userRoom(userId)).emit('privacy-settings-updated'"));
 assert(presencePrivacy.includes("io.to?.(presenceRoom(userId)).emit('privacy-settings-updated'"));

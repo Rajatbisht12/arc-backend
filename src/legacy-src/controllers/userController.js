@@ -4106,6 +4106,10 @@ const blockUser = async (req, res) => {
     const presenceIo = req.app?.get?.('io') || global._arcSocketIO;
     removePresenceSubscription(presenceIo, currentUserId, targetUserId);
     removePresenceSubscription(presenceIo, targetUserId, currentUserId);
+    // Both participants may have a cached DM capability. Targeted events
+    // invalidate it without broadcasting the block relationship publicly.
+    presenceIo?.to?.(`user-${currentUserId}`).emit('privacy-settings-updated', { userId: targetUserId });
+    presenceIo?.to?.(`user-${targetUserId}`).emit('privacy-settings-updated', { userId: String(currentUserId) });
     res.status(200).json({ success: true, message: 'User blocked' });
   } catch (error) {
     log.error('Block user error:', { error: String(error) });
@@ -4131,6 +4135,9 @@ const unblockUser = async (req, res) => {
     currentUser.blockedUsers = currentUser.blockedUsers.filter(id => id.toString() !== targetUserId);
     await currentUser.save();
     await invalidateFollowCaches(currentUserId, targetUserId);
+    const presenceIo = req.app?.get?.('io') || global._arcSocketIO;
+    presenceIo?.to?.(`user-${currentUserId}`).emit('privacy-settings-updated', { userId: targetUserId });
+    presenceIo?.to?.(`user-${targetUserId}`).emit('privacy-settings-updated', { userId: String(currentUserId) });
     res.status(200).json({ success: true, message: 'User unblocked' });
   } catch (error) {
     log.error('Unblock user error:', { error: String(error) });
