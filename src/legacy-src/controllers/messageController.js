@@ -1415,6 +1415,12 @@ const getGroupMessages = async (req, res) => {
       await redactMessageReadReceipts(messages, req.user);
       return res.status(200).json({
         success: true,
+        room: {
+          _id: chatRoom._id,
+          name: chatRoom.name,
+          avatar: chatRoom.avatar,
+          memberCount: isMember ? chatRoom.members.length : 0
+        },
         messages: await resolveClientMediaPayload(messages),
         initialPosition: window.initialPosition,
         pagination: window.pagination
@@ -1450,6 +1456,12 @@ const getGroupMessages = async (req, res) => {
     const clientMessages = await resolveClientMediaPayload(messages.reverse());
     res.status(200).json({
       success: true,
+      room: {
+        _id: chatRoom._id,
+        name: chatRoom.name,
+        avatar: chatRoom.avatar,
+        memberCount: isMember ? chatRoom.members.length : 0
+      },
       messages: clientMessages, // oldest first
       pagination: {
         current: page,

@@ -337,6 +337,7 @@ export const buildIncomingGroupCallNotification = ({
   callerName,
   chatRoomId,
   groupName,
+  groupAvatar,
   now = new Date()
 }: {
   callId: string;
@@ -345,10 +346,13 @@ export const buildIncomingGroupCallNotification = ({
   callerName: string;
   chatRoomId: string;
   groupName: string;
+  groupAvatar?: string;
   now?: Date;
 }) => {
   const safeGroupName = groupName || "Group";
-  const deepLink = `/conversation/${chatRoomId}?name=${encodeURIComponent(safeGroupName)}`;
+  const deepLink = `/conversation/${chatRoomId}?name=${encodeURIComponent(safeGroupName)}`
+    + (groupAvatar ? `&groupAvatar=${encodeURIComponent(groupAvatar)}` : "")
+    + `&callId=${encodeURIComponent(callId)}`;
   return {
     type: "call" as const,
     title: `Incoming group ${callType} call`,
@@ -365,6 +369,7 @@ export const buildIncomingGroupCallNotification = ({
         chatRoomId,
         chatId: chatRoomId,
         groupName: safeGroupName,
+        ...(groupAvatar ? { groupAvatar } : {}),
         notificationDedupeKey: `incoming-group-call:${callId}`,
         pushRequestId: `incoming-group-call:${callId}`,
         pushTargetPlatforms: ["android", "ios"],
@@ -469,13 +474,14 @@ const resolveGroupCallUsers = async (
 // room (so it rings app-wide, not only when the chat is open).
 const getGroupCallRoomInfo = async (
   chatRoomId: string,
-): Promise<{ name: string; memberIds: string[] }> => {
+): Promise<{ name: string; avatar: string; memberIds: string[] }> => {
   const messageModels = safeRequire<any>(path.join(backendModelPath, "Message.js"));
   const room = messageModels?.ChatRoom
-    ? await messageModels.ChatRoom.findById(chatRoomId).select("name creator members.user").lean()
+    ? await messageModels.ChatRoom.findById(chatRoomId).select("name avatar creator members.user").lean()
     : null;
   return {
     name: room?.name || "Group",
+    avatar: room?.avatar || "",
     memberIds: [...new Set([
       ...(room?.creator ? [String(room.creator)] : []),
       ...((room?.members || []) as any[]).map((m) => String(m.user))
@@ -1175,6 +1181,40 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     }
   });
 
+  // A push can be opened after the original socket invitation was missed while
+  // the App was backgrounded. Re-issue only an invitation for a live session to
+  // an authorized recipient; an ended push can never recreate a call.
+  socket.on("group-call-lookup", async (data: { callId?: string; chatRoomId?: string }) => {
+    const callId = boundedString(data?.callId, 160);
+    const chatRoomId = boundedString(data?.chatRoomId, 64);
+    if (!CALL_ID_PATTERN.test(callId) || !OBJECT_ID_PATTERN.test(chatRoomId)) return;
+    try {
+      const session = activeCalls.get(callId);
+      if (!session || session.finalized || session.chatRoomId !== chatRoomId
+        || session.initiatorId === userIdStr || session.participants.has(userIdStr)
+        || !session.memberIds.includes(userIdStr)
+        || !await isAuthorizedLegacyChatMember(chatRoomId, userIdStr)) return;
+      const roomInfo = await getGroupCallRoomInfo(chatRoomId);
+      const caller = (await resolveGroupCallUsers([session.initiatorId])).get(session.initiatorId);
+      // Membership and the call can change while the two lookups are in flight.
+      if (activeCalls.get(callId) !== session || session.finalized
+        || !session.memberIds.includes(userIdStr)
+        || !await isAuthorizedLegacyChatMember(chatRoomId, userIdStr)) return;
+      socket.emit("group-call-incoming", {
+        callId,
+        callType: session.callType,
+        chatRoomId,
+        initiatorId: session.initiatorId,
+        fromUserId: session.initiatorId,
+        fromUsername: caller?.displayName || caller?.username || "Someone",
+        groupName: roomInfo.name,
+        groupAvatar: roomInfo.avatar,
+      });
+    } catch (error) {
+      logger.warn("Group call lookup failed", { callId, userId: userIdStr, error: String(error) });
+    }
+  });
+
   socket.on("group-call-request", async (data: { callId?: string; chatRoomId?: string; callType?: "voice" | "video" }) => {
     const callId = boundedString(data?.callId, 160);
     const chatRoomId = boundedString(data?.chatRoomId, 64);
@@ -1241,6 +1281,7 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       fromUserId: userIdStr,
       fromUsername: initiator?.displayName || initiator?.username || "Someone",
       groupName: roomInfo.name,
+      groupAvatar: roomInfo.avatar,
     };
     const recipients = roomInfo.memberIds.filter((id) => id !== userIdStr);
     recipients.forEach((id) => io.to(`user-${id}`).emit("group-call-incoming", incomingPayload));
@@ -1253,7 +1294,8 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
           callerId: userIdStr,
           callerName: initiator?.displayName || initiator?.username || "Someone",
           chatRoomId,
-          groupName: roomInfo.name
+          groupName: roomInfo.name,
+          groupAvatar: roomInfo.avatar
         }),
         callId,
         userIdStr

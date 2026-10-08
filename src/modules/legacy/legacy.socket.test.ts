@@ -84,16 +84,31 @@ for (const callType of ["voice", "video"] as const) {
     callerName: "Arc Player",
     chatRoomId: "507f191e810c19729de860ea",
     groupName: "Arc Friends",
+    groupAvatar: "https://media.squadhunt.com/group-avatar.webp",
     now
   });
   assert.equal(groupNotification.title, `Incoming group ${callType} call`);
   assert.equal(groupNotification.message, `Arc Player started a ${callType} call in Arc Friends`);
-  assert.equal(groupNotification.data.deepLink, "/conversation/507f191e810c19729de860ea?name=Arc%20Friends");
+  assert.equal(groupNotification.data.deepLink, `/conversation/507f191e810c19729de860ea?name=Arc%20Friends&groupAvatar=https%3A%2F%2Fmedia.squadhunt.com%2Fgroup-avatar.webp&callId=group-${callType}-1`);
   assert.deepEqual(groupNotification.data.targetPlatforms, ["android", "ios"]);
   assert.equal(groupNotification.data.customData.eventType, "incoming_group_call");
+  assert.equal(groupNotification.data.customData.groupAvatar, "https://media.squadhunt.com/group-avatar.webp");
   assert.equal(groupNotification.data.customData.notificationDedupeKey, `incoming-group-call:group-${callType}-1`);
   assert.equal(groupNotification.data.customData.expiresAt, "2026-07-02T12:00:30.000Z");
 }
+
+const groupNotificationWithoutAvatar = buildIncomingGroupCallNotification({
+  callId: "group-voice-no-avatar",
+  callType: "voice",
+  callerId: "507f1f77bcf86cd799439011",
+  callerName: "Arc Player",
+  chatRoomId: "507f191e810c19729de860ea",
+  groupName: "Arc Friends",
+  now
+});
+assert.equal(groupNotificationWithoutAvatar.data.deepLink,
+  "/conversation/507f191e810c19729de860ea?name=Arc%20Friends&callId=group-voice-no-avatar");
+assert.equal("groupAvatar" in groupNotificationWithoutAvatar.data.customData, false);
 
 const disconnectSession = {
   callId: "call-disconnect-123",
