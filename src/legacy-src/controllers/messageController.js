@@ -844,7 +844,10 @@ const getRecentConversations = async (req, res) => {
     const conversations = await Message.aggregate([
       {
         $match: {
-          messageType: 'direct',
+          messageType: { $in: ['direct', 'call'] },
+          // Group call summaries also use messageType 'call'. Only a persisted
+          // call with a DM recipient can activate a direct conversation.
+          recipient: { $exists: true, $ne: null },
           deletedForEveryone: { $ne: true },
           $and: [
             {
@@ -956,7 +959,9 @@ const getRecentConversations = async (req, res) => {
         lastMessage: {
           content: conv.lastMessage.content,
           sender: conv.lastMessage.sender,
-          createdAt: conv.lastMessage.createdAt
+          createdAt: conv.lastMessage.createdAt,
+          messageType: conv.lastMessage.messageType,
+          callSummary: conv.lastMessage.callSummary
         },
         unreadCount: unreadBySender.get(otherUserId) || 0,
         messageCount: conv.messageCount
@@ -966,17 +971,16 @@ const getRecentConversations = async (req, res) => {
     // Filter out null entries (deleted users)
     const validConversations = populatedConversations.filter(conv => conv !== null);
 
-    // Sort by unread count first, then by last message time
+    // Activity order is the authoritative order for both text and call events.
     validConversations.sort((a, b) => {
-      if (a.unreadCount > 0 && b.unreadCount === 0) return -1;
-      if (a.unreadCount === 0 && b.unreadCount > 0) return 1;
       return new Date(b.lastMessage.createdAt) - new Date(a.lastMessage.createdAt);
     });
 
     const total = await Message.aggregate([
       {
         $match: {
-          messageType: 'direct',
+          messageType: { $in: ['direct', 'call'] },
+          recipient: { $exists: true, $ne: null },
           deletedForEveryone: { $ne: true },
           $and: [
             {
@@ -2958,11 +2962,17 @@ const createCallSummary = async (req, res) => {
       });
     }
 
-    // Emit real-time update to the relevant room
+    // A call summary is one persisted event for the DM pair. Notify BOTH
+    // participants with each viewer's own direct_<otherId> route so their
+    // clients can reconcile /recent without inventing a local conversation.
     if (io) {
       if (authorizedRecipientId) {
         await emitNewMessage(`user-${authorizedRecipientId}`, {
           chatId: `direct_${senderId}`,
+          message
+        });
+        await emitNewMessage(`user-${senderId}`, {
+          chatId: `direct_${authorizedRecipientId}`,
           message
         });
       } else {

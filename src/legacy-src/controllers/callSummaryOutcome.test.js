@@ -10,6 +10,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 
 const { Message, ChatRoom } = require('../models/Message');
 const User = require('../models/User');
+const UsernameRegistry = require('../models/UsernameRegistry');
 const CallSession = require('../models/CallSession');
 const messageController = require('./messageController');
 
@@ -26,7 +27,7 @@ test.before(async () => {
 test.after(async () => { await mongoose.disconnect(); await mongod.stop(); });
 
 test.beforeEach(async () => {
-  await Promise.all([Message.deleteMany({}), User.deleteMany({}), ChatRoom.deleteMany({}), CallSession.deleteMany({})]);
+  await Promise.all([Message.deleteMany({}), User.deleteMany({}), UsernameRegistry.deleteMany({}), ChatRoom.deleteMany({}), CallSession.deleteMany({})]);
   caller = await User.create({ username: 'caller', email: 'caller@example.com', password: 'x'.repeat(12), userType: 'player', profile: { displayName: 'Caller' } });
   callee = await User.create({ username: 'callee', email: 'callee@example.com', password: 'x'.repeat(12), userType: 'player', profile: { displayName: 'Callee' } });
   // The handler authorises against the real 1:1 call session.
@@ -42,16 +43,17 @@ test.beforeEach(async () => {
 
 const makeRes = () => {
   const res = { statusCode: 200, body: null };
+  res.set = () => res;
   res.status = (code) => { res.statusCode = code; return res; };
   res.json = (body) => { res.body = body; return res; };
   return res;
 };
 
-const postSummary = async (user, { outcome, durationSeconds = 0, recipient, callId = CALL_ID }) => {
+const postSummary = async (user, { outcome, durationSeconds = 0, recipient, callId = CALL_ID, callType = 'voice' }) => {
   const res = makeRes();
   await messageController.createCallSummary({
     user,
-    body: { callId, callType: 'voice', outcome, durationSeconds, participantCount: 1, recipientId: String(recipient._id) },
+    body: { callId, callType, outcome, durationSeconds, participantCount: 1, recipientId: String(recipient._id) },
   }, res);
   return res;
 };
@@ -60,6 +62,114 @@ const storedOutcome = async (callId = CALL_ID) => {
   const message = await Message.findOne({ messageType: 'call', 'callSummary.callId': callId }).lean();
   return message?.callSummary;
 };
+
+const recentFor = async (user) => {
+  const response = makeRes();
+  await messageController.getRecentConversations({ user, query: {} }, response);
+  assert.equal(response.statusCode, 200);
+  return response.body.data;
+};
+
+test('a first-contact missed call creates one persisted recent DM for both participants', async () => {
+  assert.equal((await recentFor(caller)).conversations.length, 0);
+  assert.equal((await recentFor(callee)).conversations.length, 0);
+
+  await postSummary(caller, { outcome: 'missed', recipient: callee });
+  for (const [viewer, other] of [[caller, callee], [callee, caller]]) {
+    const result = await recentFor(viewer);
+    assert.equal(result.pagination.totalConversations, 1);
+    assert.equal(result.conversations.length, 1);
+    assert.equal(result.conversations[0]._id, `direct_${other._id}`);
+    assert.equal(result.conversations[0].lastMessage.messageType, 'call');
+    assert.equal(result.conversations[0].lastMessage.callSummary.outcome, 'missed');
+    assert.equal(result.conversations[0].unreadCount, 0, 'call history is not an unread DM message');
+  }
+});
+
+test('an answered call upgrades one first-contact DM, not a second conversation', async () => {
+  await postSummary(caller, { outcome: 'missed', recipient: callee });
+  await postSummary(callee, { outcome: 'answered', durationSeconds: 7, recipient: caller });
+  await postSummary(callee, { outcome: 'answered', durationSeconds: 7, recipient: caller });
+  assert.equal(await Message.countDocuments({ messageType: 'call' }), 1);
+  for (const viewer of [caller, callee]) {
+    const recent = await recentFor(viewer);
+    assert.equal(recent.conversations.length, 1);
+    assert.equal(recent.conversations[0].lastMessage.callSummary.outcome, 'answered');
+  }
+});
+
+test('a newer call is the preview of an existing DM without duplicating its row', async () => {
+  await Message.create({
+    sender: caller._id,
+    recipient: callee._id,
+    messageType: 'direct',
+    content: { text: 'Earlier text' },
+    createdAt: new Date(Date.now() - 60_000),
+  });
+  await postSummary(caller, { outcome: 'answered', durationSeconds: 2, recipient: callee });
+  for (const viewer of [caller, callee]) {
+    const recent = await recentFor(viewer);
+    assert.equal(recent.conversations.length, 1);
+    assert.equal(recent.conversations[0].messageCount, 2);
+    assert.equal(recent.conversations[0].lastMessage.callSummary.outcome, 'answered');
+  }
+});
+
+test('first-contact video answered and missed calls are discoverable by both sides', async () => {
+  await CallSession.updateOne({ callId: CALL_ID }, { $set: { callType: 'video' } });
+  await postSummary(callee, { outcome: 'answered', recipient: caller, callType: 'video', durationSeconds: 3 });
+  const secondCallId = 'call:video-missed-2';
+  // Reuse the fixture's session after the first persisted outcome. The
+  // CallSession model intentionally forbids two active participant leases.
+  await CallSession.updateOne({ callId: CALL_ID }, { $set: { callId: secondCallId } });
+  await postSummary(caller, { outcome: 'missed', recipient: callee, callType: 'video', callId: secondCallId });
+  assert.equal(await Message.countDocuments({ messageType: 'call' }), 2);
+  for (const viewer of [caller, callee]) {
+    const recent = await recentFor(viewer);
+    assert.equal(recent.conversations.length, 1);
+    assert.equal(recent.conversations[0].messageCount, 2);
+    assert.equal(recent.conversations[0].lastMessage.callSummary.callType, 'video');
+    assert.equal(recent.conversations[0].lastMessage.callSummary.outcome, 'missed');
+  }
+});
+
+test('group call history does not activate a direct conversation', async () => {
+  await Message.create({
+    sender: caller._id,
+    chatRoom: new mongoose.Types.ObjectId(),
+    messageType: 'call',
+    content: { text: 'Group voice call ended' },
+    callSummary: { callId: 'group-call-only-1', callType: 'voice', outcome: 'answered', durationSeconds: 4 },
+  });
+  assert.equal((await recentFor(caller)).conversations.length, 0);
+  assert.equal((await recentFor(callee)).conversations.length, 0);
+});
+
+test('a persisted DM call event reaches both personal rooms with reciprocal chat IDs', async (t) => {
+  const events = [];
+  messageController.setIoInstance({
+    to(room) {
+      return { emit(event, payload) { events.push({ room, event, payload }); } };
+    },
+  });
+  t.after(() => messageController.setIoInstance(null));
+  await postSummary(callee, { outcome: 'answered', recipient: caller, durationSeconds: 2 });
+  for (const viewer of [caller, callee]) {
+    const recent = await recentFor(viewer);
+    assert.equal(recent.conversations.length, 1);
+    assert.equal(recent.conversations[0].lastMessage.callSummary.outcome, 'answered');
+  }
+  assert.equal(events.length, 2);
+  assert.deepEqual(events.map(item => [item.room, item.payload.chatId]), [
+    [`user-${caller._id}`, `direct_${callee._id}`],
+    [`user-${callee._id}`, `direct_${caller._id}`],
+  ]);
+  assert.ok(events.every(item => item.event === 'newMessage'));
+  assert.equal(new Set(events.map(item => String(item.payload.message._id))).size, 1);
+
+  await postSummary(caller, { outcome: 'missed', recipient: callee });
+  assert.equal(events.length, 2, 'a losing or duplicate report must not emit twice');
+});
 
 test('a late "answered" upgrades an already-stored "missed"', async () => {
   await postSummary(caller, { outcome: 'missed', recipient: callee });
