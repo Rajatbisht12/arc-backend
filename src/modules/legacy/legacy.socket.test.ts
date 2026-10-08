@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { isTemporaryCallNotification } from "../notifications/temporaryCallNotifications";
+import { isTemporaryCallNotification, temporaryCallNotificationFilter } from "../notifications/temporaryCallNotifications";
 
 import {
   buildRandomMediaStatePayload,
@@ -73,7 +73,9 @@ assert.equal(voiceNotification.title, "Someone is calling");
 assert.equal(voiceNotification.message, "Incoming voice call");
 assert.equal("randomRoomId" in voiceNotification.data.customData, false);
 assert.equal(isTemporaryCallNotification(notification), true);
-assert.equal(isTemporaryCallNotification({ type: "call", data: { customData: { eventType: "missed_call" } } }), false);
+assert.equal(isTemporaryCallNotification({ type: "call", data: { customData: { eventType: "missed_call" } } }), true);
+assert.ok(temporaryCallNotificationFilter["data.customData.eventType"].$in.includes("missed_call"));
+assert.equal(isTemporaryCallNotification({ type: "call", data: { customData: { eventType: "call_state_update" } } }), false);
 assert.equal(isTemporaryCallNotification({ type: "follow", data: { customData: { eventType: "incoming_call" } } }), false);
 
 for (const callType of ["voice", "video"] as const) {
