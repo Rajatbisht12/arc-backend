@@ -1037,7 +1037,7 @@ router.get("/", protect, async (req, res) => {
   }
 });
 
-// Read incoming-call invitations remain visible for the duration of a visit to
+// Read incoming/missed call rows remain visible for the duration of a visit to
 // Notifications. The App invokes this on screen exit, after its qualified
 // viewport reads have settled. Unseen/unread calls and ordinary rows are kept.
 router.post("/clear-read-calls", protect, async (req, res) => {

@@ -1,6 +1,6 @@
-// Only incoming-call invitations have an ephemeral inbox lifecycle. Call
-// history in chats and every other notification type remain untouched.
-export const TEMPORARY_CALL_EVENT_TYPES = ["incoming_call", "incoming_group_call"] as const;
+// Call inbox rows (including a DM invitation transitioned to missed) are
+// ephemeral once read. Chat call history and all other notifications remain.
+export const TEMPORARY_CALL_EVENT_TYPES = ["incoming_call", "incoming_group_call", "missed_call"] as const;
 
 export const temporaryCallNotificationFilter = {
   type: "call",
