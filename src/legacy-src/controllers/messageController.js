@@ -32,6 +32,7 @@ const {
 const { resolveGroupAddPrivacy } = require('../utils/groupAddPrivacy');
 const { resolvePublicWebOrigin } = require('../utils/publicWebUrl');
 const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
+const { canReadMessageVideo } = require('../utils/messageVideoAccess');
 const { hydrateBroadcastMessageCtas } = require('../services/officialSquadHunt');
 const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
 const {
@@ -444,6 +445,31 @@ const sendDirectMessage = async (req, res) => {
 };
 
 // Get direct messages between two users
+// A cached message may outlive its short-lived private S3 URL. Reissue only
+// the requested video URL after applying the same message visibility rules as
+// history; never make the underlying object public or trust a client URL.
+const getMessageVideoPlaybackUrl = async (req, res) => {
+  try {
+    const { messageId, mediaIndex } = req.params;
+    const index = Number(mediaIndex);
+    if (!/^[a-f\d]{24}$/i.test(messageId) || !Number.isSafeInteger(index) || index < 0 || index > 2) {
+      return res.status(404).json({ success: false, message: 'Video not found' });
+    }
+    const message = await Message.findById(messageId).lean();
+    if (!message) return res.status(404).json({ success: false, message: 'Video not found' });
+    const room = message.messageType === 'group' ? await ChatRoom.findById(message.chatRoom).lean() : null;
+    const media = message.content?.media?.[index];
+    if (!canReadMessageVideo(message, req.user._id, room) || media?.type !== 'video') {
+      return res.status(404).json({ success: false, message: 'Video not found' });
+    }
+    const delivered = await resolveClientMediaPayload({ url: media.url, publicId: media.publicId });
+    res.set('Cache-Control', 'no-store');
+    return res.status(200).json({ success: true, url: delivered.url });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to load video' });
+  }
+};
+
 const getDirectMessages = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -3575,6 +3601,7 @@ module.exports = {
   getMessageMediaPolicy,
   sendDirectMessage,
   getDirectMessages,
+  getMessageVideoPlaybackUrl,
   createChatRoom,
   getChatRooms,
   getRecentConversations,
