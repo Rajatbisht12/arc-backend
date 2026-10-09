@@ -5,6 +5,7 @@ const { uploadMultiple, uploadFields } = require('../middleware/upload');
 const {
   sendDirectMessage,
   getDirectMessages,
+  getMessageVideoPlaybackUrl,
   createChatRoom,
   getChatRooms,
   getRecentConversations,
@@ -110,6 +111,7 @@ const addReactionValidation = [
 // Routes
 router.post('/direct', protect, uploadMultiple('media', 3), sendDirectMessageValidation, sendDirectMessage);
 router.get('/direct/:userId', protect, getDirectMessages);
+router.get('/media/:messageId/video/:mediaIndex', protect, getMessageVideoPlaybackUrl);
 router.get('/recent', protect, getRecentConversations);
 router.post('/rooms', protect, createChatRoomValidation, createChatRoom);
 router.get('/rooms', protect, getChatRooms);
