@@ -17,6 +17,7 @@ const { attachIsSavedFlags } = require('../utils/savedFlags');
 const { getJson, setJson } = require('../utils/redisCache');
 const { profileCacheKey, invalidateProfileCache } = require('../utils/profileCache');
 const { usernameOwnerFilter } = require('../services/usernameLookupService');
+const { resolveBioMentions } = require('../utils/bioMentions');
 const { publishPrivacySettingsUpdate, evictPresenceAudience, removePresenceSubscription } = require('../utils/presencePrivacy');
 const { invalidateUserCache } = require('../middleware/auth');
 const log = require('../utils/logger');
@@ -863,6 +864,11 @@ const getUser = async (req, res) => {
     ]);
 
     const profileDto = formatUserDTO(user, isGuest, isSelf, privacyRelationship.access.canSeeOnlineStatus);
+    if (profileDto.profile?.bio) {
+      profileDto.profile.bioMentions = await resolveBioMentions(
+        profileDto.profile.bio, User, profileDto.profile.bioMentions
+      );
+    }
     if (!isSelf) delete profileDto.privacySettings;
     const deliveredRecentPosts = await resolveClientMediaPayload(
       await attachIsSavedFlags(recentPosts.map(p => formatPostDTO(p, isGuest, isSelf)), req.user)
