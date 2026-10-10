@@ -890,35 +890,58 @@ const getPosts = async (req, res) => {
     const page = normalizePage(req.query.page);
     const limit = normalizeLimit(req.query.limit, 10, 100);
     const search = normalizeSearchPattern(req.query.search);
-    const author = req.query.author || '';
+    const author = String(req.query.author || '').trim();
     const isActive = req.query.isActive;
 
+    if (author && !['player', 'team', 'admin'].includes(author)) {
+      return res.status(400).json({ success: false, message: 'Invalid author type' });
+    }
+    if (isActive !== undefined && !['true', 'false'].includes(isActive)) {
+      return res.status(400).json({ success: false, message: 'Invalid post status' });
+    }
+
     const query = {};
-    
-    if (search) {
-      query.$or = [
-        { content: { $regex: search, $options: 'i' } },
-        { 'author.username': { $regex: search, $options: 'i' } },
-        { 'author.profile.displayName': { $regex: search, $options: 'i' } }
-      ];
-    }
-    
-    if (author) {
-      query['author.userType'] = author;
-    }
-    
     if (isActive !== undefined) {
       query.isActive = isActive === 'true';
     }
 
-    const posts = await Post.find(query)
-      .populate('author', 'username email profile.displayName profile.avatar userType')
-      .select('content images postType achievementInfo visibility likes comments createdAt updatedAt isActive hiddenByAdmin author')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await Post.countDocuments(query);
+    // Author is an ObjectId reference, not an embedded Post document. Resolve
+    // matching IDs once and let Post.author's existing index do the filtering.
+    // This also keeps the default unfiltered Post query unchanged.
+    const expression = search ? { $regex: search, $options: 'i' } : null;
+    const [typeIds, matchingAuthorIds] = await Promise.all([
+      author
+        ? User.distinct('_id', { userType: author }).maxTimeMS(10000)
+        : Promise.resolve(null),
+      search
+        ? User.distinct('_id', {
+          ...(author ? { userType: author } : {}),
+          $or: [
+            { username: expression },
+            { 'profile.displayName': expression }
+          ]
+        }).maxTimeMS(10000)
+        : Promise.resolve([])
+    ]);
+    if (author) query.author = { $in: typeIds };
+    if (search) {
+      // The bounded, escaped substring query preserves partial caption matches.
+      // Author matches use IDs rather than impossible dotted reference paths.
+      query.$or = [
+        { 'content.text': expression },
+        { author: { $in: matchingAuthorIds } }
+      ];
+    }
+    const [posts, total] = await Promise.all([
+      Post.find(query)
+        .populate('author', 'username email profile.displayName profile.avatar userType')
+        .select('content images postType achievementInfo visibility likes comments createdAt updatedAt isActive hiddenByAdmin author')
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(limit)
+        .skip((page - 1) * limit)
+        .maxTimeMS(10000),
+      Post.countDocuments(query).maxTimeMS(10000)
+    ]);
 
     res.json({
       success: true,
