@@ -180,6 +180,11 @@ const userSchema = new mongoose.Schema({
       maxlength: [500, 'Bio cannot exceed 500 characters'],
       default: ''
     },
+    bioMentions: [{
+      _id: false,
+      user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      username: { type: String, required: true }
+    }],
     gender: {
       type: String,
       enum: ['', 'male', 'female', 'other', 'prefer_not_to_say'],

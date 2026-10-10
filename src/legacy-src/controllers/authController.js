@@ -22,6 +22,7 @@ const { TEAM_TYPES, normalizeTeamType } = require('../utils/teamType');
 const { normalizeProfileSocialLinksUpdate } = require('../utils/profileSocialLinks');
 const { normalizeUsernameInput, validateUsernameFormat, isCoreReservedUsername, escapeUsernameRegex } = require('../utils/usernamePolicy');
 const { usernameOwnerFilter } = require('../services/usernameLookupService');
+const { resolveBioMentions } = require('../utils/bioMentions');
 
 const INVALID_LOGIN_MESSAGE = 'Invalid email or password.';
 
@@ -279,6 +280,7 @@ const register = async (req, res) => {
     }
 
     // Create new user
+    const bioMentions = await resolveBioMentions(bio, User);
     const userData = {
       username,
       email,
@@ -287,6 +289,7 @@ const register = async (req, res) => {
       profile: {
         displayName,
         bio,
+        bioMentions,
         gender,
         dob,
         location: location || '',
@@ -579,6 +582,11 @@ const getMe = async (req, res) => {
       .populate('following', 'username profile.displayName profile.avatar');
 
     const userResponse = sanitizeUserResponse(user);
+    if (userResponse.profile?.bio) {
+      userResponse.profile.bioMentions = await resolveBioMentions(
+        userResponse.profile.bio, User, userResponse.profile.bioMentions
+      );
+    }
     userResponse.followersCount = await Follow.getFollowerCount(user._id).catch(() => user.followers?.length || 0);
     userResponse.followingCount = await Follow.getFollowingCount(user._id).catch(() => user.following?.length || 0);
 
@@ -668,7 +676,13 @@ const updateProfile = async (req, res) => {
     
     // Handle profile updates
     if (updates.displayName) updateObject['profile.displayName'] = updates.displayName;
-    if (updates.bio !== undefined) updateObject['profile.bio'] = updates.bio;
+    if (updates.bio !== undefined) {
+      updateObject['profile.bio'] = updates.bio;
+      const storedProfile = await User.findById(userId).select('profile.bioMentions').lean();
+      updateObject['profile.bioMentions'] = await resolveBioMentions(
+        updates.bio, User, storedProfile?.profile?.bioMentions
+      );
+    }
     if (updates.gender !== undefined) updateObject['profile.gender'] = updates.gender;
     if (updates.dob !== undefined) updateObject['profile.dob'] = updates.dob ? new Date(updates.dob) : null;
     if (updates.location !== undefined) updateObject['profile.location'] = updates.location;
@@ -1163,6 +1177,7 @@ const completeProfile = async (req, res) => {
     user.profile.gender = gender;
     user.profile.dob = dob;
     user.profile.bio = bio;
+    user.profile.bioMentions = await resolveBioMentions(bio, User, user.profile.bioMentions);
     if (passwordSetupRequired) {
       // Assignment deliberately goes through the User model's existing
       // pre-save bcrypt hook. The controller never stores or returns plaintext.
