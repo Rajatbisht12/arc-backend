@@ -4,7 +4,9 @@ const path = require('node:path');
 
 const legacyRoot = path.resolve(__dirname, '..');
 const backendRoot = path.resolve(legacyRoot, '..');
-const readLegacy = (relativePath) => fs.readFileSync(path.join(legacyRoot, relativePath), 'utf8');
+// Contract snippets use LF; normalize checked-out CRLF files on Windows.
+const readSource = (filePath) => fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+const readLegacy = (relativePath) => readSource(path.join(legacyRoot, relativePath));
 
 const messageController = readLegacy('controllers/messageController.js');
 const callController = readLegacy('controllers/callController.js');
@@ -19,9 +21,9 @@ const randomConnectController = readLegacy('controllers/randomConnectController.
 const premiumMembershipService = readLegacy('services/premiumMembershipService.js');
 const notificationEmitter = readLegacy('utils/notificationEmitter.js');
 const jobQueueBridge = readLegacy('utils/jobQueue.js');
-const infrastructureQueue = fs.readFileSync(path.join(backendRoot, 'infrastructure', 'jobs', 'queue.ts'), 'utf8');
-const pushMigration = fs.readFileSync(path.join(backendRoot, '..', 'scripts', 'migrate-push-infrastructure.js'), 'utf8');
-const socketSource = fs.readFileSync(path.join(backendRoot, 'modules', 'legacy', 'legacy.socket.ts'), 'utf8');
+const infrastructureQueue = readSource(path.join(backendRoot, 'infrastructure', 'jobs', 'queue.ts'));
+const pushMigration = readSource(path.join(backendRoot, '..', 'scripts', 'migrate-push-infrastructure.js'));
+const socketSource = readSource(path.join(backendRoot, 'modules', 'legacy', 'legacy.socket.ts'));
 
 const controllerWriteBypasses = fs.readdirSync(path.join(legacyRoot, 'controllers'))
   .filter((name) => name.endsWith('.js'))
@@ -43,8 +45,11 @@ assert(messageController.includes('await createMessageNotification(outcome.invit
 assert(messageController.includes('await createMessageNotification(targetUserId, callerId, message._id, {'));
 assert(messageController.includes('await createMessageNotification(recipientIdResolved, senderId, message._id, {'));
 assert(messageController.includes('deepLink: `/conversation/direct_${senderId}`'));
-assert(messageController.includes('await emitNewMessage(`user-${senderId}`, {\n        chatId: `direct_${recipientIdResolved}`'),
+const senderDeviceDelivery = /await emitNewMessage\(`user-\$\{senderId\}`,\s*\{\s*chatId:\s*`direct_\$\{recipientIdResolved\}`/;
+assert(senderDeviceDelivery.test(messageController),
   'direct messages must reach the sender\'s other devices with their own conversation route');
+assert(senderDeviceDelivery.test(messageController.replace(/\r?\n/g, '\r\n')),
+  'the sender-device delivery contract must also pass with Windows line endings');
 assert(messageController.includes('deepLink: `/conversation/${chatRoomId}`'));
 assert(messageController.includes('groupRecipientIds.map((recipientId) => createMessageNotification'));
 assert(messageController.includes('await Promise.allSettled(mentionedUserIds.map((mentionedId) =>')
