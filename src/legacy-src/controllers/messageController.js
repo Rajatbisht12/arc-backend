@@ -81,9 +81,11 @@ const loadHydratedMessageWindow = async (messageIds, { direct = false, group = f
   if (direct) {
     query = query
       .populate('recipient', 'username profile.displayName profile.avatar')
-      .populate('sharedProfile', 'username profile.displayName profile.avatar');
+      .populate('sharedProfile', 'username userType profile.displayName profile.avatar');
   }
-  if (group) query = query.populate('mentions', 'username profile.displayName profile.avatar');
+  if (group) query = query
+    .populate('sharedProfile', 'username userType profile.displayName profile.avatar')
+    .populate('mentions', 'username profile.displayName profile.avatar');
   const hydrated = await query.lean();
   const byId = new Map(hydrated.map((message) => [idString(message), message]));
   return messageIds.map((messageId) => byId.get(String(messageId))).filter(Boolean);
@@ -394,7 +396,7 @@ const sendDirectMessage = async (req, res) => {
       { path: 'replyTo', select: 'content.text sender', populate: { path: 'sender', select: 'username profile.displayName' } },
       { path: 'forwardedFrom', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } },
       { path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } },
-      { path: 'sharedProfile', select: 'username profile.displayName profile.avatar' }
+      { path: 'sharedProfile', select: 'username userType profile.displayName profile.avatar' }
     ]);
 
     // Plain object so nested populated (e.g. sharedPost.author) serializes correctly in JSON/socket
@@ -544,7 +546,7 @@ const getDirectMessages = async (req, res) => {
     .populate('forwardedFrom', 'content.text content.media sender')
     .populate('forwardedFrom.sender', 'username profile.displayName profile.avatar')
     .populate({ path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } })
-    .populate('sharedProfile', 'username profile.displayName profile.avatar')
+    .populate('sharedProfile', 'username userType profile.displayName profile.avatar')
     .populate('reactions.user', 'username profile.displayName')
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -1068,10 +1070,11 @@ const getRecentConversations = async (req, res) => {
 // Send group message
 const sendGroupMessage = async (req, res) => {
   try {
-    let { chatRoomId, text, replyTo, replyToId, forwardedFrom, sharedPostId, sharedPostCaption } = req.body;
+    let { chatRoomId, text, replyTo, replyToId, forwardedFrom, sharedPostId, sharedPostCaption, sharedProfileUsername } = req.body;
     replyTo = replyTo || replyToId;
     text = text != null ? String(text) : '';
     sharedPostId = sharedPostId != null ? (typeof sharedPostId === 'string' ? sharedPostId.trim() : String(sharedPostId)) : null;
+    sharedProfileUsername = typeof sharedProfileUsername === 'string' ? sharedProfileUsername.trim() : null;
     const senderId = req.user._id;
 
     // Check if user is member of the chat room
@@ -1104,6 +1107,7 @@ const sendGroupMessage = async (req, res) => {
     let messageText = text || '';
     let mediaData = [];
     let sharedPostObj = null;
+    let sharedProfileObj = null;
 
     if (sharedPostId) {
       const post = await Post.findById(sharedPostId)
@@ -1141,6 +1145,27 @@ const sendGroupMessage = async (req, res) => {
         });
       }
       sharedPostObj = sharedPostId;
+    }
+
+    if (sharedProfileUsername) {
+      const profileUser = await User.findOne(await usernameOwnerFilter(sharedProfileUsername, { isActive: true }))
+        .select('_id username userType profile privacySettings blockedUsers isActive').lean();
+      if (!profileUser) return res.status(400).json({ success: false, message: 'Profile not found' });
+      const activeMembers = await User.find({
+        _id: { $in: chatRoom.members.map((member) => member.user) },
+        isActive: true
+      }).select('_id userType privacySettings blockedUsers isActive').lean();
+      const access = await Promise.all(activeMembers.map((member) =>
+        resolvePrivacyAccess({ viewer: member, targetUser: profileUser })
+      ));
+      if (access.some((result) => !result.access.canViewProfile)) {
+        return res.status(403).json({
+          success: false,
+          code: 'GROUP_PROFILE_PRIVACY_RESTRICTED',
+          message: 'This profile is not visible to every active group member'
+        });
+      }
+      sharedProfileObj = profileUser._id;
     }
     
     if (forwardedFrom) {
@@ -1181,6 +1206,13 @@ const sendGroupMessage = async (req, res) => {
     if (sharedPostObj && !messageText.trim()) {
       messageText = 'Shared a post';
     }
+    // New clients include a public URL so an older server stores a usable link.
+    // On a server that understands structured profile shares, keep chat-list
+    // previews concise while the actual destination remains in sharedProfile.
+    if (sharedProfileObj && (
+      !messageText.trim() ||
+      messageText.trim() === `https://www.squadhunt.com/${encodeURIComponent(sharedProfileUsername)}`
+    )) messageText = 'Shared a profile';
 
     // Create message
     const messageData = {
@@ -1207,6 +1239,7 @@ const sendGroupMessage = async (req, res) => {
         messageData.sharedPostCaption = sharedPostCaption.trim();
       }
     }
+    if (sharedProfileObj) messageData.sharedProfile = sharedProfileObj;
 
     if (replyTo) {
       const replyMessage = await Message.exists({
@@ -1264,6 +1297,7 @@ const sendGroupMessage = async (req, res) => {
       { path: 'replyTo', select: 'content.text sender', populate: { path: 'sender', select: 'username profile.displayName' } },
       { path: 'forwardedFrom', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } },
       { path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } },
+      { path: 'sharedProfile', select: 'username userType profile.displayName profile.avatar' },
       { path: 'mentions', select: 'username profile.displayName profile.avatar' }
     ]);
 
@@ -1305,7 +1339,7 @@ const sendGroupMessage = async (req, res) => {
       .filter((memberId) => memberId !== String(senderId) && !mentionedIds.has(memberId))));
     if (groupRecipientIds.length > 0) {
       const senderName = messagePojo?.sender?.username || req.user?.username || 'Someone';
-      const messageKind = getMessageKind({ media: mediaData, sharedPost: sharedPostObj, replyTo, forwardedFrom });
+      const messageKind = getMessageKind({ media: mediaData, sharedPost: sharedPostObj, sharedProfile: sharedProfileObj, replyTo, forwardedFrom });
       const notificationResults = await Promise.allSettled(groupRecipientIds.map((recipientId) => createMessageNotification(
         recipientId,
         senderId,
@@ -1463,6 +1497,7 @@ const getGroupMessages = async (req, res) => {
     .populate('forwardedFrom', 'content.text content.media sender')
     .populate('forwardedFrom.sender', 'username profile.displayName profile.avatar')
     .populate({ path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } })
+    .populate('sharedProfile', 'username userType profile.displayName profile.avatar')
     .populate('reactions.user', 'username profile.displayName')
     .populate('mentions', 'username profile.displayName profile.avatar')
     .sort({ createdAt: -1 })
