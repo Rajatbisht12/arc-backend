@@ -1,4 +1,5 @@
 const { Message, ChatRoom } = require('../models/Message');
+const { performance } = require('node:perf_hooks');
 const User = require('../models/User');
 const Follow = require('../models/Follow');
 const Post = require('../models/Post');
@@ -68,6 +69,37 @@ const CALL_OUTCOME_PRIORITY = { missed: 1, declined: 2, answered: 3 };
 
 const sharedPostSelect = 'content.text content.media author likes comments shares createdAt postType visibility isActive hiddenByAdmin';
 const sharedPostAuthorSelect = 'username profile.displayName profile.avatar profilePicture avatar profileImage avatarUrl userType role';
+const sentMessagePopulate = (group) => [
+  { path: 'sender', select: 'username profile.displayName profile.avatar' },
+  ...(!group ? [{ path: 'recipient', select: 'username profile.displayName profile.avatar' }] : []),
+  { path: 'replyTo', select: 'content.text sender', populate: { path: 'sender', select: 'username profile.displayName' } },
+  { path: 'forwardedFrom', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } },
+  { path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } },
+  { path: 'sharedProfile', select: 'username userType profile.displayName profile.avatar' },
+  ...(group ? [{ path: 'mentions', select: 'username profile.displayName profile.avatar' }] : [])
+];
+
+const existingClientSend = async (sender, clientMessageId, destination, group, text = '') => {
+  if (!clientMessageId) return null;
+  const existing = await Message.findOne({ sender, clientMessageId });
+  if (!existing) return null;
+  const sameDestination = group
+    ? existing.messageType === 'group' && String(existing.chatRoom) === String(destination)
+    : existing.messageType === 'direct' && String(existing.recipient) === String(destination);
+  if (!sameDestination || (text && existing.content?.text !== text)) return { conflict: true };
+  await existing.populate(sentMessagePopulate(group));
+  return { message: await prepareMessagePayload(existing) };
+};
+
+const respondToExistingClientSend = (res, existing) => {
+  if (!existing) return false;
+  if (existing.conflict) {
+    res.status(409).json({ success: false, code: 'MESSAGE_ID_REUSED', message: 'Client message ID belongs to another conversation' });
+  } else {
+    res.status(200).json({ success: true, message: 'Message already sent', data: { message: existing.message } });
+  }
+  return true;
+};
 
 const loadHydratedMessageWindow = async (messageIds, { direct = false, group = false } = {}) => {
   if (!Array.isArray(messageIds) || messageIds.length === 0) return [];
@@ -169,8 +201,9 @@ const canAccessMessageForForwarding = async (message, userId) => {
 
 // Send direct message
 const sendDirectMessage = async (req, res) => {
+  const sendStartedAt = performance.now();
   try {
-    let { recipientId, recipientUsername, text, replyTo, replyToId, forwardedFrom, sharedPostId, sharedPostCaption, sharedProfileUsername } = req.body || {};
+    let { recipientId, recipientUsername, text, replyTo, replyToId, forwardedFrom, sharedPostId, sharedPostCaption, sharedProfileUsername, clientMessageId } = req.body || {};
     replyTo = replyTo || replyToId;
     text = text != null ? String(text) : '';
     sharedPostId = sharedPostId != null ? (typeof sharedPostId === 'string' ? sharedPostId.trim() : String(sharedPostId)) : null;
@@ -235,6 +268,10 @@ const sendDirectMessage = async (req, res) => {
         privacyAccess: recipientAccess.access
       });
     }
+
+    // Retry the same logical send without replaying uploads, sockets or push.
+    const priorSend = await existingClientSend(senderId, clientMessageId, recipientIdResolved, false, text);
+    if (respondToExistingClientSend(res, priorSend)) return;
 
     // Handle shared post (rich preview in DM)
     let sharedPostObj = null;
@@ -345,6 +382,7 @@ const sendDirectMessage = async (req, res) => {
       sender: senderId,
       recipient: recipientIdResolved,
       messageType: 'direct',
+      ...(clientMessageId ? { clientMessageId } : {}),
       content: {
         text: (sharedPostCaption && sharedPostCaption.trim()) ? sharedPostCaption.trim() : (messageText || defaultText),
         media: mediaData
@@ -387,20 +425,25 @@ const sendDirectMessage = async (req, res) => {
       }
     }
 
-    const message = await Message.create(messageData);
+    const persistStartedAt = performance.now();
+    let message;
+    try {
+      message = await Message.create(messageData);
+    } catch (error) {
+      if (clientMessageId && error.code === 11000) {
+        const racedSend = await existingClientSend(senderId, clientMessageId, recipientIdResolved, false, text);
+        if (respondToExistingClientSend(res, racedSend)) return;
+      }
+      throw error;
+    }
+    const persistedAt = performance.now();
     
     // Populate sender, recipient, sharedPost for rich preview
-    await message.populate([
-      { path: 'sender', select: 'username profile.displayName profile.avatar' },
-      { path: 'recipient', select: 'username profile.displayName profile.avatar' },
-      { path: 'replyTo', select: 'content.text sender', populate: { path: 'sender', select: 'username profile.displayName' } },
-      { path: 'forwardedFrom', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } },
-      { path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } },
-      { path: 'sharedProfile', select: 'username userType profile.displayName profile.avatar' }
-    ]);
+    await message.populate(sentMessagePopulate(false));
 
     // Plain object so nested populated (e.g. sharedPost.author) serializes correctly in JSON/socket
     const messagePojo = await prepareMessagePayload(message);
+    const emitStartedAt = performance.now();
 
     // Emit the chat event immediately. Socket connectivity is transport
     // presence, not proof that a particular conversation is visible on any
@@ -410,15 +453,23 @@ const sendDirectMessage = async (req, res) => {
         chatId: `direct_${senderId}`,
         message: messagePojo
       });
+      // The HTTP caller reconciles locally; other devices signed in as the
+      // sender need the same persisted message with their own DM route.
+      await emitNewMessage(`user-${senderId}`, {
+        chatId: `direct_${recipientIdResolved}`,
+        message: messagePojo
+      });
       if (process.env.NODE_ENV === 'development') { console.log('Real-time message emitted successfully');}
     } else {
       if (process.env.NODE_ENV === 'development') { console.log('Socket.io not available for real-time messaging');}
     }
+    const emittedAt = performance.now();
 
     // Always create/update the durable notification. Active-conversation push
     // suppression must be installation-scoped; a process-local Socket.IO room
     // cannot distinguish foreground chat, background app, or another device.
     await createMessageNotification(recipientIdResolved, senderId, message._id, {
+      deferPushDispatch: true,
       conversationId: `direct_${senderId}`,
       chatId: `direct_${senderId}`,
       muteKey: senderId,
@@ -427,6 +478,9 @@ const sendDirectMessage = async (req, res) => {
       primaryMediaType: mediaData[0]?.type,
       deepLink: `/conversation/direct_${senderId}`
     });
+
+    const notifiedAt = performance.now();
+    res.set('Server-Timing', `send_validation;dur=${(persistStartedAt - sendStartedAt).toFixed(1)}, message_persist;dur=${(persistedAt - persistStartedAt).toFixed(1)}, message_hydrate;dur=${(emitStartedAt - persistedAt).toFixed(1)}, socket_delivery;dur=${(emittedAt - emitStartedAt).toFixed(1)}, notification_outbox;dur=${(notifiedAt - emittedAt).toFixed(1)}`);
 
     res.status(201).json({
       success: true,
@@ -1069,8 +1123,9 @@ const getRecentConversations = async (req, res) => {
 
 // Send group message
 const sendGroupMessage = async (req, res) => {
+  const sendStartedAt = performance.now();
   try {
-    let { chatRoomId, text, replyTo, replyToId, forwardedFrom, sharedPostId, sharedPostCaption, sharedProfileUsername } = req.body;
+    let { chatRoomId, text, replyTo, replyToId, forwardedFrom, sharedPostId, sharedPostCaption, sharedProfileUsername, clientMessageId } = req.body;
     replyTo = replyTo || replyToId;
     text = text != null ? String(text) : '';
     sharedPostId = sharedPostId != null ? (typeof sharedPostId === 'string' ? sharedPostId.trim() : String(sharedPostId)) : null;
@@ -1102,6 +1157,9 @@ const sendGroupMessage = async (req, res) => {
         message: 'Only admins can send messages in this group'
       });
     }
+
+    const priorSend = await existingClientSend(senderId, clientMessageId, chatRoomId, true, text);
+    if (respondToExistingClientSend(res, priorSend)) return;
 
     // Handle forwarded messages - get original message content
     let messageText = text || '';
@@ -1219,6 +1277,7 @@ const sendGroupMessage = async (req, res) => {
       sender: senderId,
       chatRoom: chatRoomId,
       messageType: 'group',
+      ...(clientMessageId ? { clientMessageId } : {}),
       content: {
         text: (sharedPostCaption && sharedPostCaption.trim()) ? sharedPostCaption.trim() : messageText,
         media: mediaData
@@ -1284,7 +1343,18 @@ const sendGroupMessage = async (req, res) => {
       messageData.mentions = mentionedUserIds;
     }
 
-    const message = await Message.create(messageData);
+    const persistStartedAt = performance.now();
+    let message;
+    try {
+      message = await Message.create(messageData);
+    } catch (error) {
+      if (clientMessageId && error.code === 11000) {
+        const racedSend = await existingClientSend(senderId, clientMessageId, chatRoomId, true, text);
+        if (respondToExistingClientSend(res, racedSend)) return;
+      }
+      throw error;
+    }
+    const persistedAt = performance.now();
     
     // Update chat room last message and activity
     chatRoom.lastMessage = message._id;
@@ -1292,24 +1362,28 @@ const sendGroupMessage = async (req, res) => {
     await chatRoom.save();
 
     // Populate message info
-    await message.populate([
-      { path: 'sender', select: 'username profile.displayName profile.avatar' },
-      { path: 'replyTo', select: 'content.text sender', populate: { path: 'sender', select: 'username profile.displayName' } },
-      { path: 'forwardedFrom', select: 'content.text content.media sender', populate: { path: 'sender', select: 'username profile.displayName profile.avatar' } },
-      { path: 'sharedPost', select: sharedPostSelect, populate: { path: 'author', select: sharedPostAuthorSelect } },
-      { path: 'sharedProfile', select: 'username userType profile.displayName profile.avatar' },
-      { path: 'mentions', select: 'username profile.displayName profile.avatar' }
-    ]);
+    await message.populate(sentMessagePopulate(true));
 
     const messagePojo = await prepareMessagePayload(message);
+    const emitStartedAt = performance.now();
+
+    // Delivery should not wait for notification fan-out (which may include
+    // push-provider work). The message and room activity are already durable.
+    if (io) {
+      await emitNewMessage(`chat-${chatRoomId}`, {
+        chatId: chatRoomId,
+        message: messagePojo
+      });
+    }
+    const emittedAt = performance.now();
 
     // Send mention notifications
     if (mentionedUserIds.length > 0) {
       const senderUser = await User.findById(senderId).select('username profile.displayName').lean();
       const senderName = senderUser?.username || 'Someone';
-      for (const mentionedId of mentionedUserIds) {
-        try {
-          await createMessageNotification(mentionedId, senderId, message._id, {
+      const mentionResults = await Promise.allSettled(mentionedUserIds.map((mentionedId) =>
+        createMessageNotification(mentionedId, senderId, message._id, {
+            deferPushDispatch: true,
             conversationId: String(chatRoomId),
             chatId: String(chatRoomId),
             muteKey: String(chatRoomId),
@@ -1320,15 +1394,17 @@ const sendGroupMessage = async (req, res) => {
             hasMedia: mediaData.length > 0,
             primaryMediaType: mediaData[0]?.type,
             deepLink: `/conversation/${chatRoomId}`
-          });
-        } catch (notifErr) {
+          })
+      ));
+      mentionResults.forEach((result, index) => {
+        if (result.status === 'rejected') {
           log.error('Failed to deliver group mention notification', {
-            error: String(notifErr),
-            recipientId: String(mentionedId),
+            error: String(result.reason),
+            recipientId: String(mentionedUserIds[index]),
             chatRoomId: String(chatRoomId)
           });
         }
-      }
+      });
     }
 
     // Ordinary group messages receive the same durable push/in-app fallback as
@@ -1345,6 +1421,7 @@ const sendGroupMessage = async (req, res) => {
         senderId,
         message._id,
         {
+          deferPushDispatch: true,
           conversationId: String(chatRoomId),
           chatId: String(chatRoomId),
           muteKey: String(chatRoomId),
@@ -1372,17 +1449,8 @@ const sendGroupMessage = async (req, res) => {
       });
     }
 
-    // Emit real-time message to all group members
-    if (io) {
-      if (process.env.NODE_ENV === 'development') { console.log('Emitting real-time group message to chat room:', chatRoomId);}
-      await emitNewMessage(`chat-${chatRoomId}`, {
-        chatId: chatRoomId,
-        message: messagePojo
-      });
-      if (process.env.NODE_ENV === 'development') { console.log('Real-time group message emitted successfully');}
-    } else {
-      if (process.env.NODE_ENV === 'development') { console.log('Socket.io not available for real-time group messaging');}
-    }
+    const notifiedAt = performance.now();
+    res.set('Server-Timing', `send_validation;dur=${(persistStartedAt - sendStartedAt).toFixed(1)}, message_persist;dur=${(persistedAt - persistStartedAt).toFixed(1)}, message_hydrate;dur=${(emitStartedAt - persistedAt).toFixed(1)}, socket_delivery;dur=${(emittedAt - emitStartedAt).toFixed(1)}, notification_outbox;dur=${(notifiedAt - emittedAt).toFixed(1)}`);
 
     res.status(201).json({
       success: true,

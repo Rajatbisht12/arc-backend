@@ -220,21 +220,24 @@ const createMessageNotification = async (recipientId, senderId, messageId, optio
       }
       if (channels.inApp) emitNotification(recipientId, existing);
       if (channels.push) {
-        const { sendPushNotification } = require('./pushNotificationService');
-        const leaseKey = `notification-outbox-${randomUUID()}`;
-        try {
-          const claimed = await Notification.claimPushDelivery(existing._id, leaseKey);
-          if (claimed) {
-            // Another message can replace this coalesced row between the
-            // update and the claim. The claimed document is the authoritative
-            // revision; sending the earlier snapshot can lose the newer push.
-            await sendPushNotification(recipientId, claimed);
-            await Notification.completePushDelivery(existing._id, leaseKey);
+        const dispatchPush = async () => {
+          const leaseKey = `notification-outbox-${randomUUID()}`;
+          try {
+            const { sendPushNotification } = require('./pushNotificationService');
+            const claimed = await Notification.claimPushDelivery(existing._id, leaseKey);
+            if (claimed) {
+              // The claimed row is authoritative if another message replaced
+              // this coalesced notification before dispatch began.
+              await sendPushNotification(recipientId, claimed);
+              await Notification.completePushDelivery(existing._id, leaseKey);
+            }
+          } catch (pushError) {
+            await Notification.retryPushDelivery(existing._id, leaseKey, pushError).catch(() => undefined);
+            log.error('Message push notification error', { error: String(pushError) });
           }
-        } catch (pushError) {
-          await Notification.retryPushDelivery(existing._id, leaseKey, pushError).catch(() => undefined);
-          log.error('Message push notification error', { error: String(pushError) });
-        }
+        };
+        if (options.deferPushDispatch) setImmediate(() => { void dispatchPush(); });
+        else await dispatchPush();
       }
       return existing;
     }
@@ -245,7 +248,8 @@ const createMessageNotification = async (recipientId, senderId, messageId, optio
       type: 'message',
       title: notificationTitle,
       message: notificationMessage,
-      data: notificationDataFields
+      data: notificationDataFields,
+      deferPushDispatch: options.deferPushDispatch === true
     };
 
     try {

@@ -43,9 +43,13 @@ assert(messageController.includes('await createMessageNotification(outcome.invit
 assert(messageController.includes('await createMessageNotification(targetUserId, callerId, message._id, {'));
 assert(messageController.includes('await createMessageNotification(recipientIdResolved, senderId, message._id, {'));
 assert(messageController.includes('deepLink: `/conversation/direct_${senderId}`'));
+assert(messageController.includes('await emitNewMessage(`user-${senderId}`, {\n        chatId: `direct_${recipientIdResolved}`'),
+  'direct messages must reach the sender\'s other devices with their own conversation route');
 assert(messageController.includes('deepLink: `/conversation/${chatRoomId}`'));
 assert(messageController.includes('groupRecipientIds.map((recipientId) => createMessageNotification'));
-assert(messageController.includes('await createMessageNotification(mentionedId, senderId, message._id, {'));
+assert(messageController.includes('await Promise.allSettled(mentionedUserIds.map((mentionedId) =>')
+  && messageController.includes('createMessageNotification(mentionedId, senderId, message._id, {'),
+  'group mention notifications must be awaited as a parallel durable fan-out');
 assert(messageController.includes("messageKind: 'mention'"), 'group mentions must use message preferences and group mute state');
 assert(messageController.includes("if (result.status === 'rejected')"), 'group notification fan-out failures must be surfaced');
 assert(!messageController.includes('recipientIsOnline'), 'direct-message notification delivery must not use process-local socket presence');

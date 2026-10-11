@@ -8,7 +8,8 @@ const router = Router();
 const sendDirectMessageValidation = [
   body("recipientId").optional().isString().trim().isMongoId().withMessage("Invalid recipient ID"),
   body("recipientUsername").optional().trim(),
-  body("text").optional().isLength({ max: 1000 }).withMessage("Message cannot exceed 1000 characters")
+  body("text").optional().isLength({ max: 1000 }).withMessage("Message cannot exceed 1000 characters"),
+  body("clientMessageId").optional().isUUID().withMessage("Invalid client message ID")
 ];
 
 const createChatRoomValidation = [
@@ -27,7 +28,8 @@ const addMemberValidation = [body("memberId").isString().notEmpty().withMessage(
 const updateMemberRoleValidation = [body("role").isIn(["admin", "member"]).withMessage("Role must be either admin or member")];
 const sendGroupMessageValidation = [
   body("chatRoomId").isString().notEmpty().withMessage("Chat room ID is required").isMongoId().withMessage("Invalid chat room ID"),
-  body("text").optional().isLength({ max: 1000 }).withMessage("Message cannot exceed 1000 characters")
+  body("text").optional().isLength({ max: 1000 }).withMessage("Message cannot exceed 1000 characters"),
+  body("clientMessageId").optional().isUUID().withMessage("Invalid client message ID")
 ];
 const addReactionValidation = [
   body("emoji").notEmpty().withMessage("Emoji is required").isLength({ min: 1, max: 10 }).withMessage("Invalid emoji")
