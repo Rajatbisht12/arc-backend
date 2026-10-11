@@ -19,6 +19,9 @@ const messageSchema = new mongoose.Schema({
     enum: ['direct', 'group', 'call'],
     required: [true, 'Message type is required']
   },
+  // The client keeps this key across retries. A unique sender/key pair makes
+  // an uncertain HTTP timeout safe to retry without creating a second message.
+  clientMessageId: { type: String, trim: true, maxlength: 100 },
   // Explicit marker for group ACTIVITY events (name/description/member/role
   // changes). When `eventType` is set, clients render this as a centered system
   // message, never a normal chat bubble. Kept under messageType 'group' so
@@ -349,6 +352,10 @@ messageSchema.index({ recipient: 1, createdAt: -1 });
 messageSchema.index({ chatRoom: 1, createdAt: -1 });
 messageSchema.index({ messageType: 1, createdAt: -1 });
 messageSchema.index({ broadcastRecipient: 1 }, { unique: true, sparse: true });
+messageSchema.index(
+  { sender: 1, clientMessageId: 1 },
+  { unique: true, partialFilterExpression: { clientMessageId: { $type: 'string' } }, name: 'message_client_idempotency' }
+);
 // Bounded chat-history windows walk a stable (createdAt, _id) cursor. Keep
 // direct and group timelines covered so finding the first unread boundary and
 // paging around it never requires loading the full conversation.

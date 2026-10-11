@@ -291,41 +291,51 @@ const createAndEmitNotification = async (notificationData) => {
     }
 
     if (channels.push) {
-      const leaseKey = `notification-outbox-${randomUUID()}`;
-      try {
-        const { sendPushNotification } = require('./pushNotificationService');
-        let deliveryNotification = normalizedNotificationData;
-        if (notification) {
-          const Notification = require('../models/Notification');
-          deliveryNotification = await Notification.claimPushDelivery(notification._id, leaseKey);
-        }
-        if (deliveryNotification) {
-          const pushResult = await sendPushNotification(
-            normalizedNotificationData.recipient,
-            deliveryNotification
-          );
-          log.debug('Notification push dispatch completed', {
-            userId: String(normalizedNotificationData.recipient || ''),
-            notificationId: String(notification?._id || ''),
-            type: normalizedNotificationData.type || 'system',
-            requestKey: String(pushResult?.requestKey || '').slice(0, 16),
-            reasonCode: pushResult?.reasonCode || '',
-            submitted: Number(pushResult?.submitted || 0),
-            accepted: Number(pushResult?.accepted || 0),
-            failed: Number(pushResult?.failed || 0),
-            skipped: Number(pushResult?.skipped || 0)
-          });
+      const dispatchPush = async () => {
+        const leaseKey = `notification-outbox-${randomUUID()}`;
+        try {
+          const { sendPushNotification } = require('./pushNotificationService');
+          let deliveryNotification = normalizedNotificationData;
           if (notification) {
             const Notification = require('../models/Notification');
-            await Notification.completePushDelivery(notification._id, leaseKey);
+            deliveryNotification = await Notification.claimPushDelivery(notification._id, leaseKey);
           }
+          if (deliveryNotification) {
+            const pushResult = await sendPushNotification(
+              normalizedNotificationData.recipient,
+              deliveryNotification
+            );
+            log.debug('Notification push dispatch completed', {
+              userId: String(normalizedNotificationData.recipient || ''),
+              notificationId: String(notification?._id || ''),
+              type: normalizedNotificationData.type || 'system',
+              requestKey: String(pushResult?.requestKey || '').slice(0, 16),
+              reasonCode: pushResult?.reasonCode || '',
+              submitted: Number(pushResult?.submitted || 0),
+              accepted: Number(pushResult?.accepted || 0),
+              failed: Number(pushResult?.failed || 0),
+              skipped: Number(pushResult?.skipped || 0)
+            });
+            if (notification) {
+              const Notification = require('../models/Notification');
+              await Notification.completePushDelivery(notification._id, leaseKey);
+            }
+          }
+        } catch (pushError) {
+          if (notification) {
+            const Notification = require('../models/Notification');
+            await Notification.retryPushDelivery(notification._id, leaseKey, pushError).catch(() => undefined);
+          }
+          log.error('Push notification delivery failed', { error: String(pushError) });
         }
-      } catch (pushError) {
-        if (notification) {
-          const Notification = require('../models/Notification');
-          await Notification.retryPushDelivery(notification._id, leaseKey, pushError).catch(() => undefined);
-        }
-        log.error('Push notification delivery failed', { error: String(pushError) });
+      };
+      // Message sends wait for the durable notification/outbox row, not the
+      // external push provider. Immediate dispatch still runs, and the outbox
+      // recovery worker can resume it after a process interruption.
+      if (normalizedNotificationData.deferPushDispatch && notification) {
+        setImmediate(() => { void dispatchPush(); });
+      } else {
+        await dispatchPush();
       }
     }
 
