@@ -33,6 +33,7 @@ const {
 const { resolveGroupAddPrivacy } = require('../utils/groupAddPrivacy');
 const { resolvePublicWebOrigin } = require('../utils/publicWebUrl');
 const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
+const { groupMessageDeliveryRooms } = require('../utils/groupMessageDeliveryRooms');
 const { canReadMessageVideo } = require('../utils/messageVideoAccess');
 const { hydrateBroadcastMessageCtas } = require('../services/officialSquadHunt');
 const { rewritePublicMediaPayload } = require('../utils/mediaDelivery');
@@ -1370,7 +1371,7 @@ const sendGroupMessage = async (req, res) => {
     // Delivery should not wait for notification fan-out (which may include
     // push-provider work). The message and room activity are already durable.
     if (io) {
-      await emitNewMessage(`chat-${chatRoomId}`, {
+      await emitNewMessage(groupMessageDeliveryRooms(chatRoom.members), {
         chatId: chatRoomId,
         message: messagePojo
       });
