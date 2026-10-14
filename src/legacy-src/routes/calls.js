@@ -14,6 +14,7 @@ const {
 } = require('../controllers/callController');
 const {
   getPendingCall,
+  getActiveCall,
   getCallSession,
   acceptCallSession,
   declineCallSession,
@@ -81,6 +82,7 @@ router.post(
 // Durable call state used by killed-app notification actions and multi-device
 // reconciliation. These routes do not expose media credentials.
 router.get('/sessions/pending', protect, getPendingCall);
+router.get('/sessions/active', protect, getActiveCall);
 router.get('/sessions/:callId', protect, callIdParam(), handleValidationErrors, getCallSession);
 router.post('/sessions/:callId/accept', protect, callIdParam(), handleValidationErrors, acceptCallSession);
 router.post('/sessions/:callId/decline', protect, callIdParam(), handleValidationErrors, declineCallSession);

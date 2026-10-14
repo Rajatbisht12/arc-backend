@@ -1,6 +1,7 @@
 const {
   serializeCallSession,
   getPendingCallSession,
+  getActiveCallSessionForUser,
   getCallSessionForParticipant,
   transitionCallSession
 } = require('../services/callSessionService');
@@ -33,6 +34,15 @@ const getPendingCall = async (req, res) => {
     return res.json({ success: true, data: { session: serializeCallSession(session) } });
   } catch (error) {
     return sendError(res, error, 'load pending');
+  }
+};
+
+const getActiveCall = async (req, res) => {
+  try {
+    const session = await getActiveCallSessionForUser(userId(req));
+    return res.json({ success: true, data: { session: serializeCallSession(session) } });
+  } catch (error) {
+    return sendError(res, error, 'load active');
   }
 };
 
@@ -111,6 +121,7 @@ const performAction = (action) => async (req, res) => {
 
 module.exports = {
   getPendingCall,
+  getActiveCall,
   getCallSession,
   acceptCallSession: performAction('accept'),
   declineCallSession: performAction('decline'),
