@@ -63,7 +63,7 @@ const bootstrap = async () => {
   try {
     await connectRedis();
   } catch (redisErr) {
-    logger.warn("Redis unavailable — caching disabled for this session", { error: String(redisErr) });
+    logger.warn("Redis unavailable, caching disabled for this session", { error: String(redisErr) });
   }
 
   // Inject shared Redis client into legacy JS bridge
@@ -155,7 +155,7 @@ const bootstrap = async () => {
 
   // ── Graceful shutdown (critical for ECS Fargate rolling deploys) ──
   const shutdown = async (signal: string) => {
-    logger.info(`${signal} received — starting graceful shutdown`);
+    logger.info(`${signal} received, starting graceful shutdown`);
 
     // 1. Stop accepting new connections
     httpServer.close(() => {

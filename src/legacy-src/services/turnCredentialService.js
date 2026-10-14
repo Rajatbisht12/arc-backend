@@ -51,7 +51,7 @@ class TurnService {
         expiresAt: new Date(cred.expiresAt).toISOString(),
       };
     } catch (err) {
-      this.logger.warn?.('[turn] Metered unavailable — serving fallback ICE:', err?.message || err);
+      this.logger.warn?.('[turn] Metered unavailable, serving fallback ICE:', err?.message || err);
       return { iceServers: FALLBACK_ICE, source: 'fallback' };
     }
   }

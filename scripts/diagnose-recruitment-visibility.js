@@ -64,7 +64,7 @@ const OWNER_PREDICATES = [
   const total = await recs.countDocuments({});
   console.log(`teamrecruitments total: ${total}`);
   if (total === 0) {
-    console.log('No recruitment documents exist at all — the POST is not persisting.');
+    console.log('No recruitment documents exist at all, so the POST is not persisting.');
     return mongoose.disconnect();
   }
 

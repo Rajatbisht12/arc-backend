@@ -17,8 +17,8 @@ const PLAYER_PLANS = [
     creditsPerMonth: 0,
     description: 'Get started with basic limits.',
     features: [
-      'Random Connect — 3-minute call duration',
-      'Gender Filter — 5 uses/day',
+      'Random Connect - 3-minute call duration',
+      'Gender Filter - 5 uses/day',
       '2 player cards/month',
       '5 recruitment applications/month',
       'Normal visibility in suggestions',
@@ -31,7 +31,7 @@ const PLAYER_PLANS = [
       { heading: 'Gender Filter', text: 'Use the gender filter up to 5 times per day.' },
       { heading: 'Player Cards', text: 'Post up to 2 player cards per month.' },
       { heading: 'Recruitment Applications', text: 'Apply to up to 5 recruitment posts per month, including staff recruitment posts.' },
-      { heading: 'Visibility', text: 'Your profile and player card appear in suggestions and discover like everyone else—no boost. Full access to post, join tournaments and use messages.' },
+      { heading: 'Visibility', text: 'Your profile and player card appear in suggestions and discover like everyone else, with no boost. Full access to post, join tournaments and use messages.' },
       { heading: 'Credits', text: 'No boost credits on Free. You can still create and join everything; only paid plans get credits to boost posts for more reach.' }
     ]
   },
@@ -47,11 +47,11 @@ const PLAYER_PLANS = [
     features: [
       'Pro Badge on Profile',
       'Eligible for Creator Monetization',
-      'Random Connect — Unlimited Call Duration',
-      'Gender Filter — Unlimited Daily Uses',
-      'Extended Player Card Limits — 10/month',
-      'Extended Recruitment Applications — 20/month',
-      'Get Discovered — More Visibility'
+      'Random Connect - Unlimited Call Duration',
+      'Gender Filter - Unlimited Daily Uses',
+      'Extended Player Card Limits - 10/month',
+      'Extended Recruitment Applications - 20/month',
+      'Get Discovered - More Visibility'
     ],
     cta: 'Upgrade to Pro',
     highlighted: true,
@@ -62,7 +62,7 @@ const PLAYER_PLANS = [
       { heading: 'Gender Filter', text: 'Use the gender filter with unlimited daily access. Free users can use the gender filter up to 5 times per day.' },
       { heading: 'Extended Player Card Limits', text: 'Post up to 10 player cards per month, compared to 2 player cards per month for free users.' },
       { heading: 'Extended Recruitment Applications', text: 'Apply to up to 20 recruitment posts per month, including staff recruitment posts. Free users can apply to up to 5 recruitment posts per month.' },
-      { heading: 'Get Discovered — More Visibility', text: 'Your profile, posts, and player cards receive higher visibility across relevant discovery and search surfaces, helping more users and teams discover you.' }
+      { heading: 'Get Discovered - More Visibility', text: 'Your profile, posts, and player cards receive higher visibility across relevant discovery and search surfaces, helping more users and teams discover you.' }
     ]
   },
   {
@@ -132,7 +132,7 @@ const TEAM_PLANS = [
     description: 'For growing teams.',
     features: [
       'Premium Badge',
-      'Extended Recruitment Posting Limits — 30/month',
+      'Extended Recruitment Posting Limits - 30/month',
       'More Visibility Across All Posts & Recruitment Listings',
       'Priority Notifications for Squad Tournaments',
       'Enhanced Team Profile Visibility'
@@ -165,7 +165,7 @@ const TEAM_PLANS = [
     cta: 'Upgrade to Org',
     highlighted: false,
     exploreDetails: [
-      { heading: 'Credits – best value', text: '60 credits every month. 1 credit = 1 post boost (₹100 value each). So for ₹499 you get 60 boosts—₹6000 value. Ideal for orgs that post and recruit frequently.' },
+      { heading: 'Credits – best value', text: '60 credits every month. 1 credit = 1 post boost (₹100 value each). So for ₹499 you get 60 boosts - ₹6000 value. Ideal for orgs that post and recruit frequently.' },
       { heading: 'Everything in Pro', text: 'All Pro benefits: Premium Badge, 30 recruitment posts per month, higher visibility across posts and recruitment listings, priority notifications for relevant squad tournaments, and enhanced team profile visibility.' },
       { heading: 'Custom branding & verified badge', text: 'Org badge and verified status on your team profile. Optional custom branding so your org stands out.' },
       { heading: 'Priority support', text: 'Your support requests are prioritised so you get faster help for billing, features and issues.' },
