@@ -178,7 +178,7 @@ async function sendOTPEmail(to, otp, purpose = 'login') {
               or visit
               <a href="https://www.squadhunt.com" style="color:#9ca3af;text-decoration:none;"> squadhunt.com</a>.
             </p>
-            <p style="margin:0;font-size:11px;color:#6b7280;">— SquadHunt</p>
+            <p style="margin:0;font-size:11px;color:#6b7280;">- SquadHunt</p>
           </td>
         </tr>
       </table>
@@ -223,14 +223,14 @@ const sanitizeEmailLink = (value) => {
 async function sendNotificationEmail(to, title, message, link, context = {}) {
   const subject = `SquadHunt: ${title}`;
   const safeLink = sanitizeEmailLink(link);
-  const text = `${title}\n\n${message}${safeLink ? `\n\nView in SquadHunt: ${safeLink}` : ''}\n\n— SquadHunt`;
+  const text = `${title}\n\n${message}${safeLink ? `\n\nView in SquadHunt: ${safeLink}` : ''}\n\n- SquadHunt`;
   const html = `
     <div style="font-family: sans-serif;">
       <h3>${escapeHtml(title)}</h3>
       <p>${escapeHtml(message)}</p>
       ${safeLink ? `<p><a href="${escapeHtml(safeLink)}">View in SquadHunt</a></p>` : ''}
       <p style="margin:8px 0 2px;color: #999; font-size: 12px;">Need help? Email <a href="mailto:support@squadhunt.com" style="color:#9ca3af;text-decoration:none;">support@squadhunt.com</a>.</p>
-      <p style="margin:0;color: #999; font-size: 12px;">— SquadHunt</p>
+      <p style="margin:0;color: #999; font-size: 12px;">- SquadHunt</p>
     </div>
   `;
   return sendTransactionalEmail({

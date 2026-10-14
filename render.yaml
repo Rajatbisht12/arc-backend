@@ -80,7 +80,7 @@ services:
       - key: SMTP_PASS
         sync: false
       - key: SMTP_FROM
-        value: "ARC <noreply@squadhunt.com>"
+        value: "SquadHunt <noreply@squadhunt.com>"
       - key: ZEGOCLOUD_APP_ID
         sync: false
       - key: ZEGOCLOUD_SERVER_SECRET

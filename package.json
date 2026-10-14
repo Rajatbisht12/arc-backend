@@ -1,9 +1,11 @@
 {
   "name": "arc-modular-backend",
   "version": "1.0.0",
-  "description": "Scalable modular monolith backend for ARC Squad Hunt",
+  "description": "Scalable modular monolith backend for SquadHunt",
   "main": "dist/launcher.js",
   "scripts": {
+    "check:official-copy": "node scripts/check-official-copy.cjs",
+    "prebuild": "npm run check:official-copy",
     "dev": "tsx watch src/launcher.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/launcher.js",

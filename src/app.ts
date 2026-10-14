@@ -75,7 +75,7 @@ export const createApp = () => {
     return next();
   });
 
-  app.get("/", (_req, res) => res.json({ success: true, message: "ARC Backend running" }));
+  app.get("/", (_req, res) => res.json({ success: true, message: "SquadHunt Backend running" }));
   app.get("/health", (_req, res) => res.json({
     success: true,
     service: "arc-modular-backend",

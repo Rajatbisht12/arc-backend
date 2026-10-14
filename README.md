@@ -1,6 +1,6 @@
-# ARC Modular Backend
+# SquadHunt Modular Backend
 
-A **fully self-contained modular monolith** backend for ARC Squad Hunt.
+A **fully self-contained modular monolith** backend for SquadHunt.
 
 - **Single deployable service** — no dependency on `../backend` anymore.
 - **Feature modules** with clean boundaries for future extraction.

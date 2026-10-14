@@ -60,7 +60,7 @@ const seedPremiumUser = async () => {
     process.exit(1);
   }
 
-  console.log(`\nFound user: ${user.username} (${user.email}) — type: ${user.userType}`);
+  console.log(`\nFound user: ${user.username} (${user.email}) - type: ${user.userType}`);
 
   const tier = TIER_BY_USER_TYPE[user.userType];
   if (!tier) {

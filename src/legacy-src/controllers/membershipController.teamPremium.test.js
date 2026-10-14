@@ -13,7 +13,7 @@ const {
 
 const EXPECTED_TEAM_PRO_FEATURES = [
   'Premium Badge',
-  'Extended Recruitment Posting Limits — 30/month',
+  'Extended Recruitment Posting Limits - 30/month',
   'More Visibility Across All Posts & Recruitment Listings',
   'Priority Notifications for Squad Tournaments',
   'Enhanced Team Profile Visibility'
@@ -35,11 +35,11 @@ const EXPECTED_TEAM_DETAIL_COPY = [
 const EXPECTED_PLAYER_PRO_FEATURES = [
   'Pro Badge on Profile',
   'Eligible for Creator Monetization',
-  'Random Connect — Unlimited Call Duration',
-  'Gender Filter — Unlimited Daily Uses',
-  'Extended Player Card Limits — 10/month',
-  'Extended Recruitment Applications — 20/month',
-  'Get Discovered — More Visibility'
+  'Random Connect - Unlimited Call Duration',
+  'Gender Filter - Unlimited Daily Uses',
+  'Extended Player Card Limits - 10/month',
+  'Extended Recruitment Applications - 20/month',
+  'Get Discovered - More Visibility'
 ];
 const EXPECTED_PLAYER_DETAIL_HEADINGS = [
   'Pro Badge on Profile',
@@ -48,7 +48,7 @@ const EXPECTED_PLAYER_DETAIL_HEADINGS = [
   'Gender Filter',
   'Extended Player Card Limits',
   'Extended Recruitment Applications',
-  'Get Discovered — More Visibility'
+  'Get Discovered - More Visibility'
 ];
 const EXPECTED_PLAYER_DETAIL_COPY = [
   'Display the Pro badge on your profile and in relevant discovery and search areas.',

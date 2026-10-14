@@ -76,8 +76,8 @@ const assertSquadhuntDelivery = (delivery) => {
   assert.match(notificationDelivery.html, />View in SquadHunt</);
   assert.match(notificationDelivery.text, /https:\/\/www\.squadhunt\.com\/settings\/security/);
   assert.doesNotMatch(notificationDelivery.text, /squadhunt\.in/);
-  assert.match(notificationDelivery.text, /— SquadHunt/);
-  assert.match(notificationDelivery.html, /— SquadHunt/);
+  assert.match(notificationDelivery.text, /- SquadHunt/);
+  assert.match(notificationDelivery.html, /- SquadHunt/);
 
   // These are the only hand-authored email templates. Premium, payment,
   // account, legal and critical notifications all use sendNotificationEmail.

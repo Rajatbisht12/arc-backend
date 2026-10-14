@@ -45,7 +45,7 @@ const bootstrap = async () => {
   }));
 
   const shutdown = async (signal: string) => {
-    logger.info(`${signal} received — stopping Clip HLS worker`);
+    logger.info(`${signal} received, stopping Clip HLS worker`);
     await worker.close();
     await mongoose.disconnect();
     process.exit(0);

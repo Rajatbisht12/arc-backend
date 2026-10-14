@@ -76,7 +76,7 @@ docker push $ECR_REPO:v1.0.0
 # Create a Redis cluster (r6g.large for 50K+ users)
 aws elasticache create-replication-group \
   --replication-group-id arc-redis \
-  --replication-group-description "ARC Backend Redis" \
+  --replication-group-description "SquadHunt Backend Redis" \
   --engine redis \
   --cache-node-type cache.r6g.large \
   --num-cache-clusters 2 \
