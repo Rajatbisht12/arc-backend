@@ -112,6 +112,18 @@ type CallPrivacy = {
 };
 
 const activeCalls = new Map<string, ActiveCallSession>();
+// A transport drop is not a user-initiated leave. Keep the participant's slot
+// while the authenticated client reconnects to its existing call room.
+const pendingGroupDisconnects = new Map<string, ReturnType<typeof setTimeout>>();
+const groupDisconnectKey = (callId: string, userId: string) => `${callId}:${userId}`;
+const cancelGroupDisconnect = (callId: string, userId: string): boolean => {
+  const key = groupDisconnectKey(callId, userId);
+  const timer = pendingGroupDisconnects.get(key);
+  if (!timer) return false;
+  clearTimeout(timer);
+  pendingGroupDisconnects.delete(key);
+  return true;
+};
 const callRequestWindows = new Map<string, number[]>();
 const CALL_REQUEST_WINDOW_MS = 60_000;
 const CALL_REQUEST_MAX_PER_WINDOW = 8;
@@ -594,6 +606,7 @@ const finalizeGroupCall = (io: Server, callId: string): void => {
   if (!session || session.finalized) return;
   session.finalized = true;
   if (session.ringTimer) clearTimeout(session.ringTimer);
+  for (const participantId of session.participants) cancelGroupDisconnect(callId, participantId);
   activeCalls.delete(callId);
 
   const outcome: "answered" | "missed" = session.answered ? "answered" : "missed";
@@ -613,6 +626,9 @@ const handleGroupCallLeave = (io: Server, callId: string, userId: string, socket
   if (!session) {
     return;
   }
+
+  cancelGroupDisconnect(callId, userId);
+  if (!session.participants.has(userId)) return;
 
   session.participants.delete(userId);
   if (socket) {
@@ -1337,6 +1353,8 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
     participantAuthorization.forEach(({ participantId, allowed }) => {
       if (!allowed) session.participants.delete(participantId);
     });
+    const wasParticipant = session.participants.has(userIdStr);
+    const resumed = cancelGroupDisconnect(data.callId, userIdStr);
     session.participants.add(userIdStr);
     socket.data.groupCallChats = {
       ...(socket.data.groupCallChats || {}),
@@ -1375,12 +1393,17 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
       participants: existingParticipants,
     });
     const joiner = userInfo.get(userIdStr);
-    socket.to(`call-${data.callId}`).emit("group-call-participant-joined", {
-      callId: data.callId,
-      userId: userIdStr,
-      username: joiner?.username || "user",
-      displayName: joiner?.displayName || "Participant",
-      avatar: joiner?.avatar || "",
+    if (!wasParticipant || resumed) {
+      socket.to(`call-${data.callId}`).emit("group-call-participant-joined", {
+        callId: data.callId,
+        userId: userIdStr,
+        username: joiner?.username || "user",
+        displayName: joiner?.displayName || "Participant",
+        avatar: joiner?.avatar || "",
+      });
+    }
+    traceCallSignal(resumed ? "group_participant_resumed" : "group_participant_joined", {
+      callId: data.callId, userId: userIdStr, socketId: socket.id
     });
   });
 
@@ -1416,9 +1439,23 @@ export const registerLegacySocketHandlers = (io: Server, socket: Socket): void =
 
   socket.on("disconnect", () => {
     for (const [callId, session] of activeCalls.entries()) {
-      if (session.participants.has(userIdStr)) {
-        handleGroupCallLeave(io, callId, userIdStr);
-      }
+      // An unrelated device's socket may disconnect while this user is in a
+      // call elsewhere. Only the socket that joined this call owns its lease.
+      if (!session.participants.has(userIdStr) || !socket.data?.groupCallChats?.[callId]) continue;
+      if (pendingGroupDisconnects.has(groupDisconnectKey(callId, userIdStr))) continue;
+      traceCallSignal("group_socket_disconnected", { callId, userId: userIdStr, socketId: socket.id });
+      const timer = setTimeout(() => {
+        pendingGroupDisconnects.delete(groupDisconnectKey(callId, userIdStr));
+        void io.in(`call-${callId}`).fetchSockets().then((sockets) => {
+          const stillInCall = sockets.some((connectedSocket) => connectedSocket.rooms.has(`user-${userIdStr}`));
+          if (!stillInCall && activeCalls.get(callId) === session && session.participants.has(userIdStr)) {
+            traceCallSignal("group_disconnect_expired", { callId, userId: userIdStr });
+            handleGroupCallLeave(io, callId, userIdStr);
+          }
+        }).catch((error: unknown) => logger.warn("Group call disconnect check failed", { callId, error: String(error) }));
+      }, CALL_DISCONNECT_GRACE_MS);
+      timer.unref?.();
+      pendingGroupDisconnects.set(groupDisconnectKey(callId, userIdStr), timer);
     }
     // Release accepted durable 1:1 call-session leases held by this user. A
     // refresh, tab close, or network drop during an accepted call otherwise

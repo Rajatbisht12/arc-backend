@@ -427,6 +427,28 @@ const getPendingCallSession = async (calleeId) => {
     .lean();
 };
 
+// A participant may have no call UI after a lost Web socket event while an
+// accepted durable lease remains active. Expose only the authenticated user's
+// own session so the client can offer an explicit, safe recovery action.
+const getActiveCallSessionForUser = async (userId) => {
+  const actorId = toId(userId);
+  if (!actorId) return null;
+  await expireDueCallSessions(100);
+  const now = new Date();
+  return CallSession.findOne({
+    participantLeaseActive: true,
+    source: { $ne: 'random_connect' },
+    randomRoomId: { $in: ['', null] },
+    $and: [
+      { $or: [{ caller: actorId }, { callee: actorId }] },
+      { $or: [
+        { status: 'ringing', expiresAt: { $gt: now } },
+        { status: 'accepted', activeUntil: { $gt: now } }
+      ] }
+    ]
+  }).sort({ createdAt: -1 }).lean();
+};
+
 const transitionCallSession = async ({ callId, actorId, action, reason = '', installationId = '' }) => {
   const normalizedCallId = bounded(callId);
   if (!CALL_ID_PATTERN.test(normalizedCallId)) throw serviceError('Invalid callId');
@@ -672,6 +694,7 @@ module.exports = {
   expireDueCallSessions,
   getCallSessionForParticipant,
   getPendingCallSession,
+  getActiveCallSessionForUser,
   transitionCallSession,
   endAcceptedCallSessionsForUser,
   recoverCallStatePushes,

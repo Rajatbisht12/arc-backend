@@ -63,7 +63,7 @@ test('exactly one shared group message, in the group thread', () => {
   // Never "declined": one member declining is not a group outcome.
   assert.doesNotMatch(writer, /"declined"/);
   // Delivered live to the thread the same way the DM path does it.
-  assert.match(writer, /emit\("newMessage", \{\s*chatId: session\.chatRoomId/);
+  assert.match(writer, /emit\("newMessage", rewritePublicMediaPayload\(\{\s*chatId: session\.chatRoomId/);
 });
 
 test('duration is only recorded for an answered call, measured from the join', () => {
