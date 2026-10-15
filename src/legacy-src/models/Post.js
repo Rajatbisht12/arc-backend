@@ -336,6 +336,7 @@ postSchema.index({ 'recruitmentInfo.gameTitle': 1, 'recruitmentInfo.isActive': 1
 // Compound index for profile-page post queries
 postSchema.index({ author: 1, isActive: 1, visibility: 1, createdAt: -1 });
 postSchema.index({ isActive: 1, hiddenByAdmin: 1, visibility: 1, createdAt: -1, _id: -1 });
+postSchema.index({ isActive: 1, hiddenByAdmin: 1, visibility: 1, _id: 1 }); // public sitemap keyset walk
 postSchema.index({ isActive: 1, hiddenByAdmin: 1, 'content.media.type': 1, createdAt: -1, _id: -1 });
 postSchema.index({ 'viewedBy.user': 1, createdAt: -1 });
 postSchema.index({ 'likes.user': 1, createdAt: -1 });
