@@ -18,6 +18,7 @@ const loadModule = <T>(modulePath: string): T => {
 };
 
 export const postController = loadModule<PostController>(path.join(backendControllerPath, "postController.js"));
+export const publicPostSeoController = loadModule<PostController>(path.join(backendControllerPath, "publicPostSeoController.js"));
 export const { protect, publicOptionalAuth } = loadModule<AuthMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
 export const { uploadFields } = loadModule<UploadMiddleware>(path.join(backendMiddlewarePath, "upload.js"));
 export const { handleValidationErrors } = loadModule<ValidationMiddleware>(path.join(backendMiddlewarePath, "validation.js"));

@@ -16,5 +16,9 @@ const loadModule = <T>(modulePath: string): T => {
 };
 
 export const userController = loadModule<UserController>(path.join(backendControllerPath, "userController.js"));
+export const publicProfileSeoController = loadModule<Record<
+  'getPublicProfileSeo' | 'getPublicProfileSitemap' | 'getPublicProfileSitemapCount',
+  RequestHandler
+>>(path.join(backendControllerPath, 'publicProfileSeoController.js'));
 export const { protect, optionalAuth, publicOptionalAuth } = loadModule<AuthMiddleware>(path.join(backendMiddlewarePath, "auth.js"));
 export const { handleValidationErrors } = loadModule<ValidationMiddleware>(path.join(backendMiddlewarePath, "validation.js"));

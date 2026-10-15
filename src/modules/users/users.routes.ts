@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { body, param } from "express-validator";
 import rateLimit from "express-rate-limit";
-import { handleValidationErrors, optionalAuth, publicOptionalAuth, protect, userController } from "./users.legacy-adapters";
+import { handleValidationErrors, optionalAuth, publicOptionalAuth, protect, publicProfileSeoController, userController } from "./users.legacy-adapters";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const {
@@ -13,8 +13,6 @@ const {
 } = require("../../legacy-src/utils/teamInvitationPolicy.js");
 
 const router = Router();
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const publicProfileSeo = require('../../legacy-src/controllers/publicProfileSeoController.js');
 const avatarProxyLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 60,
@@ -86,9 +84,9 @@ const cancelByUsernameValidation = [
 
 router.get("/", optionalAuth, userController.getUsers);
 router.get("/search", optionalAuth, userController.getUsers);
-router.get('/public-seo/sitemap/count', publicProfileSeo.getPublicProfileSitemapCount);
-router.get('/public-seo/sitemap', publicProfileSeo.getPublicProfileSitemap);
-router.get('/public-seo/profile/:username', [param('username').matches(/^[A-Za-z0-9_]{3,20}$/)], handleValidationErrors, publicProfileSeo.getPublicProfileSeo);
+router.get('/public-seo/sitemap/count', publicProfileSeoController.getPublicProfileSitemapCount);
+router.get('/public-seo/sitemap', publicProfileSeoController.getPublicProfileSitemap);
+router.get('/public-seo/profile/:username', [param('username').matches(/^[A-Za-z0-9_]{3,20}$/)], handleValidationErrors, publicProfileSeoController.getPublicProfileSeo);
 router.get("/resolve-mention/:username", protect, [param("username").matches(/^[A-Za-z0-9_]{3,20}$/)], handleValidationErrors, userController.getMentionUser);
 router.post("/create-team", protect, userController.createTeam);
 router.get("/avatar/:userId", avatarProxyLimiter, userController.getAvatar);
