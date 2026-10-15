@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { body, param } from "express-validator";
 import rateLimit from "express-rate-limit";
-import { handleValidationErrors, publicOptionalAuth, postController, protect, uploadFields, validateAchievementPostBody } from "./posts.legacy-adapters";
+import { handleValidationErrors, publicOptionalAuth, postController, publicPostSeoController, protect, uploadFields, validateAchievementPostBody } from "./posts.legacy-adapters";
 
 const router = Router();
 
@@ -62,6 +62,10 @@ const postAvailabilityLimiter = rateLimit({
 router.post("/", protect, uploadFields([{ name: "media", maxCount: 5 }, { name: "cover", maxCount: 1 }]), createPostValidation, handleValidationErrors, postController.createPost);
 router.get("/", publicOptionalAuth, postController.getPosts);
 router.get("/clips", publicOptionalAuth, postController.getClips);
+router.get("/public-seo/sitemap/count", publicPostSeoController.getPublicPostSitemapCount);
+router.get("/public-seo/sitemap", publicPostSeoController.getPublicPostSitemap);
+router.get("/public-seo/post/:id", postIdValidation, handleValidationErrors, publicPostSeoController.getPublicPostSeo);
+router.get("/public-seo/clip/:id", postIdValidation, handleValidationErrors, publicPostSeoController.getPublicClipSeo);
 // Keep the legacy existence probe for previously published clients. Detail
 // requests now use privacy-aware optional authentication directly.
 router.get("/:id/availability", postAvailabilityLimiter, postIdValidation, handleValidationErrors, postController.getPostAvailability);

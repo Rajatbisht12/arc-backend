@@ -26,6 +26,7 @@ import paymentsRoutes from "./payments/payments.routes";
 import hostVerificationRoutes from "./host-verification/host-verification.routes";
 import callsRoutes from "./calls/calls.routes";
 import rtcRoutes from "./calls/rtc.routes";
+import publicSeoRoutes from './public-seo/public-seo.routes';
 
 export const registerModules = (app: Express): void => {
   registerLegacyMiddleware(app);
@@ -36,6 +37,7 @@ export const registerModules = (app: Express): void => {
   app.use("/api/messages", messagesRoutes);
   app.use("/api/notifications", notificationsRoutes);
   app.use("/api/posts", postsRoutes);
+  app.use('/api/public-seo', publicSeoRoutes);
   app.use("/api/tournaments", tournamentsRoutes);
   app.use("/api/scrims", scrimsRoutes);
   app.use("/api/recruitment", recruitmentRoutes);
