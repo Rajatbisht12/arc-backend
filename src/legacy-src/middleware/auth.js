@@ -7,6 +7,14 @@ const log = require('../utils/logger');
 // ── Cache helpers ────────────────────────────────────────────────────────────
 const USER_CACHE_TTL = 300; // 5 minutes
 const userCacheKey = (id) => `auth:user:${id}`;
+const touchUserActivity = (user) => {
+  if (!user?._id || user.userType === 'system') return;
+  const now = new Date();
+  if (new Date(user.lastSeen || 0).getTime() > now.getTime() - 5 * 60 * 1000) return;
+  void Promise.resolve().then(() => User.updateOne({ _id: user._id, lastSeen: { $lt: new Date(now.getTime() - 5 * 60 * 1000) } }, {
+    $set: { lastSeen: now, 'emailPreferences.lastReengagementAt': null }
+  })).catch((error) => log.warn?.('Activity timestamp update failed', { code: String(error?.code || 'ACTIVITY_UPDATE') }));
+};
 
 /**
  * Fetch user by ID — Redis-first, MongoDB fallback.
@@ -106,6 +114,7 @@ const protect = async (req, res, next) => {
     }
 
     req.user = user;
+    touchUserActivity(user);
     next();
   } catch (error) {
     log.error('Auth error', { error: String(error) });
@@ -173,6 +182,7 @@ const optionalAuth = async (req, res, next) => {
             return sendProfileCompletionRequired(res);
           }
           req.user = user;
+          touchUserActivity(user);
         } else {
           return res.status(401).json({
             success: false,
@@ -211,7 +221,10 @@ const publicOptionalAuth = async (req, res, next) => {
       return next();
     }
     const user = await getCachedUser(decoded.id);
-    if (user?.isActive && user.needsProfileCompletion !== true) req.user = user;
+    if (user?.isActive && user.needsProfileCompletion !== true) {
+      req.user = user;
+      touchUserActivity(user);
+    }
   } catch {
     // Public reads still use the controller's anonymous visibility checks.
     // A stale browser cookie must not turn a public link into a login error.

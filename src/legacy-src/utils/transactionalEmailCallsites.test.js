@@ -13,9 +13,12 @@ const premium = read('services/premiumMembershipService.js');
 const securityEmail = read('utils/securityEmail.js');
 const creatorEarnings = read('services/CreatorEarningsCalculationService.js');
 
-for (const eventType of ['password_reset', 'password_changed']) {
+for (const eventType of ['password_changed']) {
   assert(auth.includes(`eventType: '${eventType}'`), `${eventType} must enqueue a confirmation after a successful mutation`);
 }
+assert(auth.includes("templateId: 'password_reset_confirmation'"), 'password reset must enqueue the approved confirmation template');
+assert(auth.includes("templateId: 'signup_confirmation'"), 'completed signup must enqueue the welcome template');
+assert(admin.includes("templateId: 'account_disabled'"), 'account disablement must enqueue the approved template');
 assert(admin.includes("eventType: 'admin_password_reset'"));
 assert(securityEmail.includes('intent: EMAIL_INTENTS.SECURITY'));
 assert(!securityEmail.toLowerCase().includes('temporary password'));
@@ -107,7 +110,6 @@ for (const eventType of [
   'account_restored',
   'account_suspended',
   'content_report_warning',
-  'report_account_suspended',
   'monetization_approved',
   'monetization_rejected',
   'monetization_revoked',

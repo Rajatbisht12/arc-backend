@@ -7,7 +7,9 @@ const ConnectionQueue = require('../models/ConnectionQueue');
 const { generateToken, generateRefreshToken } = require('../utils/jwt');
 const { uploadAvatar, uploadImage } = require('../utils/cloudinary');
 const { sendOTPEmail } = require('../utils/email');
+const { hashOtp, findMatchingOtp } = require('../utils/otpHash');
 const { enqueuePasswordSecurityEmail } = require('../utils/securityEmail');
+const { queueAutomatedEmail } = require('../services/automatedEmailService');
 const log = require('../utils/logger');
 const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const { invalidateUserCache } = require('../middleware/auth');
@@ -250,13 +252,7 @@ const register = async (req, res) => {
       });
     }
 
-    const otpRecord = await OtpVerification.findOne({
-      email: email.toLowerCase(),
-      otp: String(otp).trim(),
-      purpose: 'register',
-      used: false,
-      expiresAt: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
+    const otpRecord = await findMatchingOtp(OtpVerification, email, 'register', otp);
 
     if (!otpRecord) {
       return res.status(400).json({
@@ -318,6 +314,11 @@ const register = async (req, res) => {
     }
 
     const user = await User.create(userData);
+    try {
+      await queueAutomatedEmail({ userId: user._id, eventKey: `signup:${user._id}`, templateId: 'signup_confirmation' });
+    } catch (emailError) {
+      log.error('Signup confirmation queue failed', { code: String(emailError?.code || 'QUEUE_ERROR') });
+    }
 
     // Generate tokens
     const token = generateToken({ id: user._id, username: user.username, userType: user.userType });
@@ -420,13 +421,7 @@ const resetPasswordWithOtp = async (req, res) => {
       });
     }
 
-    const record = await OtpVerification.findOne({
-      email: cleanEmail,
-      otp: String(otp).trim(),
-      purpose: 'forgot_password',
-      used: false,
-      expiresAt: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
+    const record = await findMatchingOtp(OtpVerification, cleanEmail, 'forgot_password', otp);
 
     if (!record) {
       return res.status(400).json({
@@ -461,12 +456,11 @@ const resetPasswordWithOtp = async (req, res) => {
     // update password (pre-save hook will hash it)
     user.password = newPassword;
     await user.save();
-    void enqueuePasswordSecurityEmail({
-      to: user.email,
-      eventType: 'password_reset'
-    }).catch((emailError) => {
-      log.error('Password reset confirmation email enqueue failed:', { error: String(emailError) });
-    });
+    try {
+      await queueAutomatedEmail({ userId: user._id, eventKey: `password-reset:${record._id}`, templateId: 'password_reset_confirmation' });
+    } catch (emailError) {
+      log.error('Password reset confirmation queue failed', { code: String(emailError?.code || 'QUEUE_ERROR') });
+    }
 
     return res.status(200).json({
       success: true,
@@ -1210,6 +1204,11 @@ const completeProfile = async (req, res) => {
       invalidateUserCache(userId),
       invalidateProfileCache(userId, previousUsername, user.username)
     ]);
+    try {
+      await queueAutomatedEmail({ userId: user._id, eventKey: `signup:${user._id}`, templateId: 'signup_confirmation' });
+    } catch (emailError) {
+      log.error('Signup confirmation queue failed', { code: String(emailError?.code || 'QUEUE_ERROR') });
+    }
 
     // Generate new token with updated username
     const token = generateToken({ id: user._id, username: user.username, userType: user.userType });
@@ -1266,22 +1265,25 @@ const sendOtp = async (req, res) => {
     if (!allowedPurposes.includes(purpose)) {
       return res.status(400).json({ success: false, message: 'Invalid purpose' });
     }
-    if (purpose === 'login') {
+    let recipient = null;
+    if (purpose === 'login' || purpose === 'forgot_password') {
       const user = await User.findOne({ email: normalizedEmail });
       if (!user || user.isSystemAccount || user.userType === 'system') {
+        if (purpose === 'forgot_password') return res.status(200).json({ success: true, message: 'If an account exists, a reset code has been sent.' });
         return res.status(404).json({ success: false, message: 'No account found with this email' });
       }
+      recipient = user;
     }
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const otp = String(require('crypto').randomInt(100000, 1000000));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
     await OtpVerification.deleteMany({ email: normalizedEmail, purpose });
     await OtpVerification.create({
       email: normalizedEmail,
-      otp,
+      otpHash: hashOtp(normalizedEmail, purpose, otp),
       purpose,
       expiresAt
     });
-    const result = await sendOTPEmail(normalizedEmail, otp, purpose);
+    const result = await sendOTPEmail(normalizedEmail, otp, purpose, { firstName: recipient?.profile?.displayName, expiresAt });
     if (!result.sent) {
       return res.status(500).json({
         success: false,
@@ -1315,13 +1317,7 @@ const verifyOtpForRegister = async (req, res) => {
       return res.status(409).json({ success: false, message: 'Email is already in use' });
     }
 
-    const record = await OtpVerification.findOne({
-      email: email.toLowerCase(),
-      otp: String(otp).trim(),
-      purpose: 'register',
-      used: false,
-      expiresAt: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
+    const record = await findMatchingOtp(OtpVerification, email, 'register', otp);
 
     if (!record) {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
@@ -1348,12 +1344,7 @@ const verifyOtpAndLogin = async (req, res) => {
     if (!email || !otp) {
       return res.status(400).json({ success: false, message: 'Email and OTP are required' });
     }
-    const record = await OtpVerification.findOne({
-      email: email.toLowerCase(),
-      otp: String(otp).trim(),
-      used: false,
-      expiresAt: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
+    const record = await findMatchingOtp(OtpVerification, email, 'login', otp);
     if (!record) {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
     }

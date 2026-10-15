@@ -47,6 +47,9 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
+  SMTP_REPLY_TO: z.string().email().optional(),
+  PROMOTIONAL_EMAILS_ENABLED: z.string().optional().transform((v) => v === "true"),
+  EMAIL_UNSUBSCRIBE_SECRET: z.string().optional(),
 
   // Official Supercell API credential. Keep the KEY alias while deployments migrate.
   CLASH_ROYALE_API_TOKEN: z.string().optional(),
@@ -125,6 +128,16 @@ const envSchema = z.object({
       path: ["TURNSTILE_SECRET_KEY"],
       message: "Turnstile verification requires a configured secret key"
     });
+  }
+  if (value.PROMOTIONAL_EMAILS_ENABLED) {
+    const unsubscribeSecret = value.EMAIL_UNSUBSCRIBE_SECRET || "";
+    if (unsubscribeSecret.length < 32 || /(replace|example|placeholder)/i.test(unsubscribeSecret) ||
+        unsubscribeSecret === value.JWT_SECRET || unsubscribeSecret === value.ADMIN_JWT_SECRET) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["EMAIL_UNSUBSCRIBE_SECRET"], message: "Promotional email requires a separate, non-placeholder unsubscribe secret of at least 32 characters" });
+    }
+    if (!value.SMTP_USER || !value.SMTP_PASS) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["PROMOTIONAL_EMAILS_ENABLED"], message: "Promotional email requires configured SMTP credentials" });
+    }
   }
   if (value.NODE_ENV !== "production") return;
   const key = value.BANK_DETAILS_ENCRYPTION_KEY || "";

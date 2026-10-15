@@ -23,7 +23,7 @@ or admin-supplied notification text.
 | Random Connect | Match found and session updates | User preference | User preference | Never |
 | Discovery activity | Presence, feed activity, recommendations and friend suggestions | User preference | User preference | Never |
 | Creator/host status and routine moderation | Monetization/host updates and content warnings that do not change account access | User preference | User preference | Never |
-| Marketing and general broadcasts | Promotions, campaigns and non-critical announcements | User preference | User preference | Never |
+| Marketing and general broadcasts | Promotions, campaigns and non-critical announcements | User preference | User preference | Never through the notification pipeline. The separate five-day re-engagement email requires explicit email consent and a release flag. |
 | Security | OTP, email verification, password/account recovery and security alerts | Where implemented | Where implemented | Exact `security` event only |
 | Account access | Welcome, account deletion/reactivation, suspension and ban notices | Where implemented | Where implemented | Exact `account_lifecycle` event only |
 | Premium lifecycle | Purchase, renewal, billing failure, cancellation and expiry | System-alert preference | System-alert preference | Exact `premium_lifecycle` event only |
@@ -73,6 +73,13 @@ The Nodemailer transporter and raw `sendMail`/`sendTransactionalEmail` helpers
 are private to `email.js`. Runtime callers can only use the policy-aware OTP or
 notification-shaped dispatchers; the source-wide capability test fails if a
 new file acquires email transport access without explicit review.
+
+The seven approved automated templates use `automatedEmailService` and the same
+Nodemailer transporter. The only promotional template is
+`inactive_user_reengagement`. Its delivery path rechecks separate email consent,
+account status, five-day inactivity, suppression, and the signed unsubscribe
+token at the worker boundary. It does not add a general marketing intent to
+the notification producer allowlist.
 
 ## Independent delivery and user preferences
 

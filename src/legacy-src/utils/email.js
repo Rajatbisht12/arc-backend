@@ -56,9 +56,15 @@ async function sendMail({
   notificationType,
   templateKey,
   triggerSource,
-  producerStack
+  producerStack,
+  headers,
+  list,
+  replyTo,
+  marketingAuthorized = false
 }) {
-  const policy = evaluateEmailPolicy({ intent, eventType, notificationType });
+  const policy = marketingAuthorized && intent === 'marketing' && eventType === 'inactive_user_reengagement' && templateKey === 'inactive_user_reengagement'
+    ? { allowed: true, intent, eventType, reason: 'verified_marketing_event' }
+    : evaluateEmailPolicy({ intent, eventType, notificationType });
   const audit = buildEmailAuditContext({
     to,
     intent: policy.intent || intent,
@@ -80,7 +86,7 @@ async function sendMail({
   const trans = getTransporter();
   if (!trans) {
     log.warn('Email transport unavailable', audit);
-    return { sent: false, error: 'Email not configured' };
+    return { sent: false, error: 'Email not configured', code: 'EMAIL_NOT_CONFIGURED' };
   }
   try {
     // The SMTP mailbox is deployment-configurable, but the public sender name
@@ -93,7 +99,10 @@ async function sendMail({
       to: Array.isArray(to) ? to.join(', ') : to,
       subject: subject || EMAIL_BRAND,
       text: text || '',
-      html: html || text
+      html: html || text,
+      ...(replyTo ? { replyTo } : {}),
+      ...(headers ? { headers } : {}),
+      ...(list ? { list } : {})
     });
     log.info('Email provider accepted', {
       ...audit,
@@ -103,7 +112,7 @@ async function sendMail({
   } catch (err) {
     const sanitizedError = sanitizeEmailAuditError(err);
     log.error('Email provider rejected dispatch', { ...audit, error: sanitizedError });
-    return { sent: false, error: sanitizedError };
+    return { sent: false, error: sanitizedError, code: String(err?.code || 'PROVIDER_REJECTED') };
   }
 }
 
@@ -114,87 +123,60 @@ async function sendTransactionalEmail(options) {
 /**
  * Send OTP email for login/register/forgot_password
  */
-async function sendOTPEmail(to, otp, purpose = 'login') {
-  const purposes = {
-    login: 'Login',
-    register: 'Email verification',
-    forgot_password: 'Reset password'
-  };
-  const title = purposes[purpose] || 'Verification';
-
-  // Subject + header text alag-alag purpose ke liye
-  let subject = '';
-  let headerTitle = '';
-  let headerSubtitle = '';
-
-  if (purpose === 'login') {
-    subject = 'Login to SquadHunt using OTP';
-    headerTitle = 'Login to SquadHunt using OTP';
-    headerSubtitle = 'Secure one‑time verification for your account.';
-  } else if (purpose === 'register') {
-    subject = 'Verify your email for SquadHunt';
-    headerTitle = 'Verify your email for SquadHunt';
-    headerSubtitle = 'Complete your signup by confirming this email address.';
-  } else if (purpose === 'forgot_password') {
-    subject = 'Reset your SquadHunt password';
-    headerTitle = 'Reset your SquadHunt password';
-    headerSubtitle = 'Use this OTP to securely reset your password.';
-  } else {
-    subject = 'SquadHunt verification code';
-    headerTitle = 'SquadHunt verification code';
-    headerSubtitle = 'Use this code to complete your action.';
-  }
-
-  const text = `Your SquadHunt OTP is: ${otp}. Valid for 10 minutes. Do not share with anyone.`;
-
-  const html = `
-    <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0b1120; padding:24px;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;margin:0 auto;background:#020617;border-radius:16px;border:1px solid #1e293b;overflow:hidden;">
-        <tr>
-          <td style="padding:20px 24px 16px;background:linear-gradient(135deg,#4f46e5,#7c3aed);">
-            <h1 style="margin:0;font-size:20px;font-weight:700;color:#e5e7eb;">${headerTitle}</h1>
-            <p style="margin:4px 0 0;font-size:12px;color:#e5e7eb;opacity:0.85;">${headerSubtitle}</p>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:22px 24px 6px;color:#e5e7eb;">
-            <p style="margin:0 0 8px;font-size:14px;">Your one-time verification code is:</p>
-            <div style="margin:8px 0 12px;padding:14px 18px;border-radius:12px;background:#020617;border:1px solid #4f46e5;text-align:center;">
-              <span style="display:inline-block;font-size:26px;letter-spacing:6px;font-weight:700;color:#f9fafb;">${otp}</span>
-            </div>
-            <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;">Valid for <strong>10 minutes</strong>. Do not share this code with anyone.</p>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:0 24px 18px;">
-            <p style="margin:0;font-size:11px;color:#64748b;">If you didn’t request this, you can safely ignore this email. Someone may have typed your email address by mistake.</p>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:12px 24px 16px;border-top:1px solid #1f2937;background:#020617;">
-            <p style="margin:0 0 4px;font-size:11px;color:#6b7280;">
-              Need help? Email
-              <a href="mailto:support@squadhunt.com" style="color:#9ca3af;text-decoration:none;"> support@squadhunt.com</a>
-              or visit
-              <a href="https://www.squadhunt.com" style="color:#9ca3af;text-decoration:none;"> squadhunt.com</a>.
-            </p>
-            <p style="margin:0;font-size:11px;color:#6b7280;">- SquadHunt</p>
-          </td>
-        </tr>
-      </table>
-    </div>
-  `;
+async function sendOTPEmail(to, otp, purpose = 'login', options = {}) {
+  const templateIds = { login: 'login_verification', register: 'registration_otp', forgot_password: 'password_reset_otp' };
+  const templateId = templateIds[purpose];
+  if (!templateId) throw new Error('Unsupported OTP purpose');
+  const { renderAutomatedEmail } = require('./automatedEmailTemplates');
+  const rendered = renderAutomatedEmail(templateId, { otp, firstName: options.firstName, expiresAt: options.expiresAt });
 
   return sendTransactionalEmail({
     to,
-    subject,
-    text,
-    html,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
     intent: EMAIL_INTENTS.SECURITY,
     eventType: `otp_${purpose}`,
-    templateKey: 'security_otp',
+    templateKey: templateId,
     triggerSource: 'auth.otp',
     producerStack: captureEmailCallStack()
+  });
+}
+
+async function sendAutomatedEmail(to, templateId, data = {}) {
+  const { renderAutomatedEmail } = require('./automatedEmailTemplates');
+  if (templateId === 'inactive_user_reengagement') {
+    const User = require('../models/User');
+    const { marketingEnabled, marketingEligibility, tokenForUser, hashToken, unsubscribeUrlForUser } = require('../services/marketingEmailService');
+    if (!marketingEnabled() || !data.userId) return { sent: false, blocked: true, reason: 'marketing_not_ready' };
+    const user = await User.findById(data.userId).select('+emailPreferences.unsubscribeTokenHash');
+    const token = tokenForUser(user);
+    if (!marketingEligibility(user) || !token || user.email !== to || user.emailPreferences?.unsubscribeTokenHash !== hashToken(token)) {
+      return { sent: false, blocked: true, reason: 'marketing_ineligible' };
+    }
+    data = {
+      ...data,
+      unsubscribeUrl: unsubscribeUrlForUser(user),
+      preferencesUrl: 'https://www.squadhunt.com/settings/notifications'
+    };
+  }
+  const rendered = renderAutomatedEmail(templateId, data);
+  const unsubscribeUrl = rendered.promotional ? data.unsubscribeUrl : '';
+  return sendMail({
+    to,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
+    intent: rendered.intent,
+    eventType: rendered.eventType,
+    templateKey: templateId,
+    triggerSource: 'automated_email',
+    marketingAuthorized: rendered.promotional,
+    ...(rendered.promotional ? {
+      list: { unsubscribe: unsubscribeUrl },
+      headers: { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+    } : {}),
+    replyTo: process.env.SMTP_REPLY_TO || 'support@squadhunt.com'
   });
 }
 
@@ -249,6 +231,7 @@ async function sendNotificationEmail(to, title, message, link, context = {}) {
 
 module.exports = {
   sendOTPEmail,
+  sendAutomatedEmail,
   sendNotificationEmail,
   escapeHtml,
   sanitizeEmailLink,

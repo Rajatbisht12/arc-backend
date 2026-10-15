@@ -526,6 +526,15 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
+  emailPreferences: {
+    promotionalEnabled: { type: Boolean, default: false },
+    marketingConsentAt: { type: Date, default: null },
+    consentSource: { type: String, default: '' },
+    withdrawnAt: { type: Date, default: null },
+    suppressedAt: { type: Date, default: null },
+    unsubscribeTokenHash: { type: String, default: null, select: false },
+    lastReengagementAt: { type: Date, default: null }
+  },
   privacySettings: {
     // Canonical, cross-platform privacy contract. The original controls retain
     // their legacy-alias fallback; new independent controls declare their own
@@ -796,6 +805,7 @@ const stripPrivateDeviceFields = (_document, value) => {
   delete value.password;
   delete value.pushTokens;
   delete value.notificationClients;
+  delete value.emailPreferences;
   return value;
 };
 userSchema.set('toJSON', { transform: stripPrivateDeviceFields });
@@ -811,6 +821,8 @@ userSchema.index({ 'playerInfo.tournamentHistory.status': 1 });
 userSchema.index({ isActive: 1, username: 1 }); // user list + search
 userSchema.index({ isActive: 1, createdAt: -1 }); // admin: new users
 userSchema.index({ isActive: 1, lastSeen: -1 }); // admin: active users
+userSchema.index({ 'emailPreferences.promotionalEnabled': 1, lastSeen: 1, _id: 1 });
+userSchema.index({ 'emailPreferences.unsubscribeTokenHash': 1 }, { sparse: true });
 userSchema.index({ isActive: 1, userType: 1, createdAt: -1 }); // filtered user lists
 userSchema.index({ isActive: 1, 'privacySettings.profileVisibility': 1, _id: 1 });
 userSchema.index({ isActive: 1, 'privacySettings.showPostsToFollowers': 1, _id: 1 });
@@ -852,6 +864,13 @@ userSchema.pre('save', async function(next) {
     this.$locals.previousUsername = oldUsername?.username || null;
     next();
   } catch (error) { next(error); }
+});
+userSchema.pre('save', function(next) {
+  if (this.isModified('lastSeen') && this.emailPreferences?.lastReengagementAt &&
+      new Date(this.lastSeen).getTime() > new Date(this.emailPreferences.lastReengagementAt).getTime()) {
+    this.emailPreferences.lastReengagementAt = null;
+  }
+  next();
 });
 userSchema.post('save', async function(doc) {
   const previous = doc.$locals.previousUsername;
