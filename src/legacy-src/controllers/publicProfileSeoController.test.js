@@ -3,6 +3,7 @@ const test = require('node:test');
 const User = require('../models/User');
 const UsernameRegistry = require('../models/UsernameRegistry');
 const controller = require('./publicProfileSeoController');
+const { clearLocalCursors } = require('../utils/publicSitemapPagination');
 
 const user = () => ({
   username: 'GamerOne', userType: 'player', isActive: true,
@@ -51,23 +52,26 @@ test('public SEO endpoint emits only public fields and immediately withdraws pri
 });
 
 test('sitemap uses the identical eligibility filter and bounded page size', async () => {
+  clearLocalCursors();
   const originalFind = User.find;
   const originalCount = User.countDocuments;
   let filter;
-  let skip;
-  let limit;
+  const reads = [];
   User.countDocuments = async nextFilter => {
     assert.equal(nextFilter['privacySettings.profileVisibility'], 'public');
-    return 2001;
+    return 20001;
   };
   User.find = nextFilter => {
     filter = nextFilter;
+    const read = { filter: nextFilter };
+    reads.push(read);
     const query = {
-      sort() { return query; },
-      skip(value) { skip = value; return query; },
-      limit(value) { limit = value; return query; },
-      select() { return query; },
-      async lean() { return [user(), { ...user(), username: 'PrivateOne', privacySettings: { profileVisibility: 'private' } }]; }
+      sort(value) { read.sort = value; return query; },
+      limit(value) { read.limit = value; return query; },
+      select(value) { read.select = value; return query; },
+      async lean() { return read.select === '_id'
+        ? Array.from({ length: 10000 }, (_, index) => ({ _id: index.toString(16).padStart(24, '0') }))
+        : [user(), { ...user(), username: 'PrivateOne', privacySettings: { profileVisibility: 'private' } }]; }
     };
     return query;
   };
@@ -78,8 +82,11 @@ test('sitemap uses the identical eligibility filter and bounded page size', asyn
     const pageResponse = response();
     await controller.getPublicProfileSitemap({ query: { page: '2' } }, pageResponse);
     assert.equal(filter['privacySettings.profileVisibility'], 'public');
-    assert.equal(skip, 1000);
-    assert.equal(limit, 1000);
+    assert.equal(reads.length, 2);
+    assert(reads.every(read => read.limit === 10000));
+    assert(reads.every(read => !('skip' in read)));
+    assert.deepEqual(reads[1].sort, { _id: 1 });
+    assert.equal(reads[1].filter._id.$gt, '00000000000000000000270f');
     assert.deepEqual(pageResponse.body.data.usernames, ['GamerOne']);
   } finally {
     User.find = originalFind;

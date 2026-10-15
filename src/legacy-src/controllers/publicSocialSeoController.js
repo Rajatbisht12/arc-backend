@@ -2,6 +2,9 @@ const TeamRecruitment = require('../models/TeamRecruitment');
 const PlayerProfile = require('../models/PlayerProfile');
 const Tournament = require('../models/Tournament');
 const Scrim = require('../models/Scrim');
+const User = require('../models/User');
+const { usernameOwnerFilter } = require('../services/usernameLookupService');
+const { publicProfileSeoFilter } = require('../utils/publicProfileSeoPolicy');
 const log = require('../utils/logger');
 const {
   publicShareCode, publicSocialImageUrl, publicAvatarUrl,
@@ -15,6 +18,12 @@ const failed = (res, error) => {
   log.error('Public social SEO lookup failed', { error: String(error) });
   return res.status(500).json({ success: false, message: 'Public page unavailable' });
 };
+const publicTournamentData = tournament => ({
+  code: tournament.tournamentCode,
+  name: tournament.name || '',
+  description: tournament.description || '',
+  image: publicSocialImageUrl(tournament.banner)
+});
 
 const getPublicRecruitmentSeo = async (req, res) => {
   noStore(res);
@@ -72,12 +81,25 @@ const getPublicTournamentSeo = async (req, res) => {
       .populate('host', ownerFields).lean();
     if (!isPublicCompetitionSeoEligible(tournament, tournament?.host,
       ['Upcoming', 'Registration Open', 'Ongoing', 'Completed'])) return missing(res);
-    return res.status(200).json({ success: true, data: { tournament: {
-      code: tournament.tournamentCode,
-      name: tournament.name || '',
-      description: tournament.description || '',
-      image: publicSocialImageUrl(tournament.banner)
-    } } });
+    return res.status(200).json({ success: true, data: { tournament: publicTournamentData(tournament) } });
+  } catch (error) { return failed(res, error); }
+};
+
+const getPublicTournamentByNameSeo = async (req, res) => {
+  noStore(res);
+  const name = req.params.name;
+  const hostUsername = req.params.hostUsername;
+  if (typeof name !== 'string' || !name.trim() || name.length > 200
+    || !/^[A-Za-z0-9_]{3,20}$/.test(hostUsername || '')) return missing(res);
+  try {
+    const host = await User.findOne(await usernameOwnerFilter(hostUsername, publicProfileSeoFilter))
+      .select(ownerFields).lean();
+    if (!host) return missing(res);
+    const tournament = await Tournament.findOne({ name, host: host._id, status: { $ne: 'Cancelled' } })
+      .select('tournamentCode host name description banner status').lean();
+    if (!isPublicCompetitionSeoEligible(tournament, host,
+      ['Upcoming', 'Registration Open', 'Ongoing', 'Completed'])) return missing(res);
+    return res.status(200).json({ success: true, data: { tournament: publicTournamentData(tournament) } });
   } catch (error) { return failed(res, error); }
 };
 
@@ -102,5 +124,5 @@ const getPublicScrimSeo = async (req, res) => {
 
 module.exports = {
   getPublicRecruitmentSeo, getPublicPlayerProfileSeo,
-  getPublicTournamentSeo, getPublicScrimSeo
+  getPublicTournamentSeo, getPublicTournamentByNameSeo, getPublicScrimSeo
 };

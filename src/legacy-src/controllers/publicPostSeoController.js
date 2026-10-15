@@ -1,8 +1,8 @@
 const Post = require('../models/Post');
 const { publicPostSeoFilter, isPublicPostSeoEligible, postPreview } = require('../utils/publicPostSeoPolicy');
+const { PAGE_SIZE, candidateCount, afterFilter, startCursorForPage, rememberNextPage } = require('../utils/publicSitemapPagination');
 const log = require('../utils/logger');
 
-const PAGE_SIZE = 1000;
 const postFields = 'author visibility isActive hiddenByAdmin content.text content.media.type content.media.url content.media.coverUrl content.media.width content.media.height createdAt editedAt';
 const authorFields = 'username userType isActive moderationStatus deletedAt isSystemAccount isSuperUser needsProfileCompletion adminControls.loginDisabled privacySettings.profileVisibility privacySettings.showPostsToFollowers profile.displayName';
 const noStore = res => res.setHeader('Cache-Control', 'private, no-store, max-age=0');
@@ -52,7 +52,7 @@ const getPublicClipSeo = async (req, res) => {
 const getPublicPostSitemapCount = async (_req, res) => {
   noStore(res);
   try {
-    const count = await Post.countDocuments(publicPostSeoFilter);
+    const count = await candidateCount(Post, publicPostSeoFilter, 'posts');
     return res.status(200).json({ success: true, data: { pages: Math.ceil(count / PAGE_SIZE) } });
   } catch (error) {
     log.error('Public post sitemap count failed', { error: String(error) });
@@ -63,15 +63,19 @@ const getPublicPostSitemapCount = async (_req, res) => {
 const getPublicPostSitemap = async (req, res) => {
   noStore(res);
   const page = Number(req.query.page);
-  if (!Number.isSafeInteger(page) || page < 1 || page > 100000) {
+  if (!Number.isSafeInteger(page) || page < 1) {
     return res.status(400).json({ success: false, message: 'Invalid sitemap page' });
   }
   try {
-    // Indexed, bounded page reads; author eligibility is evaluated using the
-    // same policy as the detail endpoint before any ID leaves the server.
-    const posts = await Post.find(publicPostSeoFilter).sort({ createdAt: -1, _id: -1 })
-      .skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE)
+    const count = await candidateCount(Post, publicPostSeoFilter, 'posts');
+    if (page > Math.ceil(count / PAGE_SIZE)) return res.status(404).json({ success: false, message: 'Sitemap page not found' });
+    const cursor = await startCursorForPage(Post, publicPostSeoFilter, 'posts', page);
+    if (cursor === null) return res.status(503).json({ success: false, message: 'Sitemap page temporarily unavailable' });
+    // Indexed keyset reads; author eligibility is rechecked before any ID leaves the server.
+    const posts = await Post.find(afterFilter(publicPostSeoFilter, cursor)).sort({ _id: 1 })
+      .limit(PAGE_SIZE)
       .select('author visibility isActive hiddenByAdmin editedAt').populate('author', authorFields).lean();
+    await rememberNextPage('posts', page, posts);
     return res.status(200).json({ success: true, data: {
       page,
       posts: posts.filter(isPublicPostSeoEligible).map(post => ({

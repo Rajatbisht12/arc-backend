@@ -9,6 +9,7 @@ const router = Router();
 router.get('/recruitment/:code', controller.getPublicRecruitmentSeo);
 router.get('/player-profile/:code', controller.getPublicPlayerProfileSeo);
 router.get('/tournament/:code', controller.getPublicTournamentSeo);
+router.get('/tournament/by-name/:name/:hostUsername', controller.getPublicTournamentByNameSeo);
 router.get('/scrim/:code', controller.getPublicScrimSeo);
 
 export default router;
