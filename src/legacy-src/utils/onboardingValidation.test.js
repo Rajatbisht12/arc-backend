@@ -60,6 +60,10 @@ assert.strictEqual(
   'Display name is required and must be less than 50 characters'
 );
 assert.strictEqual(
+  validateOnboardingProfile({ userType: 'player', displayName: '   ' }, now).error,
+  'Display name is required and must be less than 50 characters'
+);
+assert.strictEqual(
   validateOnboardingProfile({ userType: 'player', displayName: 'Player', gender: 'unknown', dob: '2000-01-15' }, now).error,
   'Gender must be male, female, or other'
 );

@@ -645,8 +645,7 @@ const userSchema = new mongoose.Schema({
     }]
   },
   googleId: {
-    type: String,
-    sparse: true
+    type: String
   },
   appleId: {
     type: String,
@@ -658,7 +657,7 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
-  // Set only for newly-created mobile OAuth accounts. Existing OAuth users
+  // Set only for newly-created OAuth accounts. Existing OAuth users
   // intentionally default to false so this feature cannot create a migration
   // loop. The flag is cleared atomically when onboarding stores a real local
   // password.
@@ -813,6 +812,13 @@ userSchema.set('toObject', { transform: stripPrivateDeviceFields });
 
 // Index for better search performance
 userSchema.index({ username: 1, email: 1 });
+// A provider subject may only belong to one account. Production disables
+// autoIndex, so install this with scripts/migrate-oauth-google-index.js.
+userSchema.index({ googleId: 1 }, {
+  name: 'oauth_google_subject_unique',
+  unique: true,
+  partialFilterExpression: { googleId: { $type: 'string' } }
+});
 userSchema.index({ 'profile.displayName': 1 });
 userSchema.index({ userType: 1 });
 userSchema.index({ 'playerInfo.tournamentHistory.tournamentId': 1 });

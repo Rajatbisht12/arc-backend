@@ -17,6 +17,9 @@ let tokenCalls = 0;
 let refreshTokenCalls = 0;
 let avatarUploadCalls = 0;
 let saveCalls = 0;
+let findOneImpl = async () => mockUser;
+let createImpl = async () => { throw new Error('User.create should not be called'); };
+const lookupQueries = [];
 let mockUser = {
   _id: 'deactivated-user-id',
   email: 'deactivated@example.com',
@@ -35,10 +38,11 @@ class GoogleStrategy {
 stubModule('passport', { use: () => {} });
 stubModule('passport-google-oauth20', { Strategy: GoogleStrategy });
 stubModule('../models/User', {
-  findOne: async () => mockUser,
-  create: async () => {
-    throw new Error('Deactivated users must not create a replacement account');
-  }
+  findOne: async (query) => {
+    lookupQueries.push(query);
+    return findOneImpl(query);
+  },
+  create: async (data) => createImpl(data)
 });
 stubModule('../utils/jwt', {
   generateToken: () => {
@@ -80,12 +84,48 @@ require('./passport');
   });
 
   assert.strictEqual(result.user, false);
+  assert.deepStrictEqual(lookupQueries[0], { googleId: 'google-subject' });
   assert.deepStrictEqual(result.info, { message: 'Account is deactivated.' });
   assert.strictEqual(avatarUploadCalls, 0);
   assert.strictEqual(saveCalls, 0);
   assert.strictEqual(tokenCalls, 0);
   assert.strictEqual(refreshTokenCalls, 0);
 
+  findOneImpl = async (query) => query.googleId ? null : mockUser;
+  mockUser = {
+    ...mockUser,
+    _id: 'password-account-id',
+    email: 'password-account@example.com',
+    isSystemAccount: false,
+    userType: 'player',
+    isActive: true
+  };
+  const conflict = await new Promise((resolve, reject) => verifyGoogle(
+    'google-access-token', 'google-refresh-token',
+    { id: 'unlinked-subject', emails: [{ value: 'password-account@example.com' }], _json: { email_verified: true } },
+    (error, user, info) => error ? reject(error) : resolve({ user, info })
+  ));
+  assert.strictEqual(conflict.user, false);
+  assert.match(conflict.info.message, /sign in before linking Google/i);
+  assert.strictEqual(tokenCalls, 0);
+
+  let created = null;
+  findOneImpl = async () => null;
+  createImpl = async (data) => {
+    created = data;
+    return { _id: 'new-oauth-id', ...data };
+  };
+  const newAccount = await new Promise((resolve, reject) => verifyGoogle(
+    'google-access-token', 'google-refresh-token',
+    { id: 'new-subject', displayName: 'New User', emails: [{ value: 'new@example.com' }], _json: { email_verified: true } },
+    (error, value, info) => error ? reject(error) : resolve({ value, info })
+  ));
+  assert.strictEqual(newAccount.value.user._id, 'new-oauth-id');
+  assert.strictEqual(created.googleId, 'new-subject');
+  assert.strictEqual(created.requiresPasswordSetup, true);
+  assert.strictEqual(created.needsProfileCompletion, true);
+
+  findOneImpl = async () => mockUser;
   mockUser = {
     ...mockUser,
     _id: 'official-system-id',
@@ -104,8 +144,8 @@ require('./passport');
   });
   assert.strictEqual(systemResult.user, false);
   assert.deepStrictEqual(systemResult.info, { message: 'Account is unavailable.' });
-  assert.strictEqual(tokenCalls, 0);
-  assert.strictEqual(refreshTokenCalls, 0);
+  assert.strictEqual(tokenCalls, 1);
+  assert.strictEqual(refreshTokenCalls, 1);
 
   console.log('Passport OAuth contract tests passed');
 })().catch((error) => {

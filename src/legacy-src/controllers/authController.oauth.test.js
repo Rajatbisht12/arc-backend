@@ -1,4 +1,6 @@
 const assert = require('assert');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 
 const stubModule = (request, exportsValue) => {
   const filename = require.resolve(request);
@@ -65,9 +67,17 @@ let googleProfile = {
   sub: 'google-admin-subject',
   email: 'admin@example.com'
 };
-stubModule('axios', { get: async () => ({ data: googleProfile }) });
+const { privateKey: applePrivateKey, publicKey: applePublicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+const appleJwk = { ...applePublicKey.export({ format: 'jwk' }), kid: 'test-apple-key' };
+const appleToken = (subject, email) => jwt.sign({
+  iss: 'https://appleid.apple.com',
+  aud: 'com.arcSquadHunt',
+  sub: subject,
+  ...(email ? { email, email_verified: 'true' } : {})
+}, applePrivateKey, { algorithm: 'RS256', expiresIn: '5m', keyid: 'test-apple-key' });
+stubModule('axios', { get: async (url) => ({ data: url.includes('appleid.apple.com') ? { keys: [appleJwk] } : googleProfile }) });
 
-const { completeGoogleProfile, completeProfile, googleTokenLogin, register } = require('./authController');
+const { completeGoogleProfile, completeProfile, googleTokenLogin, appleMobileLogin, register } = require('./authController');
 
 const createRes = () => ({
   statusCode: 200,
@@ -177,6 +187,7 @@ const dateYearsAgo = (years) => {
   googleProfile = {
     sub: 'new-google-subject',
     email: 'new@example.com',
+    email_verified: true,
     name: 'New Google User'
   };
   findOneImpl = () => Promise.resolve(null);
@@ -206,6 +217,7 @@ const dateYearsAgo = (years) => {
   googleProfile = {
     sub: 'new-web-google-subject',
     email: 'new-web@example.com',
+    email_verified: true,
     name: 'New Web Google User'
   };
   createImpl = async (data) => {
@@ -221,7 +233,64 @@ const dateYearsAgo = (years) => {
   const newWebGoogleRes = createRes();
   await googleTokenLogin({ body: { access_token: 'google-access-token' } }, newWebGoogleRes);
   assert.strictEqual(newWebGoogleRes.statusCode, 200);
-  assert.strictEqual(createdWebGoogleData.requiresPasswordSetup, false);
+  assert.strictEqual(createdWebGoogleData.requiresPasswordSetup, true);
+
+  let sameSubjectLookups = 0;
+  findOneImpl = (query) => {
+    if (query.googleId) {
+      sameSubjectLookups += 1;
+      return Promise.resolve(sameSubjectLookups === 1 ? null : existingGoogleUser);
+    }
+    return Promise.resolve(null);
+  };
+  createImpl = async () => { throw Object.assign(new Error('duplicate provider subject'), { code: 11000 }); };
+  const retryRes = createRes();
+  await googleTokenLogin({ body: { access_token: 'google-access-token' } }, retryRes);
+  assert.strictEqual(retryRes.statusCode, 200);
+  assert.strictEqual(retryRes.body.data.user._id, existingGoogleUser._id);
+
+  googleProfile = {
+    sub: 'unlinked-google-subject',
+    email: 'existing@example.com',
+    email_verified: true
+  };
+  findOneImpl = (query) => Promise.resolve(query.googleId ? null : existingGoogleUser);
+  const conflictRes = createRes();
+  await googleTokenLogin({ body: { access_token: 'google-access-token' } }, conflictRes);
+  assert.strictEqual(conflictRes.statusCode, 409);
+  assert.strictEqual(conflictRes.body.code, 'ACCOUNT_LINK_REQUIRED');
+  assert.strictEqual(existingGoogleUser.googleId, undefined);
+
+  let createdAppleData = null;
+  findOneImpl = () => Promise.resolve(null);
+  createImpl = async (data) => {
+    createdAppleData = data;
+    return { _id: 'new-apple-id', ...data, toObject() { return { ...this }; } };
+  };
+  const newAppleRes = createRes();
+  await appleMobileLogin({ body: { identityToken: appleToken('new-apple-subject', 'apple@example.com'), displayName: 'Apple User' } }, newAppleRes);
+  assert.strictEqual(newAppleRes.statusCode, 200);
+  assert.strictEqual(createdAppleData.appleId, 'new-apple-subject');
+  assert.strictEqual(createdAppleData.requiresPasswordSetup, true);
+  assert.strictEqual(createdAppleData.needsProfileCompletion, true);
+
+  createImpl = async () => { throw new Error('Apple must not auto-link an email collision'); };
+  findOneImpl = (query) => Promise.resolve(query.email ? existingGoogleUser : null);
+  const appleConflictRes = createRes();
+  await appleMobileLogin({ body: { identityToken: appleToken('unlinked-apple-subject', 'existing@example.com') } }, appleConflictRes);
+  assert.strictEqual(appleConflictRes.statusCode, 409);
+  assert.strictEqual(appleConflictRes.body.code, 'ACCOUNT_LINK_REQUIRED');
+  assert.strictEqual(existingGoogleUser.appleId, undefined);
+
+  findOneImpl = (query) => Promise.resolve(query.appleId ? {
+    ...existingGoogleUser,
+    appleId: 'linked-apple-subject',
+    async save() {}
+  } : null);
+  const existingAppleRes = createRes();
+  await appleMobileLogin({ body: { identityToken: appleToken('linked-apple-subject') } }, existingAppleRes);
+  assert.strictEqual(existingAppleRes.statusCode, 200);
+  assert.strictEqual(existingAppleRes.body.profileComplete, true);
 
   createImpl = async () => {
     throw new Error('User.create should not be called during profile completion');
@@ -297,6 +366,17 @@ const dateYearsAgo = (years) => {
   }, missingDobRes);
   assert.strictEqual(missingDobRes.statusCode, 400);
   assert.strictEqual(missingDobRes.body.message, 'Date of birth is required');
+
+  const missingUsernameRes = createRes();
+  await completeProfile({
+    user: { _id: 'google-user-id' },
+    body: {
+      userType: 'team', displayName: 'Completed Team', gender: 'female',
+      dob: validDob, password: 'valid-password'
+    }
+  }, missingUsernameRes);
+  assert.strictEqual(missingUsernameRes.statusCode, 400);
+  assert.match(missingUsernameRes.body.message, /username/i);
 
   const legacyGenderRes = createRes();
   await completeProfile({

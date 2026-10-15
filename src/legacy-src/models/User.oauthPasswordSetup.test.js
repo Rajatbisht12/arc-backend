@@ -12,6 +12,9 @@ const runPreSaveHooks = (document) => new Promise((resolve, reject) => {
 });
 
 (async () => {
+  assert.ok(User.schema.indexes().some(([key, options]) =>
+    key.googleId === 1 && options.name === 'oauth_google_subject_unique' && options.unique === true
+  ));
   const document = new User({
     email: 'oauth-password-contract@example.com',
     username: 'oauth_pw_contract',

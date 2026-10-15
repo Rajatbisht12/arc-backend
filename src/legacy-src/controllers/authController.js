@@ -1127,7 +1127,8 @@ const completeProfile = async (req, res) => {
     ({ userType, displayName, gender, dob, bio } = onboardingProfile.value);
 
     const passwordSetupRequired = user.requiresPasswordSetup === true;
-    if (passwordSetupRequired) {
+    const isSettingPassword = passwordSetupRequired || password !== undefined;
+    if (isSettingPassword) {
       if (!user.googleId && !user.appleId) {
         return res.status(409).json({
           success: false,
@@ -1161,8 +1162,8 @@ const completeProfile = async (req, res) => {
       return sendUsernameDuplicate(res);
     }
 
-    // Authentication providers establish identity. Profile completion only
-    // applies the same profile fields collected during OTP registration.
+    // Authentication providers establish identity. Complete the same profile
+    // fields as OTP registration and attach the user's local password.
     const previousUsername = user.username;
     user.userType = userType;
     user.username = username;
@@ -1172,7 +1173,7 @@ const completeProfile = async (req, res) => {
     user.profile.dob = dob;
     user.profile.bio = bio;
     user.profile.bioMentions = await resolveBioMentions(bio, User, user.profile.bioMentions);
-    if (passwordSetupRequired) {
+    if (isSettingPassword) {
       // Assignment deliberately goes through the User model's existing
       // pre-save bcrypt hook. The controller never stores or returns plaintext.
       user.password = password;
@@ -1396,7 +1397,7 @@ const generateGuestToken = async (_req, res) => {
 
 const googleTokenLogin = async (req, res) => {
   try {
-    const { access_token, requirePasswordSetup } = req.body;
+    const { access_token } = req.body;
     if (!access_token) {
       return res.status(400).json({ success: false, message: 'access_token is required' });
     }
@@ -1406,12 +1407,22 @@ const googleTokenLogin = async (req, res) => {
       headers: { Authorization: `Bearer ${access_token}` }
     });
 
-    const email = profile.email?.toLowerCase();
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'Email not provided by Google' });
+    const googleId = typeof profile.sub === 'string' ? profile.sub.trim() : '';
+    if (!googleId) {
+      return res.status(401).json({ success: false, message: 'Google login failed' });
     }
 
-    let user = await User.findOne({ email });
+    const email = typeof profile.email === 'string' ? profile.email.trim().toLowerCase() : '';
+    // Provider subject, never an email string, is proof of an existing link.
+    let user = await User.findOne({ googleId });
+    if (!user) {
+      if (!email || profile.email_verified !== true) {
+        return res.status(400).json({ success: false, message: 'A verified Google email is required to create an account' });
+      }
+      if (await User.findOne({ email })) {
+        return res.status(409).json({ success: false, code: 'ACCOUNT_LINK_REQUIRED', message: 'An account already uses this email. Sign in to that account before linking Google.' });
+      }
+    }
 
     if (user?.isSystemAccount || user?.userType === 'system') return sendInvalidLoginResponse(res);
     if (user?.userType === 'admin') {
@@ -1453,24 +1464,40 @@ const googleTokenLogin = async (req, res) => {
         counter++;
       }
 
-      user = await User.create({
-        email,
-        googleId: profile.sub,
-        username: finalUsername,
-        password: require('crypto').randomBytes(32).toString('hex'),
-        userType: 'player',
-        profile: {
-          displayName: profile.name || email.split('@')[0],
-          avatar: avatarUrl
-        },
-        needsProfileCompletion: true,
-        requiresPasswordSetup: requirePasswordSetup === true,
-        isActive: true
-      });
+      try {
+        user = await User.create({
+          email,
+          googleId,
+          username: finalUsername,
+          password: require('crypto').randomBytes(32).toString('hex'),
+          userType: 'player',
+          profile: {
+            displayName: typeof profile.name === 'string' ? profile.name.trim() : '',
+            avatar: avatarUrl
+          },
+          needsProfileCompletion: true,
+          requiresPasswordSetup: true,
+          isActive: true
+        });
+      } catch (createError) {
+        if (createError?.code !== 11000) throw createError;
+        // A retry may race the first creation. Only the same verified Google
+        // subject may recover that account; an email collision must not link it.
+        user = await User.findOne({ googleId });
+        if (!user) {
+          return res.status(409).json({ success: false, code: 'ACCOUNT_LINK_REQUIRED', message: 'An account already uses this email. Sign in to that account before linking Google.' });
+        }
+      }
     } else {
       user.lastSeen = new Date();
       await user.save();
     }
+
+    if (user.isSystemAccount || user.userType === 'system') return sendInvalidLoginResponse(res);
+    if (user.userType === 'admin') {
+      return res.status(403).json({ success: false, message: 'Admin accounts must sign in through the dedicated Admin Portal.' });
+    }
+    if (!user.isActive) return res.status(401).json({ success: false, message: 'Account is deactivated.' });
 
     const token = generateToken({ id: user._id, username: user.username, userType: user.userType });
     const refreshToken = generateRefreshToken({ id: user._id });
@@ -1553,7 +1580,7 @@ const verifyAppleIdentityToken = async (identityToken) => {
 
 const appleMobileLogin = async (req, res) => {
   try {
-    const { identityToken, displayName, nonce, requirePasswordSetup } = req.body;
+    const { identityToken, displayName, nonce } = req.body;
     if (!identityToken) {
       return res.status(400).json({ success: false, message: 'identityToken is required' });
     }
@@ -1563,8 +1590,8 @@ const appleMobileLogin = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Apple login failed' });
     }
 
-    const appleId = profile.sub;
-    const tokenEmail = typeof profile.email === 'string' ? profile.email.toLowerCase() : '';
+    const appleId = typeof profile.sub === 'string' ? profile.sub.trim() : '';
+    const tokenEmail = typeof profile.email === 'string' ? profile.email.trim().toLowerCase() : '';
     const emailVerified = profile.email_verified === true || profile.email_verified === 'true' || !tokenEmail;
 
     if (!appleId) {
@@ -1577,7 +1604,9 @@ const appleMobileLogin = async (req, res) => {
 
     let user = await User.findOne({ appleId });
     if (!user && tokenEmail) {
-      user = await User.findOne({ email: tokenEmail });
+      if (await User.findOne({ email: tokenEmail })) {
+        return res.status(409).json({ success: false, code: 'ACCOUNT_LINK_REQUIRED', message: 'An account already uses this email. Sign in to that account before linking Apple.' });
+      }
     }
 
     if (user?.isSystemAccount || user?.userType === 'system') return sendInvalidLoginResponse(res);
@@ -1616,43 +1645,21 @@ const appleMobileLogin = async (req, res) => {
           password: require('crypto').randomBytes(32).toString('hex'),
           userType: 'player',
           profile: {
-            displayName: displayName || tokenEmail.split('@')[0],
+            displayName: typeof displayName === 'string' ? displayName.trim() : '',
             avatar: ''
           },
           needsProfileCompletion: true,
-          requiresPasswordSetup: requirePasswordSetup === true,
+          requiresPasswordSetup: true,
           isActive: true
         });
       } catch (createError) {
-        const duplicateAppleOrEmail =
-          createError?.code === 11000 &&
-          (createError?.keyPattern?.appleId ||
-            createError?.keyPattern?.email ||
-            createError?.keyValue?.appleId ||
-            createError?.keyValue?.email);
-
-        if (!duplicateAppleOrEmail) throw createError;
-
-        user = await User.findOne({
-          $or: [
-            { appleId },
-            ...(tokenEmail ? [{ email: tokenEmail }] : [])
-          ]
-        });
-        if (!user) throw createError;
-        if (user.isSystemAccount || user.userType === 'system') return sendInvalidLoginResponse(res);
-        if (user.userType === 'admin') {
-          return res.status(403).json({
-            success: false,
-            message: 'Admin accounts must sign in through the dedicated Admin Portal.'
-          });
+        if (createError?.code !== 11000) throw createError;
+        user = await User.findOne({ appleId });
+        if (!user) {
+          return res.status(409).json({ success: false, code: 'ACCOUNT_LINK_REQUIRED', message: 'An account already uses this email. Sign in to that account before linking Apple.' });
         }
-        if (!user.appleId) user.appleId = appleId;
-        user.lastSeen = new Date();
-        await user.save();
       }
     } else {
-      if (!user.appleId) user.appleId = appleId;
       user.lastSeen = new Date();
       await user.save();
     }
