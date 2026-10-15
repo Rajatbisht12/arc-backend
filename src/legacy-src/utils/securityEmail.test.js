@@ -25,7 +25,7 @@ const previousSmtpUser = process.env.SMTP_USER;
 const previousSmtpPass = process.env.SMTP_PASS;
 
 (async () => {
-  for (const eventType of ['password_reset', 'password_changed', 'admin_password_reset']) {
+  for (const eventType of ['password_changed', 'admin_password_reset']) {
     const email = buildPasswordSecurityEmail(eventType);
     assert.equal(email.eventType, eventType);
     assert.ok(email.subject.includes('password'));
@@ -44,6 +44,7 @@ const previousSmtpPass = process.env.SMTP_PASS;
     () => buildPasswordSecurityEmail('login_like'),
     (error) => error?.code === 'UNSUPPORTED_SECURITY_EMAIL_EVENT'
   );
+  assert.throws(() => buildPasswordSecurityEmail('password_reset'), /Unsupported password security email event/);
 
   const previousClientUrl = process.env.CLIENT_URL;
   process.env.CLIENT_URL = 'https://arc.example.test/app/';

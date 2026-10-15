@@ -74,6 +74,11 @@ const emailAudit = require(path.join(backendRootPath, "utils", "emailAudit.js"))
 export const emailWorker = new Worker(
   QUEUE_NAMES.EMAIL,
   async (job: Job) => {
+    if (job.name === "automated") {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const service = require(path.join(backendRootPath, "services", "automatedEmailService.js"));
+      return service.deliverAutomatedEmail(job.data.eventId);
+    }
     const { to, subject, text, link, context } = job.data;
     const policy = emailPolicy.evaluateEmailPolicy(context || {});
     const audit = emailAudit.buildEmailAuditContext({
@@ -414,6 +419,20 @@ export const enqueueEmail = async (
   });
   logger.info("Email queued", audit);
   return { queued: true, blocked: false };
+};
+
+export const enqueueAutomatedEmail = async (eventId: string): Promise<void> => {
+  const id = String(eventId || "");
+  if (!/^[a-f0-9]{24}$/i.test(id)) throw new Error("Invalid automated email event ID");
+  await emailQueue.add("automated", { eventId: id }, {
+    jobId: `automated-${id}`,
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: 100,
+    // The durable event can be retried after a definite SMTP rejection.
+    // A retained failed job with this jobId would block the recovery scan.
+    removeOnFail: true
+  });
 };
 
 /**

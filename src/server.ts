@@ -7,6 +7,7 @@ import { connectRedis, disconnectRedis, redisCacheClient } from "./infrastructur
 import { attachSocketRedisAdapter, createSocketServer } from "./infrastructure/websocket/socket";
 import {
   enqueueEmail,
+  enqueueAutomatedEmail,
   enqueueBulkNotifications,
   enqueuePushReceipts,
   enqueuePushSend,
@@ -78,6 +79,7 @@ const bootstrap = async () => {
   );
   jobQueue?.setQueueFunctions?.({
     enqueueEmail,
+    enqueueAutomatedEmail,
     enqueueBulkNotifications,
     enqueuePushReceipts,
     enqueuePushSend,
@@ -145,6 +147,11 @@ const bootstrap = async () => {
     stopStoryMediaCleanupCron?: () => void;
   }>(path.join(backendRootPath, "jobs", "storyMediaCleanupCron.js"));
   storyMediaCleanupCron?.startStoryMediaCleanupCron?.();
+  const automatedEmailCron = safeRequire<{
+    startAutomatedEmailCron?: () => void;
+    stopAutomatedEmailCron?: () => void;
+  }>(path.join(backendRootPath, "jobs", "automatedEmailCron.js"));
+  automatedEmailCron?.startAutomatedEmailCron?.();
 
   httpServer.listen(env.PORT, () => {
     logger.info("Server started", {
@@ -174,6 +181,7 @@ const bootstrap = async () => {
       apnsVoipPushService?.stopApnsVoipPushSweeper?.();
       premiumMembershipCron?.stopPremiumMembershipCron?.();
       storyMediaCleanupCron?.stopStoryMediaCleanupCron?.();
+      automatedEmailCron?.stopAutomatedEmailCron?.();
       const { emailWorker, notificationWorker, broadcastWorker, clipVideoWorker } = await import("./infrastructure/jobs/queue");
       await Promise.allSettled([emailWorker.close(), notificationWorker.close(), broadcastWorker.close(), clipVideoWorker.close()]);
     } catch { /* queue may not be initialized */ }

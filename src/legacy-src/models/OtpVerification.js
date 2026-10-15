@@ -9,9 +9,9 @@ const otpVerificationSchema = new mongoose.Schema({
   },
   otp: {
     type: String,
-    required: true,
-    length: 6
+    select: false
   },
+  otpHash: { type: String, select: false },
   purpose: {
     type: String,
     enum: ['login', 'register', 'forgot_password'],
@@ -30,6 +30,7 @@ const otpVerificationSchema = new mongoose.Schema({
 });
 
 otpVerificationSchema.index({ email: 1, purpose: 1 });
+otpVerificationSchema.index({ email: 1, purpose: 1, otpHash: 1 });
 otpVerificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // TTL optional
 
 module.exports = mongoose.model('OtpVerification', otpVerificationSchema);

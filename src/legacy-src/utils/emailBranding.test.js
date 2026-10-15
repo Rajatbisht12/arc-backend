@@ -41,8 +41,6 @@ const { EMAIL_INTENTS } = require('./notificationChannelPolicy');
 
 const assertSquadhuntDelivery = (delivery) => {
   assert.equal(delivery.from, 'SquadHunt <legacy-mailbox@example.test>');
-  assert.match(delivery.subject, /SquadHunt/i);
-  assert.match(delivery.text, /SquadHunt/i);
   assert.match(delivery.html, /SquadHunt/i);
   assert.equal(/\bARC\b/i.test(`${delivery.from}\n${delivery.subject}\n${delivery.text}\n${delivery.html}`), false);
 };
@@ -72,6 +70,8 @@ const assertSquadhuntDelivery = (delivery) => {
   deliveries.forEach(assertSquadhuntDelivery);
 
   const notificationDelivery = deliveries.at(-1);
+  assert.match(notificationDelivery.subject, /SquadHunt/i);
+  assert.match(notificationDelivery.text, /SquadHunt/i);
   assert.match(notificationDelivery.text, /View in SquadHunt/);
   assert.match(notificationDelivery.html, />View in SquadHunt</);
   assert.match(notificationDelivery.text, /https:\/\/www\.squadhunt\.com\/settings\/security/);

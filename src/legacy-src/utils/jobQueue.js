@@ -19,6 +19,7 @@ const {
 } = require('./emailAudit');
 
 let _enqueueEmail = null;
+let _enqueueAutomatedEmail = null;
 let _enqueueBulkNotifications = null;
 let _enqueuePushReceipts = null;
 let _enqueuePushSend = null;
@@ -30,8 +31,9 @@ let _enqueueClipTranscode = null;
 /**
  * Inject the queue functions from TypeScript land.
  */
-const setQueueFunctions = ({ enqueueEmail, enqueueBulkNotifications, enqueuePushReceipts, enqueuePushSend, enqueueBroadcast, enqueueBroadcastReceipts, removeBroadcastJobs, enqueueClipTranscode }) => {
+const setQueueFunctions = ({ enqueueEmail, enqueueAutomatedEmail, enqueueBulkNotifications, enqueuePushReceipts, enqueuePushSend, enqueueBroadcast, enqueueBroadcastReceipts, removeBroadcastJobs, enqueueClipTranscode }) => {
   _enqueueEmail = enqueueEmail;
+  _enqueueAutomatedEmail = enqueueAutomatedEmail;
   _enqueueBulkNotifications = enqueueBulkNotifications;
   _enqueuePushReceipts = enqueuePushReceipts;
   _enqueuePushSend = enqueuePushSend;
@@ -39,6 +41,15 @@ const setQueueFunctions = ({ enqueueEmail, enqueueBulkNotifications, enqueuePush
   _enqueueBroadcastReceipts = enqueueBroadcastReceipts;
   _removeBroadcastJobs = removeBroadcastJobs;
   _enqueueClipTranscode = enqueueClipTranscode;
+};
+
+const enqueueAutomatedEmail = async (eventId) => {
+  if (!_enqueueAutomatedEmail) {
+    const error = new Error('Automated email queue is unavailable');
+    error.statusCode = 503;
+    throw error;
+  }
+  return _enqueueAutomatedEmail(eventId);
 };
 
 /** HLS transcoding must never fall back to the HTTP request process. */
@@ -241,6 +252,7 @@ const enqueueBulkNotifications = async (recipientIds, title, message, type, data
 module.exports = {
   setQueueFunctions,
   enqueueEmail,
+  enqueueAutomatedEmail,
   enqueueBulkNotifications,
   enqueuePushReceipts,
   enqueuePushSend,

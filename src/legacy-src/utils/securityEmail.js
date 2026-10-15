@@ -3,10 +3,6 @@ const { EMAIL_INTENTS } = require('./notificationChannelPolicy');
 const { resolvePublicWebOrigin } = require('./publicWebUrl');
 
 const PASSWORD_SECURITY_EVENTS = Object.freeze({
-  password_reset: Object.freeze({
-    subject: 'Your SquadHunt password was reset',
-    text: 'Your SquadHunt account password was reset successfully. If you did not make this change, contact SquadHunt support immediately.'
-  }),
   password_changed: Object.freeze({
     subject: 'Your SquadHunt password was changed',
     text: 'Your SquadHunt account password was changed successfully. If you did not make this change, contact SquadHunt support immediately.'

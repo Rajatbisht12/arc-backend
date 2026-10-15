@@ -697,17 +697,16 @@ const updateUserStatus = async (req, res) => {
       });
     }
 
-    const user = await User.findByIdAndUpdate(
-      userId,
+    const user = await User.findOneAndUpdate(
+      { _id: userId, isActive: !isActive },
       { isActive },
       { new: true }
     ).select('-password');
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
+      const existing = await User.findById(userId).select('-password');
+      if (!existing) return res.status(404).json({ success: false, message: 'User not found' });
+      return res.json({ success: true, message: 'Account status unchanged', data: existing });
     }
 
     await Promise.all([
@@ -725,11 +724,16 @@ const updateUserStatus = async (req, res) => {
         ? 'Your SquadHunt account access has been restored by an administrator.'
         : 'Your SquadHunt account has been suspended by an administrator. Contact SquadHunt support if you believe this was a mistake.',
       { type: isActive ? 'account_restored' : 'account_suspended' },
-      notificationEmail(
-        EMAIL_INTENTS.ACCOUNT_LIFECYCLE,
-        isActive ? 'account_restored' : 'account_suspended'
-      )
+      isActive ? notificationEmail(EMAIL_INTENTS.ACCOUNT_LIFECYCLE, 'account_restored') : undefined
     );
+    if (!isActive) {
+      try {
+        const { queueAutomatedEmail } = require('../services/automatedEmailService');
+        await queueAutomatedEmail({ userId: user._id, eventKey: `account-disabled:admin:${user._id}:${user.updatedAt?.getTime() || Date.now()}`, templateId: 'account_disabled', payload: { actionSource: 'manual_admin' } });
+      } catch (emailError) {
+        log.error('Account disabled email queue failed', { code: String(emailError?.code || 'QUEUE_ERROR') });
+      }
+    }
 
     res.json({
       success: true,
@@ -1411,8 +1415,8 @@ const updateReport = async (req, res) => {
         : await Post.findById(report.targetId).select('author').lean();
       const targetOwnerId = target?.team || target?.author;
       if (targetOwnerId) {
-        const suspendedUser = await User.findByIdAndUpdate(
-          targetOwnerId,
+        const suspendedUser = await User.findOneAndUpdate(
+          { _id: targetOwnerId, isActive: true },
           { isActive: false },
           { new: true }
         ).select('username');
@@ -1430,13 +1434,20 @@ const updateReport = async (req, res) => {
         ]);
         evictPresenceAudience(global._arcSocketIO, targetOwnerId);
         await disconnectUserSockets(global._arcSocketIO, targetOwnerId, 'account_suspended');
-        await createSystemNotification(
+        if (suspendedUser) await createSystemNotification(
           targetOwnerId,
           'Account Suspended',
           'Your SquadHunt account has been suspended following a report review. Contact SquadHunt support if you believe this was a mistake.',
-          { type: 'account_suspended', reportId: report._id },
-          notificationEmail(EMAIL_INTENTS.ACCOUNT_LIFECYCLE, 'report_account_suspended')
+          { type: 'account_suspended', reportId: report._id }
         );
+        if (suspendedUser) {
+          try {
+            const { queueAutomatedEmail } = require('../services/automatedEmailService');
+            await queueAutomatedEmail({ userId: suspendedUser._id, eventKey: `account-disabled:report:${report._id}`, templateId: 'account_disabled', payload: { actionSource: 'report_review' } });
+          } catch (emailError) {
+            log.error('Report account email queue failed', { code: String(emailError?.code || 'QUEUE_ERROR') });
+          }
+        }
       }
     }
 
@@ -3775,8 +3786,25 @@ const updateUserControls = async (req, res) => {
     updates['adminControls.updatedAt'] = new Date();
     updates['adminControls.updatedBy'] = req.user?._id || null;
 
-    const user = await User.findByIdAndUpdate(userId, { $set: updates }, { new: true }).select('-password');
+    const disablingLogin = updates['adminControls.loginDisabled'] === true;
+    const transitioned = disablingLogin
+      ? await User.findOneAndUpdate(
+        { _id: userId, 'adminControls.loginDisabled': { $ne: true } },
+        { $set: updates },
+        { new: true }
+      ).select('-password')
+      : null;
+    const user = transitioned || await User.findByIdAndUpdate(userId, { $set: updates }, { new: true }).select('-password');
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (transitioned) {
+      try {
+        const { queueAutomatedEmail } = require('../services/automatedEmailService');
+        await queueAutomatedEmail({ userId: user._id, eventKey: `account-disabled:login-control:${user._id}:${user.adminControls?.updatedAt?.getTime() || Date.now()}`, templateId: 'account_disabled', payload: { actionSource: 'manual_admin' } });
+      } catch (emailError) {
+        log.error('Login disablement email queue failed', { code: String(emailError?.code || 'QUEUE_ERROR') });
+      }
+    }
 
     res.locals.auditAfter = { userId, adminControls: user.adminControls };
     res.json({ success: true, message: 'User controls updated', data: user });
