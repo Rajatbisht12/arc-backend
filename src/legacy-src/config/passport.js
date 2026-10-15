@@ -14,16 +14,26 @@ passport.use(
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
-        const email = profile.emails?.[0]?.value?.toLowerCase();
+        const email = profile.emails?.[0]?.value?.trim().toLowerCase();
+        const googleId = typeof profile.id === 'string' ? profile.id.trim() : '';
         const avatar = profile.photos?.[0]?.value;
         const displayName = profile.displayName;
 
-        if (!email) {
-          return done(null, false, { message: 'Email not provided by Google' });
+        if (!googleId) {
+          return done(null, false, { message: 'Google identity not provided.' });
         }
 
-        // Find or create user
-        let user = await User.findOne({ email });
+        // Only the verified provider subject identifies a linked account.
+        let user = await User.findOne({ googleId });
+        if (!user) {
+          const verifiedEmail = profile.emails?.[0]?.verified === true || profile._json?.email_verified === true;
+          if (!email || !verifiedEmail) {
+            return done(null, false, { message: 'A verified Google email is required to create an account.' });
+          }
+          if (await User.findOne({ email })) {
+            return done(null, false, { message: 'An account already uses this email. Sign in before linking Google.' });
+          }
+        }
 
         if (user?.isSystemAccount || user?.userType === 'system') {
           return done(null, false, { message: 'Account is unavailable.' });
@@ -80,19 +90,26 @@ passport.use(
           
           // Create temporary user for Google OAuth without username/password
           // User will set these on profile completion page
-          user = await User.create({
-            email,
-            googleId: profile.id,
-            username: finalUsername, // Temporary unique username (max 20 chars)
-            password: require('crypto').randomBytes(32).toString('hex'), // Temporary password
-            userType: 'player', // Default to player
-            profile: {
-              displayName: displayName || email.split('@')[0],
-              avatar: avatarUrl
-            },
-            needsProfileCompletion: true,
-            isActive: true
-          });
+          try {
+            user = await User.create({
+              email,
+              googleId,
+              username: finalUsername, // Temporary unique username until onboarding
+              password: require('crypto').randomBytes(32).toString('hex'),
+              userType: 'player',
+              profile: {
+                displayName: typeof displayName === 'string' ? displayName.trim() : '',
+                avatar: avatarUrl
+              },
+              needsProfileCompletion: true,
+              requiresPasswordSetup: true,
+              isActive: true
+            });
+          } catch (createError) {
+            if (createError?.code !== 11000) throw createError;
+            user = await User.findOne({ googleId });
+            if (!user) return done(null, false, { message: 'An account already uses this email. Sign in before linking Google.' });
+          }
         } else {
           // Update existing user
           if (avatarUrl && !user.profile.avatar) {
@@ -101,6 +118,10 @@ passport.use(
           user.lastSeen = new Date();
           await user.save();
         }
+
+        if (user.isSystemAccount || user.userType === 'system') return done(null, false, { message: 'Account is unavailable.' });
+        if (user.userType === 'admin') return done(null, false, { message: 'Admin accounts must sign in through the dedicated Admin Portal.' });
+        if (!user.isActive) return done(null, false, { message: 'Account is deactivated.' });
 
         // Generate JWT tokens
         const token = generateToken({ 
