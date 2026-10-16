@@ -60,9 +60,36 @@ and per-viewer report suppression before returning content.
 ## Deployment prerequisite: indexes and historical backfill
 
 Production disables automatic MongoDB collection/index creation. Deploying the
-model files alone does not provision the indexes. Run the following against
-staging, inspect the aggregate report, then repeat in the intended production
-deployment environment:
+model files alone does not provision the indexes.
+
+### Standard ECS deployment
+
+Run `bash deploy.sh` as usual. It runs these steps inside the new image's ECS
+preflight, after loading deployment secrets and **before switching the service
+to the new revision**:
+
+- First discovery rollout: read-only audit, `--apply`, then `--verify`.
+- Subsequent deployments: `--verify` only, without rescanning historical signals.
+
+No manual commands are required after deploying through this script. The active
+task definition's `DISCOVERY_EXPOSURE_MIGRATION_VERSION=1` records the completed
+rollout. A newly registered revision cannot receive traffic until all preflight
+steps succeed; a failed backfill blocks activation and is retried on the next
+deployment. Merely registering a task definition does not mark the active
+service as migrated. Missing/conflicting indexes block even a routine deployment.
+
+If changing the target database or intentionally reconciling historical data,
+use `FORCE_DISCOVERY_EXPOSURE_MIGRATION=1 bash deploy.sh` to rerun audit and
+backfill. This is additive and idempotent, but scans history, so it should not be
+enabled for every release. Do not manually copy the version marker onto an
+unmigrated service. Existing financial maintenance-window gates remain unchanged.
+
+### Manual or nonstandard deployment
+
+For staging validation or a release that bypasses `deploy.sh`, run the following
+in the intended deployment environment with the new source and dependencies,
+**before enabling the new backend revision**. Inspect the aggregate audit report
+before applying:
 
 ```sh
 node scripts/migrate-discovery-exposure.js
