@@ -1,12 +1,23 @@
 # Discovery recommendations
 
 Home Feed and Clips use the same authenticated backend recommendation policy.
-Eligible candidates are ordered by four strict tiers:
+Videos have a strict no-repeat policy: after at least one second of meaningful
+exposure, the same canonical video is excluded from both Home Feed and Clips
+recommendations. A one- or two-second watch is sufficient; completion is not
+required. Watching on one surface excludes it on the other, across sessions and
+devices. Videos with explicit interaction history are also excluded.
+
+Eligible candidates are ordered by these strict tiers:
 
 1. Unseen and never explicitly interacted with, published in the last 7 days.
 2. Other unseen and never explicitly interacted with content.
-3. Previously viewed content with no explicit interaction, after unseen content is exhausted.
-4. Previously interacted with content, after all higher tiers are exhausted.
+3. Previously viewed **non-video** posts with no explicit interaction, after unseen content is exhausted.
+4. Previously interacted with **non-video** posts, after all higher tiers are exhausted.
+
+Tiers 3 and 4 never return videos, including when all unseen videos have been
+exhausted. Clips stops with no continuation instead of recycling watched videos.
+Non-video Home Feed fallback behavior is unchanged. Public view counts and
+metadata prefetching remain independent from meaningful exposure.
 
 The 7-day boundary uses the server's current UTC time and `Post.createdAt`.
 The existing relevance, content quality, following, and diversity signals operate
@@ -27,6 +38,15 @@ An unlike or unsave does not erase historical exposure or interaction. Home Feed
 videos and Clips are the same Post record, so watching either surface updates
 the same identity. Matching media URLs never merges independent content.
 Intentional profile, saved, search, and direct-link access remains available.
+The no-repeat rule is enforced against the actual Post's video media, not only
+the historical `contentType` hint, which may be generic in older exposure rows.
+Delivery/session expiry never makes a persistently watched video unseen again.
+
+Qualified `view`, `watch`, and `dwell` events from existing engagement endpoints
+now update exposure immediately as well as analytics. They use the same one-second
+threshold as the private exposure endpoint. A metadata GET or zero-duration public
+view event still does not qualify. Short watches therefore do not depend on
+rerunning the historical migration before they affect the next recommendation.
 
 `RecommendationDelivery` is separate from exposure. Its `session:post` identity
 prevents a recommendation session from re-serving fetched metadata. Delivery
@@ -68,15 +88,22 @@ Run `bash deploy.sh` as usual. It runs these steps inside the new image's ECS
 preflight, after loading deployment secrets and **before switching the service
 to the new revision**:
 
-- First discovery rollout: read-only audit, `--apply`, then `--verify`.
+- First discovery rollout or upgrade to exposure backfill v2: read-only audit,
+  `--apply`, then `--verify`.
 - Subsequent deployments: `--verify` only, without rescanning historical signals.
 
 No manual commands are required after deploying through this script. The active
-task definition's `DISCOVERY_EXPOSURE_MIGRATION_VERSION=1` records the completed
+task definition's `DISCOVERY_EXPOSURE_MIGRATION_VERSION=2` records the completed
 rollout. A newly registered revision cannot receive traffic until all preflight
 steps succeed; a failed backfill blocks activation and is retried on the next
 deployment. Merely registering a task definition does not mark the active
 service as migrated. Missing/conflicting indexes block even a routine deployment.
+
+Backfill v2 reconciles qualified historical view/watch/dwell events created
+after the initial backfill but before those existing endpoints started updating
+exposure live. It reuses the additive, idempotent migration; no new collections,
+schema changes or manual post-deployment commands are required. It still does not
+guess exposure from unqualified zero-duration views or metadata prefetches.
 
 If changing the target database or intentionally reconciling historical data,
 use `FORCE_DISCOVERY_EXPOSURE_MIGRATION=1 bash deploy.sh` to rerun audit and
@@ -199,8 +226,10 @@ contention retains a continuation instead of falsely declaring exhaustion.
 No new media players, video downloads, scroll resets or UI rankings were added.
 
 Fresh unseen inventory precedes older unseen inventory. Only confirmed unseen
-exhaustion permits viewed fallback, followed by interacted fallback. Repeat
-inventory favors least recently viewed content. A finite or empty catalog has
+exhaustion permits **non-video Home Feed** viewed fallback, followed by non-video
+interacted fallback. Repeat inventory favors least recently viewed non-video
+posts; watched videos are never recycled, even with `includeViewed=true` or a
+new client recommendation cycle. A finite or empty catalog has
 an explicit termination/continuation state; it must not cause a tight empty-page
 request loop or claim that more unique records exist than the catalog contains.
 
@@ -249,18 +278,28 @@ Actual staging DocumentDB execution plans remain a release check.
 
 ## Validation and changed files
 
-Backend `npm run test:discovery` passed 550 integration assertions plus the
+Backend `npm run test:discovery` passed 571 integration assertions plus the
 230-unique-Clip pagination regression, canonical author follow-state test, and
 three migration tests. Coverage includes all four strict tiers, the inclusive
 7-day freshness boundary (and older by one millisecond), 49-hour/six-day unseen
 content, 167/169-hour ordering, popularity not crossing tiers, canonical Home/Clips
 identity, authenticated ownership, public-counter separation, save/unsave
-history, simultaneous requests, new and newly-public uploads after exhaustion,
+history, one/two/three-second video exclusion, immediate legacy view/watch/dwell
+exposure, no video recycling after refresh/session expiry/catalog exhaustion,
+intentional watched-video navigation, simultaneous requests, new and newly-public uploads after exhaustion,
 cursor-only session restoration, independent anonymous sessions, private/blocked/
 suspended/deleted content, and finite empty catalogs. Both Home and Clips reach
 all 231 seeded eligible items without repeating. A separate 20,000-row exposure
 history check returned ten fresh unseen cards in 25.07 ms on local MongoDB.
 This is synthetic execution time, not production latency or capacity testing.
+
+For the one-second no-repeat update, the recommendation/engagement and privacy
+suites and backend production build also passed. Web exposure tests passed 13
+checks, native exposure trackers passed nine checks using
+`node --experimental-strip-types --test src/services/recommendationExposure.test.mts`,
+and the deployment gate passed six tests, including backfill v1-to-v2 rollout.
+These are automated policy/tracker checks, not new physical-device playback
+validation. No production migration or deployment was run for this update.
 
 The existing recommendation and privacy suites and backend TypeScript build
 passed. Web: 84 tests across 12 relevant suites passed, and production fixture

@@ -100,11 +100,11 @@ test('deployment backfill decision handles first rollout, routine deployment and
   const deploy = fs.readFileSync(path.join(root, 'deploy.sh'), 'utf8');
   const decision = deploy.slice(deploy.indexOf('REQUIRES_DISCOVERY_MIGRATION=0'), deploy.indexOf('REQUIRES_FINANCIAL_QUIESCE=0'));
   for (const [original, target, force, expected] of [
-    ['None', '1', '0', '1'],
-    ['', '1', '0', '1'],
-    ['1', '1', '0', '0'],
+    ['None', '2', '0', '1'],
+    ['', '2', '0', '1'],
+    ['2', '2', '0', '0'],
     ['1', '2', '0', '1'],
-    ['1', '1', '1', '1']
+    ['2', '2', '1', '1']
   ]) {
     const result = spawnSync('bash', ['-c', `${decision}\nprintf '%s' "$REQUIRES_DISCOVERY_MIGRATION"`], {
       env: {
@@ -122,7 +122,7 @@ test('deployment backfill decision handles first rollout, routine deployment and
 
 test('ECS deployment versions the backfill and gates traffic on successful preflight', () => {
   const deploy = fs.readFileSync(path.join(root, 'deploy.sh'), 'utf8');
-  assert.match(deploy, /TARGET_DISCOVERY_EXPOSURE_VERSION="1"/);
+  assert.match(deploy, /TARGET_DISCOVERY_EXPOSURE_VERSION="2"/);
   assert.match(deploy, /ORIGINAL_DISCOVERY_EXPOSURE_VERSION.*\$\(aws ecs describe-task-definition/);
   assert.match(deploy, /"\$ORIGINAL_DISCOVERY_EXPOSURE_VERSION" != "\$TARGET_DISCOVERY_EXPOSURE_VERSION" \|\| "\$\{FORCE_DISCOVERY_EXPOSURE_MIGRATION:-0\}" == "1"/);
   assert.match(deploy, /discoveryMarker\.value = process\.argv\[4\]/);
