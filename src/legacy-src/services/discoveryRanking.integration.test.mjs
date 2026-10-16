@@ -12,7 +12,7 @@ const State = require('../models/RecommendationState');
 const Engagement = require('../models/PostEngagement');
 const { getRecommendedPosts, recordEngagementEvent } = require('./recommendationService');
 const { recordContentExposure } = require('./contentExposureService');
-const { FRESH_WINDOW_MS, unseenCandidates } = require('./discoveryRankingService');
+const { unseenCandidates } = require('./discoveryRankingService');
 const { recordRecommendationExposure, recordClipView, getPost, toggleSave } = require('../controllers/postController');
 const { ensureDiscoveryCollections } = require('../utils/ensureDiscoveryCollections');
 require('../utils/logger').debug = () => {};
@@ -37,19 +37,16 @@ try {
   const feed = (seed, options = {}, mode = 'feed') => getRecommendedPosts({ user, query: { limit: 10, sessionSeed: seed, ...options }, mode });
   const clear = async () => Promise.all([Post.deleteMany({}), Exposure.deleteMany({}), Delivery.deleteMany({}), State.deleteMany({}), Engagement.deleteMany({})]);
   await clear();
-  check(FRESH_WINDOW_MS === 7 * 24 * HOUR, 'fresh unseen window is seven days, not the legacy 48 hours');
   const boundaryNow = new Date();
-  const boundaryPosts = await Post.insertMany([49 * HOUR, 6 * 24 * HOUR, FRESH_WINDOW_MS, FRESH_WINDOW_MS + 1].map(age =>
+  const boundaryPosts = await Post.insertMany([0, 49 * HOUR, 6 * 24 * HOUR, 7 * 24 * HOUR, 7 * 24 * HOUR + 1, 30 * 24 * HOUR].map(age =>
     makePost(0, { createdAt: new Date(boundaryNow.getTime() - age) })
   ));
   const boundaryQuery = {
     filter: { isActive: true, visibility: 'public' }, userId: user._id,
-    session: 'seven-day-boundary', now: boundaryNow, candidateLimit: 10
+    session: 'age-neutral-unseen', now: boundaryNow, candidateLimit: 10
   };
-  const boundaryFresh = await unseenCandidates({ ...boundaryQuery, tier: 1 });
-  const boundaryOlder = await unseenCandidates({ ...boundaryQuery, tier: 2 });
-  check(boundaryFresh.length === 3 && boundaryPosts.slice(0, 3).every(post => boundaryFresh.some(item => String(item._id) === String(post._id))), '49-hour, six-day and exactly seven-day unseen content belongs to the fresh tier');
-  check(boundaryOlder.length === 1 && String(boundaryOlder[0]._id) === String(boundaryPosts[3]._id), 'content older than seven days by one millisecond belongs to the older unseen tier');
+  const unseen = await unseenCandidates(boundaryQuery);
+  check(unseen.length === boundaryPosts.length && boundaryPosts.every(post => unseen.some(item => String(item._id) === String(post._id))), 'all upload ages share one unseen tier, including both sides of the former seven-day boundary');
   await clear();
   const fresh = await Post.insertMany(Array.from({ length: 23 }, (_, i) => makePost(i ? 49 : 167)));
   const older = await Post.insertMany(Array.from({ length: 17 }, (_, i) => makePost(i ? 30 * 24 : 169, { views: 1_000_000 })));
@@ -70,14 +67,13 @@ try {
   check(new Set(all.map(post => String(post._id))).size === 44, 'every canonical item is served exactly once');
   const tiers = all.map(post => post._ranking.tier);
   check(tiers.every((tier, i) => !i || tier >= tiers[i - 1]), 'strict tiers cannot be crossed by popularity, affinity or diversity');
-  check(all.slice(0, 23).every(post => fresh.some(item => String(item._id) === String(post._id))), 'all fresh unseen precedes older unseen');
-  check(all.slice(23, 40).every(post => older.some(item => String(item._id) === String(post._id))), 'older unseen precedes previously viewed/liked/commented');
+  check(all.slice(0, 40).every(post => [...fresh, ...older].some(item => String(item._id) === String(post._id)) && post._ranking.tier === 1), 'all unseen content precedes previously viewed/liked/commented regardless of upload age');
   check(String(all[40]._id) === String(seen[0]._id), 'non-video repeat tier prefers least recently viewed');
-  check(tiers.slice(-2).every(tier => tier === 4), 'non-video explicit actions remain the final fallback');
+  check(tiers.slice(-2).every(tier => tier === 3), 'non-video explicit actions remain the final fallback');
   check(await Exposure.countDocuments({ user: user._id }) === 4, 'serving and prefetching do not create exposure');
   // A new authenticated session/device uses the SAME persistent exposure rows.
   const device = await feed('another-device', { includeViewed: 'true' }, 'clips');
-  check(device.posts.every(post => post._ranking.tier === 1), 'legacy includeViewed cannot bypass fresh unseen rules');
+  check(device.posts.every(post => post._ranking.tier === 1), 'legacy includeViewed cannot bypass unseen rules');
   const selected = fresh[0];
   await recordContentExposure({ userId: user._id, postId: selected._id, durationMs: 1000, contentType: 'video' });
   const crossSurface = await feed('web-after-android', {}, 'clips');
@@ -98,14 +94,14 @@ try {
   const onlySeen = await Post.create(nonVideo(50));
   await recordContentExposure({ userId: user._id, postId: onlySeen._id, durationMs: 1000 });
   const repeatFirst = await feed('fresh-upload');
-  check(repeatFirst.posts[0]._ranking.tier === 3, 'viewed non-video content remains eligible when unique catalog is exhausted');
+  check(repeatFirst.posts[0]._ranking.tier === 2, 'viewed non-video content remains eligible when unique catalog is exhausted');
   const upload = await Post.create(makePost(0));
   const freshAfterRepeat = await feed('fresh-upload', { cursor: repeatFirst.pagination.nextCursor });
   check(String(freshAfterRepeat.posts[0]._id) === String(upload._id), 'new uploads enter ahead of repeats without restarting the application');
   const restoredVisibility = await Post.create(makePost(169, { visibility: 'private' }));
   await Post.updateOne({ _id: restoredVisibility._id }, { $set: { visibility: 'public' } });
   const olderAfterRepeat = await feed('fresh-upload');
-  check(String(olderAfterRepeat.posts[0]._id) === String(restoredVisibility._id) && olderAfterRepeat.posts[0]._ranking.tier === 2, 'incremental exhaustion checks discover newly eligible older posts before repeats');
+  check(String(olderAfterRepeat.posts[0]._id) === String(restoredVisibility._id) && olderAfterRepeat.posts[0]._ranking.tier === 1, 'incremental exhaustion checks discover newly eligible older posts before repeats');
   const savedCheckpoint = await State.findOne({ user: user._id }).lean();
   check(savedCheckpoint && savedCheckpoint.expiresAt > new Date(), 'unseen exhaustion is checkpointed with explicit expiry');
 
@@ -144,7 +140,7 @@ try {
   for (const mode of ['feed', 'clips']) {
     const result = await feed(`unseen-after-watched-${mode}`, {}, mode);
     check(result.posts.length === 2 && result.posts.every(post => newVideos.some(item => String(item._id) === String(post._id))), `${mode} still discovers fresh and older unseen videos without recycling watched content`);
-    check(result.posts[0]._ranking.tier === 1 && result.posts[1]._ranking.tier === 2, `${mode} preserves seven-day freshness priority`);
+    check(result.posts.every(post => post._ranking.tier === 1), `${mode} places all unseen videos in the same age-neutral tier`);
   }
   const intentionalRewatch = await feed('direct-watched-video', { targetClipId: String(watched[0]._id) }, 'clips');
   check(String(intentionalRewatch.targetClip._id) === String(watched[0]._id) && !intentionalRewatch.posts.some(post => String(post._id) === String(watched[0]._id)), 'an intentionally opened watched video remains accessible but is not recommended again');

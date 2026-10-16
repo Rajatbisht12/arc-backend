@@ -267,11 +267,16 @@ const clipInteractionTier = selectSessionFreshPosts([
 assert.deepStrictEqual(clipInteractionTier, ['clip-unseen'],
   'Clips also prioritizes a non-interacted candidate without changing its ranking architecture');
 
-// ── New-post freshness kicker ─────────────────────────────────────────────
+// ── Upload age is not an automatic recommendation signal ──────────────────
 
 const brandNew = scorePost(makePost('p-a', { createdAt: new Date(now - (10 * 60 * 1000)) }), baseContext());
 const older = scorePost(makePost('p-a', { createdAt: new Date(now - (12 * HOUR_MS)) }), baseContext());
-assert(brandNew > older + 15, 'newly created posts get a temporary head start');
+assert.strictEqual(brandNew, older, 'automatic recommendation scores are age-neutral');
+assert(
+  scorePost(makePost('p-a', { createdAt: new Date(now - (10 * 60 * 1000)) }), baseContext({ useUploadAge: true }))
+    > scorePost(makePost('p-a', { createdAt: new Date(now - (12 * HOUR_MS)) }), baseContext({ useUploadAge: true })) + 15,
+  'intentional Search preserves its existing upload-age behavior'
+);
 
 // ── Boost frequency cap / damping ─────────────────────────────────────────
 

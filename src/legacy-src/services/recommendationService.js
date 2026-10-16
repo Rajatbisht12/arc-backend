@@ -11,8 +11,8 @@ const { buildPrivacyAccess } = require('../utils/privacyPolicy');
 const { normalizeTag } = require('../utils/hashtags');
 const log = require('../utils/logger');
 const { getBoostScore, isActiveBoost, getDeliverySource, recordBoostDelivery } = require('./boostService');
-const { getDiscoveryPage, decodeDiscoveryCursor } = require('./discoveryRankingService');
-const { EXPLICIT_INTERACTIONS, recordContentExposure } = require('./contentExposureService');
+const { getDiscoveryPage, decodeDiscoveryCursor, RANKING_POLICY } = require('./discoveryRankingService');
+const { EXPLICIT_INTERACTIONS, recordContentExposure, excludeExposedVideos } = require('./contentExposureService');
 
 const DEFAULT_LIMIT = 15;
 const MAX_LIMIT = 30;
@@ -46,7 +46,8 @@ const TOP_POSITION_PENALTY_WINDOW_HOURS = 8;
 const BOOST_USER_COOLDOWN_HOURS = 6;
 const BOOST_FREQUENCY_CAP = 4;
 const BOOST_TOP_WINDOW = 5;
-const NEW_POST_KICKER_HOURS = 6;
+// Intentional Search only; not used by automatic Home/Clips discovery.
+const SEARCH_NEW_POST_KICKER_HOURS = 6;
 const MAX_SESSION_SEED_LENGTH = 64;
 const MAX_ENGAGEMENT_DURATION_MS = 24 * 60 * 60 * 1000;
 const ENGAGEMENT_CONTEXTS = new Set(['feed', 'clips', 'profile', 'search', 'post', 'unknown']);
@@ -763,12 +764,12 @@ function scorePost(post, {
   seed,
   sessionId,
   seenMap,
-  boostDeliveryMap
+  boostDeliveryMap,
+  // Only intentional Search retains its existing upload-age signals. Automatic
+  // Home/Clips recommendations are age-neutral by default.
+  useUploadAge = false
 }) {
   const now = Date.now();
-  const createdAt = new Date(post.createdAt).getTime();
-  const hoursOld = Math.max(0, (now - createdAt) / 36e5);
-  const freshness = Math.exp(-hoursOld / (mode === 'clips' ? 96 : 72));
 
   const likes = post.likeCount ?? getCount(post.likes);
   const comments = post.commentCount ?? getCount(post.comments);
@@ -777,7 +778,7 @@ function scorePost(post, {
   const views = Math.max(post.uniqueViewCount ?? getCount(post.viewedBy), post.views || 0);
   // Compress engagement to a bounded log scale (~0–90). Raw counts were
   // unbounded, so one very popular post (e.g. 25k views → ~8750) dwarfed
-  // freshness/seen-penalty/exploration and stayed pinned at #1 forever, freezing
+  // seen-penalty/exploration and stayed pinned at #1 forever, freezing
   // the feed. Log keeps "more engaged ranks higher" but at a magnitude
   // comparable to the other signals, so the seen-penalty and session-seed
   // exploration can actually rotate the order.
@@ -797,11 +798,12 @@ function scorePost(post, {
   const qualityPenalty = reports * 25;
   const exploration = stableNoise(seed, post._id) * (mode === 'clips' ? 16 : 10);
   const viralVelocity = engagementRate > 0 ? Math.min(35, engagementRate * 28) : 0;
-  // Temporary head start for newly created eligible posts so fresh content
-  // reaches the top before engagement accumulates.
-  const newPostKicker = hoursOld < NEW_POST_KICKER_HOURS
-    ? (mode === 'clips' ? 20 : 26) * Math.exp(-hoursOld / 2.5)
-    : 0;
+  let uploadAgeScore = 0;
+  if (useUploadAge) {
+    const hoursOld = Math.max(0, (now - new Date(post.createdAt).getTime()) / 36e5);
+    uploadAgeScore = Math.exp(-hoursOld / (mode === 'clips' ? 96 : 72)) * (mode === 'clips' ? 85 : 70)
+      + (hoursOld < SEARCH_NEW_POST_KICKER_HOURS ? (mode === 'clips' ? 20 : 26) * Math.exp(-hoursOld / 2.5) : 0);
+  }
   const seenPenalty = getSeenPenalty(seenMap?.get(normalizeId(post._id)), now, sessionId);
   const interactionPenalty = getInteractionPenalty(
     interestProfile.interactionMap?.get(normalizeId(post._id)),
@@ -809,8 +811,7 @@ function scorePost(post, {
   );
 
   const score =
-    freshness * (mode === 'clips' ? 85 : 70)
-    + engagement
+    engagement
     + viralVelocity
     + followingBoost
     + authorAffinity
@@ -820,7 +821,7 @@ function scorePost(post, {
     + boostScore
     + exploration
     + ownPostPenalty
-    + newPostKicker
+    + uploadAgeScore
     - seenPenalty
     - interactionPenalty
     - qualityPenalty;
@@ -1237,7 +1238,8 @@ async function getWeightedRecommendedPosts({ user, query = {}, mode = 'feed' }) 
         seed,
         sessionId: sessionSeed,
         seenMap,
-        boostDeliveryMap
+        boostDeliveryMap,
+        useUploadAge: true
       })
     }))
     .sort((a, b) => {
@@ -1377,7 +1379,7 @@ async function getWeightedRecommendedPosts({ user, query = {}, mode = 'feed' }) 
           previousSessionId: seenMap.get(postId)?.lastSessionId ?? null,
           freshness: Math.round(Math.exp(-hoursOld / (mode === 'clips' ? 96 : 72)) * 1000) / 1000,
           hoursOld: Math.round(hoursOld * 10) / 10,
-          newPostKicker: hoursOld < NEW_POST_KICKER_HOURS,
+          newPostKicker: hoursOld < SEARCH_NEW_POST_KICKER_HOURS,
           createdAt: post.createdAt,
           rankingReason: wasRecentlyInteracted(interactionEntry, rankingNow)
             ? 'organic(interaction-suppressed)'
@@ -1385,7 +1387,7 @@ async function getWeightedRecommendedPosts({ user, query = {}, mode = 'feed' }) 
               ? 'boost+organic'
               : isPreviouslySeen
               ? 'organic(seen-penalized)'
-              : hoursOld < NEW_POST_KICKER_HOURS
+              : hoursOld < SEARCH_NEW_POST_KICKER_HOURS
                 ? 'fresh'
                 : 'organic',
         };
@@ -1543,6 +1545,8 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     posts: selectedPosts.map(post => formatted.get(normalizeId(post._id))),
     targetClip: targetClipPost ? formatted.get(normalizeId(targetClipPost._id)) : null
   });
+  // Direct targets remain accessible; only automatic recommendations are gated.
+  delivered.posts = await excludeExposedVideos(delivered.posts, viewerId);
   log.debug('discovery-page', { mode, count: delivered.posts.length, lastTier: page.lastTier, durationMs: Date.now() - startedAt });
   return {
     posts: delivered.posts,
@@ -1555,8 +1559,9 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
       hasMore: Boolean(page.nextCursor), nextCursor: page.nextCursor, cursor: query.cursor || null
     },
     recommendation: {
-      algorithm: 'discovery-v3', mode, context: mode, sessionSeed,
-      signals: ['strict_exposure_tiers', 'fresh_unseen_7d', 'persistent_cross_surface_exposure', 'watched_video_exclusion', 'least_recent_non_video_repeats', 'personalization', 'diversity', 'privacy'],
+      algorithm: 'discovery-v3', rankingPolicy: RANKING_POLICY, mode, context: mode, sessionSeed,
+      signals: ['strict_exposure_tiers', 'unseen_any_age', 'persistent_cross_surface_exposure', 'watched_video_exclusion', 'least_recent_non_video_repeats', 'personalization', 'diversity', 'privacy'],
+      // Legacy response name means unseen inventory, not a freshness window.
       exhaustedFreshClips: mode === 'clips' && !page.nextCursor
     }
   };
