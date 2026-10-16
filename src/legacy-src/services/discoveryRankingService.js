@@ -6,7 +6,7 @@ const ContentExposure = require('../models/ContentExposure');
 const RecommendationDelivery = require('../models/RecommendationDelivery');
 const RecommendationState = require('../models/RecommendationState');
 
-const FRESH_WINDOW_MS = 48 * 60 * 60 * 1000;
+const FRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const DELIVERY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_CANDIDATES = 240;
 const EXHAUSTION_CHECK_TTL_MS = 60_000;
