@@ -1,6 +1,8 @@
 const Post = require('../models/Post');
 const User = require('../models/User');
+const FollowRequest = require('../models/FollowRequest');
 const { formatUserDTO } = require('../utils/dto');
+const { buildPrivacyAccess } = require('../utils/privacyPolicy');
 const { resolveClientMediaPayload } = require('../utils/privateMediaDelivery');
 const { normalizeQuerySearch, buildPrefixRegex, escapeRegex } = require('../utils/searchQuery');
 const { getRelationshipContext, buildAudienceFilter } = require('./recommendationService');
@@ -21,9 +23,12 @@ const buildDiscoverSearchFilter = ({ audienceFilter, search, matchingAuthorIds }
   };
 };
 
-const toDiscoverSearchTile = (post, isGuest) => ({
+const toDiscoverSearchTile = (post, isGuest, authorFollowState) => ({
   _id: normalizeId(post),
-  author: post.author ? formatUserDTO(post.author, isGuest) : null,
+  author: post.author ? {
+    ...formatUserDTO(post.author, isGuest),
+    ...(authorFollowState || {})
+  } : null,
   content: post.content,
   postType: post.postType,
   createdAt: post.createdAt,
@@ -74,10 +79,38 @@ const getDiscoverSearchPosts = async ({ user, query = {}, mode = 'feed' }) => {
     .exec();
   const hasMore = found.length > limit;
   const pagePosts = hasMore ? found.slice(0, limit) : found;
+  const viewerId = normalizeId(relationship.currentUserId);
+  const authors = new Map(pagePosts
+    .filter((post) => post.author && normalizeId(post.author) !== viewerId)
+    .map((post) => [normalizeId(post.author), post.author]));
+  const authorIds = [...authors.keys()];
+  const pendingRequests = viewerId && authorIds.length
+    ? await FollowRequest.find({ requester: viewerId, target: { $in: authorIds }, status: 'pending' })
+      .select('target').lean()
+    : [];
+  const pendingIds = new Set(pendingRequests.map((request) => normalizeId(request.target)));
+  const authorFollowStates = new Map(authorIds.map((authorId) => {
+    const author = authors.get(authorId);
+    const isFollowing = Boolean(viewerId && relationship.followingIds.has(authorId));
+    const followRequestPending = pendingIds.has(authorId);
+    const access = buildPrivacyAccess({ settings: author.privacySettings, isFollower: isFollowing });
+    const canFollow = access.canFollow && !isFollowing && !followRequestPending;
+    return [authorId, {
+      isFollowing,
+      followStatus: isFollowing ? 'accepted' : followRequestPending ? 'pending' : 'none',
+      followRequestPending,
+      canFollow,
+      privacyAccess: { canFollow, followRequestPending }
+    }];
+  }));
   // Search screens render preview tiles and navigate by ID. Do not populate
   // comment/like arrays or the full Post; the canonical detail endpoint loads
   // interaction state only when the user opens a result.
-  const posts = pagePosts.map((post) => toDiscoverSearchTile(post, !user || user.userType === 'guest'));
+  const posts = pagePosts.map((post) => toDiscoverSearchTile(
+    post,
+    !user || user.userType === 'guest',
+    authorFollowStates.get(normalizeId(post.author))
+  ));
   const delivered = await resolveClientMediaPayload({ posts });
   return {
     posts: delivered.posts,

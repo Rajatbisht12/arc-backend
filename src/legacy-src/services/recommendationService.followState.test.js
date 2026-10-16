@@ -17,6 +17,7 @@ const Post = require('../models/Post');
 const Follow = require('../models/Follow');
 const FollowRequest = require('../models/FollowRequest');
 const { getRecommendedPosts } = require('./recommendationService');
+const { getDiscoverSearchPosts } = require('./discoverPostSearchService');
 
 let mongod;
 
@@ -94,4 +95,16 @@ test('clips authors carry canonical follow-state (Follow / Requests-off / Unfoll
     assert.strictEqual(own.isFollowing, undefined, 'self author gets no follow-state');
     assert.strictEqual(own.canFollow, undefined);
   }
+
+  const searchResult = await getDiscoverSearchPosts({
+    user: { _id: viewer._id, userType: 'player', isActive: true },
+    query: { search: 'clip', context: 'search', page: 1, limit: 30 },
+    mode: 'clips',
+  });
+  const searchAuthors = new Map(searchResult.posts.map(post => [String(post.author?._id), post.author]));
+  assert.strictEqual(searchAuthors.get(String(publicOpen._id))?.canFollow, true);
+  assert.strictEqual(searchAuthors.get(String(publicClosed._id))?.canFollow, false);
+  assert.strictEqual(searchAuthors.get(String(followedAuthor._id))?.followStatus, 'accepted');
+  assert.strictEqual(searchAuthors.get(String(pendingAuthor._id))?.followStatus, 'pending');
+  assert.strictEqual(searchAuthors.get(String(viewer._id))?.followStatus, undefined);
 });
