@@ -11,6 +11,8 @@ const { buildPrivacyAccess } = require('../utils/privacyPolicy');
 const { normalizeTag } = require('../utils/hashtags');
 const log = require('../utils/logger');
 const { getBoostScore, isActiveBoost, getDeliverySource, recordBoostDelivery } = require('./boostService');
+const { getDiscoveryPage, decodeDiscoveryCursor } = require('./discoveryRankingService');
+const { EXPLICIT_INTERACTIONS, recordContentExposure } = require('./contentExposureService');
 
 const DEFAULT_LIMIT = 15;
 const MAX_LIMIT = 30;
@@ -179,6 +181,7 @@ async function getRelationshipContext(user) {
     const restrictedAuthors = await User.find({
       $or: [
         { isActive: { $ne: true } },
+        { moderationStatus: { $in: ['suspended', 'banned', 'soft_deleted'] } },
         {
           'privacySettings.showPostsToFollowers': { $exists: true, $ne: true }
         },
@@ -224,6 +227,7 @@ async function getRelationshipContext(user) {
     _id: { $ne: currentUserId },
     $or: [
       { isActive: { $ne: true } },
+      { moderationStatus: { $in: ['suspended', 'banned', 'soft_deleted'] } },
       {
         'privacySettings.showPostsToFollowers': { $exists: true, $ne: true }
       },
@@ -541,7 +545,7 @@ function addInteraction(interactionMap, postId, interactedAt, count = 1) {
   interactionMap.set(normalizedPostId, current);
 }
 
-async function getInterestProfile(userId, relationship) {
+async function getInterestProfile(userId, relationship, { bounded = false } = {}) {
   if (!userId) {
     return {
       tagWeights: new Map(),
@@ -572,9 +576,10 @@ async function getInterestProfile(userId, relationship) {
   }
 
   const eventPostIds = recentEvents.map((event) => event.post).filter(Boolean);
-  const savedUser = await User.findById(userId)
-    .select('savedPosts.post savedPosts.savedAt')
-    .lean()
+  const savedUserQuery = User.findById(userId);
+  if (bounded) savedUserQuery.select('savedPosts').slice('savedPosts', -160);
+  else savedUserQuery.select('savedPosts.post savedPosts.savedAt');
+  const savedUser = await savedUserQuery.lean()
     .catch(() => null);
   const savedPosts = Array.isArray(savedUser?.savedPosts)
     ? savedUser.savedPosts.filter((item) => item?.post)
@@ -765,11 +770,11 @@ function scorePost(post, {
   const hoursOld = Math.max(0, (now - createdAt) / 36e5);
   const freshness = Math.exp(-hoursOld / (mode === 'clips' ? 96 : 72));
 
-  const likes = getCount(post.likes);
-  const comments = getCount(post.comments);
-  const shares = getCount(post.shares);
-  const reports = getCount(post.reports);
-  const views = Math.max(getCount(post.viewedBy), post.views || 0);
+  const likes = post.likeCount ?? getCount(post.likes);
+  const comments = post.commentCount ?? getCount(post.comments);
+  const shares = post.shareCount ?? getCount(post.shares);
+  const reports = post.reportCount ?? getCount(post.reports);
+  const views = Math.max(post.uniqueViewCount ?? getCount(post.viewedBy), post.views || 0);
   // Compress engagement to a bounded log scale (~0–90). Raw counts were
   // unbounded, so one very popular post (e.g. 25k views → ~8750) dwarfed
   // freshness/seen-penalty/exploration and stayed pinned at #1 forever, freezing
@@ -1109,7 +1114,7 @@ async function fetchTargetClip(filter) {
     .exec();
 }
 
-async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
+async function getWeightedRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   const limit = clampLimit(query.limit, mode === 'clips' ? 10 : DEFAULT_LIMIT);
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const excludedIds = parseExcludedIds(query.exclude || query.excludedIds);
@@ -1455,11 +1460,114 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
   };
 }
 
+async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
+  // Intentional search/discover keeps its existing accessible result contract.
+  // includeViewed is a legacy client hint, never permission to bypass tiers.
+  if (query.context === 'search') return getWeightedRecommendedPosts({ user, query, mode });
+  const startedAt = Date.now();
+  const limit = clampLimit(query.limit, mode === 'clips' ? 10 : DEFAULT_LIMIT);
+  const sessionSeed = normalizeSessionSeed(query.sessionSeed || decodeDiscoveryCursor(query.cursor)?.seed
+    || ((!user?._id || user.userType === 'guest') ? new mongoose.Types.ObjectId().toString() : undefined));
+  const relationship = await getRelationshipContext(user);
+  const viewerId = relationship.currentUserId;
+  const baseFilter = buildAudienceFilter({ user, mode, relationship, query });
+  const [interestProfile, boostDeliveryMap, targetClipPost, total] = await Promise.all([
+    getInterestProfile(viewerId, relationship, { bounded: true }),
+    getBoostDeliveryMap(viewerId, mode),
+    fetchTargetClip(buildTargetClipFilter(baseFilter, query.targetClipId, mode)),
+    !query.cursor ? Post.countDocuments(baseFilter) : null
+  ]);
+  const seed = `${viewerId || 'guest'}:${mode}:${sessionSeed}`;
+  const page = await getDiscoveryPage({
+    userId: viewerId, mode, seed: sessionSeed, baseFilter, limit, cursor: query.cursor, targetPost: targetClipPost,
+    excludedIds: parseExcludedIds(query.exclude || query.excludedIds),
+    rank: (candidates, pageLimit) => {
+      const scored = candidates.map(post => ({ post, score: scorePost(post, {
+        mode, relationship, interestProfile, seed, sessionId: sessionSeed,
+        seenMap: new Map(), boostDeliveryMap
+      }) })).sort((a, b) => b.score - a.score || String(b.post._id).localeCompare(String(a.post._id)));
+      // Diversity and paid-placement rules are applied WITHIN one strict tier.
+      return applyBoostPlacement(selectDiversePosts(scored, pageLimit, mode), { seed });
+    }
+  });
+  const ids = page.selected.map(item => item.post._id);
+  const hydrated = ids.length ? await fetchCandidates({ ...baseFilter, _id: { $in: ids } }, {
+    limit, page: 1, cursor: null, candidateLimit: limit
+  }) : [];
+  const byId = new Map(hydrated.map(post => [normalizeId(post._id), post]));
+  const selectedPosts = ids.map(id => byId.get(normalizeId(id))).filter(Boolean);
+  const presentationPosts = targetClipPost
+    ? [targetClipPost, ...selectedPosts.filter(post => normalizeId(post._id) !== normalizeId(targetClipPost._id))]
+    : selectedPosts;
+  const authorIds = [...new Set(presentationPosts.map(post => normalizeId(post.author)).filter(id => id && id !== viewerId))];
+  const [attributed, pending, savedRows] = await Promise.all([
+    recordBoostDelivery(selectedPosts, mode, viewerId).catch(error => {
+      log.warn('Failed to record boost delivery', { error: String(error), mode });
+      return new Set();
+    }),
+    viewerId && authorIds.length ? FollowRequest.find({ requester: viewerId, target: { $in: authorIds }, status: 'pending' }).select('target').lean() : [],
+    viewerId && presentationPosts.length ? User.aggregate([
+      { $match: { _id: new mongoose.Types.ObjectId(viewerId) } },
+      { $project: { savedPosts: { $filter: { input: { $ifNull: ['$savedPosts', []] }, as: 'saved', cond: { $in: ['$$saved.post', presentationPosts.map(post => post._id)] } } } } }
+    ]) : []
+  ]);
+  const savedIds = new Set((savedRows[0]?.savedPosts || []).map(row => normalizeId(row.post)));
+  const pendingIds = new Set(pending.map(row => normalizeId(row.target)));
+  const isGuest = !user || user.userType === 'guest';
+  const formatted = new Map(presentationPosts.map(post => {
+    const postId = normalizeId(post._id);
+    const authorId = normalizeId(post.author);
+    const dto = formatPostDTO(post, isGuest, authorId === viewerId, viewerId);
+    if (dto) {
+      dto.deliverySource = attributed.has(postId) ? 'boost' : 'organic';
+      dto.isSaved = savedIds.has(postId);
+      if (dto.author && typeof dto.author === 'object' && authorId !== viewerId) {
+        const isFollowing = relationship.followingIds.has(authorId);
+        const followRequestPending = pendingIds.has(authorId);
+        const access = buildPrivacyAccess({ settings: post.author.privacySettings, isSelf: false, isFollower: isFollowing });
+        const canFollow = access.canFollow && !followRequestPending && !isFollowing;
+        Object.assign(dto.author, {
+          isFollowing, followStatus: isFollowing ? 'accepted' : followRequestPending ? 'pending' : 'none',
+          followRequestPending, canFollow, privacyAccess: { canFollow, followRequestPending }
+        });
+      }
+      if (process.env.NODE_ENV !== 'production') dto._ranking = {
+        tier: page.tierById.get(postId) || null,
+        rankingScore: page.selected.find(item => normalizeId(item.post._id) === postId)?.score ?? null,
+        createdAt: post.createdAt
+      };
+    }
+    return [postId, dto];
+  }));
+  const delivered = await resolveClientMediaPayload({
+    posts: selectedPosts.map(post => formatted.get(normalizeId(post._id))),
+    targetClip: targetClipPost ? formatted.get(normalizeId(targetClipPost._id)) : null
+  });
+  log.debug('discovery-page', { mode, count: delivered.posts.length, lastTier: page.lastTier, durationMs: Date.now() - startedAt });
+  return {
+    posts: delivered.posts,
+    ...(query.targetClipId ? { targetClip: delivered.targetClip } : {}),
+    pagination: {
+      current: Math.max(1, parseInt(query.page, 10) || 1), count: delivered.posts.length,
+      total: total !== null ? Math.ceil(total / limit) : undefined,
+      totalPosts: mode === 'feed' ? total ?? undefined : undefined,
+      totalClips: mode === 'clips' ? total ?? undefined : undefined,
+      hasMore: Boolean(page.nextCursor), nextCursor: page.nextCursor, cursor: query.cursor || null
+    },
+    recommendation: {
+      algorithm: 'discovery-v3', mode, context: mode, sessionSeed,
+      signals: ['strict_exposure_tiers', 'fresh_unseen_48h', 'persistent_cross_surface_exposure', 'least_recent_repeats', 'personalization', 'diversity', 'privacy'],
+      exhaustedFreshClips: mode === 'clips' && page.lastTier >= 3
+    }
+  };
+}
+
 async function recordEngagementEvent({
   userId,
   postId,
   authorId,
   eventType,
+  contentType,
   context = 'unknown',
   durationMs = 0,
   completionRate = 0,
@@ -1485,6 +1593,10 @@ async function recordEngagementEvent({
   };
 
   try {
+    if (EXPLICIT_INTERACTIONS.has(eventType)) {
+      await recordContentExposure({ userId, postId, interaction: true,
+        contentType: contentType || (normalizedContext === 'clips' ? 'video' : undefined) });
+    }
     if (eventType === 'view') {
       const filter = { user: userId, post: postId, eventType, context: normalizedContext };
       const update = buildViewEngagementUpdate(payload);

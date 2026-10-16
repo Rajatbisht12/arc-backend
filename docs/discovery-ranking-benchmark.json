@@ -1,0 +1,14 @@
+{
+  "measuredOn": "2026-10-16",
+  "catalogSize": 231,
+  "authors": 5,
+  "pageSize": 10,
+  "baselineRef": "f56735a05749e6f0352b40ffde86f9177b32a290",
+  "database": "local MongoMemoryServer; no network or production load",
+  "results": [
+    { "revision": "before", "mode": "feed", "unique": 121, "delivered": 121, "pages": 13, "firstMs": 110.15, "medianMs": 23.82, "p95Ms": 110.15, "totalMs": 446 },
+    { "revision": "after", "mode": "feed", "unique": 231, "delivered": 231, "pages": 24, "firstMs": 60, "medianMs": 18.69, "p95Ms": 42.3, "totalMs": 537.25 },
+    { "revision": "before", "mode": "clips", "unique": 231, "delivered": 231, "pages": 24, "firstMs": 36.36, "medianMs": 15.99, "p95Ms": 38.8, "totalMs": 442.81 },
+    { "revision": "after", "mode": "clips", "unique": 231, "delivered": 231, "pages": 24, "firstMs": 39.25, "medianMs": 17.12, "p95Ms": 36.64, "totalMs": 483.08 }
+  ]
+}

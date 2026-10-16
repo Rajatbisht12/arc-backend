@@ -8,6 +8,7 @@ const backendRoot = path.resolve(__dirname, '..');
 const auditOnly = process.argv.includes('--audit-only');
 const verifyOnly = process.argv.includes('--verify-only');
 const allowBroadcastEventRepair = process.argv.includes('--allow-broadcast-event-repair');
+const migrateDiscoveryExposure = process.argv.includes('--migrate-discovery-exposure');
 if (auditOnly && verifyOnly) {
   console.error('Use only one of --audit-only or --verify-only');
   process.exit(1);
@@ -51,7 +52,17 @@ const main = async () => {
     ...(allowBroadcastEventRepair ? ['--allow-event-repair'] : [])
   ]);
   run('migrate-username-registry.js', ['--audit-only']);
+  if (auditOnly && migrateDiscoveryExposure) {
+    run('migrate-discovery-exposure.js');
+  }
   if (auditOnly) return;
+  // The active ECS revision records the completed backfill version. Only the
+  // first rollout (or an explicit force) scans historical signals; every release
+  // checks the actual database indexes. Secrets have already been hydrated.
+  if (migrateDiscoveryExposure) {
+    run('migrate-discovery-exposure.js', ['--apply']);
+  }
+  run('migrate-discovery-exposure.js', ['--verify']);
   run('migrate-username-registry.js');
   run('migrate-username-registry.js', ['--verify']);
   if (!verifyOnly) {

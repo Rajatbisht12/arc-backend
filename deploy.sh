@@ -13,6 +13,11 @@ TASK_FAMILY="arc-backend"
 TASK_DEF_FILE="./arc-task-def.json"
 TARGET_BANK_SCHEMA_VERSION="3"
 TARGET_MONETIZATION_SCHEMA_VERSION="1"
+TARGET_DISCOVERY_EXPOSURE_VERSION="1"
+if [[ "${FORCE_DISCOVERY_EXPOSURE_MIGRATION:-0}" != "0" && "${FORCE_DISCOVERY_EXPOSURE_MIGRATION:-0}" != "1" ]]; then
+  echo "FORCE_DISCOVERY_EXPOSURE_MIGRATION must be 0 or 1" >&2
+  exit 1
+fi
 QUIESCED=0
 MUTATING_PREFLIGHT_STARTED=0
 AUTOSCALING_SUSPENDED=0
@@ -106,6 +111,14 @@ ORIGINAL_MONETIZATION_SCHEMA_VERSION=$(aws ecs describe-task-definition \
   --task-definition "$ORIGINAL_TASK_DEF" \
   --query "taskDefinition.containerDefinitions[0].environment[?name=='MONETIZATION_ADMIN_SCHEMA_VERSION'].value | [0]" \
   --output text)
+ORIGINAL_DISCOVERY_EXPOSURE_VERSION=$(aws ecs describe-task-definition \
+  --task-definition "$ORIGINAL_TASK_DEF" \
+  --query "taskDefinition.containerDefinitions[0].environment[?name=='DISCOVERY_EXPOSURE_MIGRATION_VERSION'].value | [0]" \
+  --output text)
+REQUIRES_DISCOVERY_MIGRATION=0
+if [[ "$ORIGINAL_DISCOVERY_EXPOSURE_VERSION" != "$TARGET_DISCOVERY_EXPOSURE_VERSION" || "${FORCE_DISCOVERY_EXPOSURE_MIGRATION:-0}" == "1" ]]; then
+  REQUIRES_DISCOVERY_MIGRATION=1
+fi
 REQUIRES_FINANCIAL_QUIESCE=0
 if [[ "$ORIGINAL_SCHEMA_VERSION" != "$TARGET_BANK_SCHEMA_VERSION" || "$ORIGINAL_MONETIZATION_SCHEMA_VERSION" != "$TARGET_MONETIZATION_SCHEMA_VERSION" || "$RECOVERY_MODE" == "1" || "${FORCE_FINANCIAL_MIGRATION:-0}" == "1" ]]; then
   REQUIRES_FINANCIAL_QUIESCE=1
@@ -254,6 +267,7 @@ npm run test:notification-producers
 npm run test:broadcast
 npm run test:bank-details
 npm run test:monetization
+node --test scripts/discovery-deployment.test.js
 # The build runs tsc with type checking and emits dist. Running a separate
 # no-emit typecheck immediately beforehand doubles compiler memory pressure on
 # Windows and has caused the Git Bash Node process to terminate with exit 139.
@@ -288,11 +302,14 @@ aws ecs describe-task-definition --task-definition "$ORIGINAL_TASK_DEF" \
       const monetizationMarker = env.find(item => item.name === 'MONETIZATION_ADMIN_SCHEMA_VERSION');
       if (monetizationMarker) monetizationMarker.value = process.argv[3];
       else env.push({ name: 'MONETIZATION_ADMIN_SCHEMA_VERSION', value: process.argv[3] });
+      const discoveryMarker = env.find(item => item.name === 'DISCOVERY_EXPOSURE_MIGRATION_VERSION');
+      if (discoveryMarker) discoveryMarker.value = process.argv[4];
+      else env.push({ name: 'DISCOVERY_EXPOSURE_MIGRATION_VERSION', value: process.argv[4] });
       ['taskDefinitionArn','revision','status','requiresAttributes',
        'compatibilities','registeredAt','registeredBy'].forEach(k => delete td[k]);
       process.stdout.write(JSON.stringify(td));
     });
-  " "$IMAGE" "$TARGET_BANK_SCHEMA_VERSION" "$TARGET_MONETIZATION_SCHEMA_VERSION" > "$TASK_DEF_FILE"
+  " "$IMAGE" "$TARGET_BANK_SCHEMA_VERSION" "$TARGET_MONETIZATION_SCHEMA_VERSION" "$TARGET_DISCOVERY_EXPOSURE_VERSION" > "$TASK_DEF_FILE"
 
 NEW_REV=$(aws ecs register-task-definition \
   --cli-input-json "file://$TASK_DEF_FILE" \
@@ -307,12 +324,20 @@ NEW_MONETIZATION_SCHEMA_VERSION=$(aws ecs describe-task-definition \
   --task-definition "$NEW_TASK_DEF" \
   --query "taskDefinition.containerDefinitions[0].environment[?name=='MONETIZATION_ADMIN_SCHEMA_VERSION'].value | [0]" \
   --output text)
+NEW_DISCOVERY_EXPOSURE_VERSION=$(aws ecs describe-task-definition \
+  --task-definition "$NEW_TASK_DEF" \
+  --query "taskDefinition.containerDefinitions[0].environment[?name=='DISCOVERY_EXPOSURE_MIGRATION_VERSION'].value | [0]" \
+  --output text)
 NEW_TASK_IMAGE=$(aws ecs describe-task-definition \
   --task-definition "$NEW_TASK_DEF" \
   --query 'taskDefinition.containerDefinitions[0].image' \
   --output text)
 if [[ "$NEW_SCHEMA_VERSION" != "$TARGET_BANK_SCHEMA_VERSION" || "$NEW_MONETIZATION_SCHEMA_VERSION" != "$TARGET_MONETIZATION_SCHEMA_VERSION" || "$NEW_TASK_IMAGE" != "$IMAGE" ]]; then
   echo "Registered task definition failed the bank-schema/image verification gate." >&2
+  exit 1
+fi
+if [[ "$NEW_DISCOVERY_EXPOSURE_VERSION" != "$TARGET_DISCOVERY_EXPOSURE_VERSION" ]]; then
+  echo "Registered task definition failed the discovery exposure migration-version verification gate." >&2
   exit 1
 fi
 
@@ -334,9 +359,9 @@ run_preflight() {
     return 1
   fi
   if [[ "$mode" == "audit" ]]; then
-    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--audit-only',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[])]}]}))" "$CONTAINER_NAME" "$repair_events")
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--audit-only',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[]),...(process.argv[3]==='1'?['--migrate-discovery-exposure']:[])]}]}))" "$CONTAINER_NAME" "$repair_events" "$REQUIRES_DISCOVERY_MIGRATION")
   elif [[ "$mode" == "verify" ]]; then
-    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--verify-only',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[])]}]}))" "$CONTAINER_NAME" "$repair_events")
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js','--verify-only',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[]),...(process.argv[3]==='1'?['--migrate-discovery-exposure']:[])]}]}))" "$CONTAINER_NAME" "$repair_events" "$REQUIRES_DISCOVERY_MIGRATION")
   elif [[ "$mode" == "random-connect-apply" ]]; then
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-random-connect-indexes.js']}]}))" "$CONTAINER_NAME")
   elif [[ "$mode" == "random-connect-verify" ]]; then
@@ -346,7 +371,7 @@ run_preflight() {
   elif [[ "$mode" == "username-verify" ]]; then
     overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/migrate-username-registry.js','--verify']}]}))" "$CONTAINER_NAME")
   else
-    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[])]}]}))" "$CONTAINER_NAME" "$repair_events")
+    overrides=$(node -e "process.stdout.write(JSON.stringify({containerOverrides:[{name:process.argv[1],command:['node','scripts/preflight-push-release.js',...(process.argv[2]==='1'?['--allow-broadcast-event-repair']:[]),...(process.argv[3]==='1'?['--migrate-discovery-exposure']:[])]}]}))" "$CONTAINER_NAME" "$repair_events" "$REQUIRES_DISCOVERY_MIGRATION")
   fi
   local task
   local run_result
@@ -408,6 +433,11 @@ run_preflight() {
 }
 
 echo "==> Running non-destructive provider and database readiness audit..."
+if [[ "$REQUIRES_DISCOVERY_MIGRATION" == "1" ]]; then
+  echo "==> Discovery exposure v$TARGET_DISCOVERY_EXPOSURE_VERSION: audit and backfill required before deployment."
+else
+  echo "==> Discovery exposure v$TARGET_DISCOVERY_EXPOSURE_VERSION is active; checking indexes without repeating the historical backfill."
+fi
 if [[ "${ALLOW_BROADCAST_EVENT_REPAIR:-0}" == "1" ]]; then
   echo "==> BroadcastEvent repair enabled: redundant events will be fully archived before removal. Confirm a production database snapshot exists."
 fi

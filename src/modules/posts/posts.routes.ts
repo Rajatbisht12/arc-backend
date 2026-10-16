@@ -75,6 +75,10 @@ router.get("/:id", publicOptionalAuth, postIdValidation, handleValidationErrors,
 router.get("/:id/comments", publicOptionalAuth, postIdValidation, handleValidationErrors, postController.getPostComments);
 router.get("/:id/likes", publicOptionalAuth, postIdValidation, handleValidationErrors, postController.getPostLikes);
 router.post("/:id/view", protect, postIdValidation, engagementMetricValidation, handleValidationErrors, postController.recordClipView);
+router.post("/:id/exposure", protect, postIdValidation,
+  body("durationMs").isInt({ min: 1000, max: MAX_ENGAGEMENT_DURATION_MS }),
+  body("context").isIn(["feed", "clips", "post", "profile", "search"]),
+  handleValidationErrors, postController.recordRecommendationExposure);
 router.post("/:id/like", protect, postIdValidation, handleValidationErrors, postController.toggleLike);
 router.post("/:id/comment", protect, postIdValidation, addCommentValidation, handleValidationErrors, postController.addComment);
 router.delete("/:id/comments/:commentId", protect, postIdValidation, commentIdValidation, handleValidationErrors, postController.deleteComment);

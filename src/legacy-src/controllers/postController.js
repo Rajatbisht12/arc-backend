@@ -26,6 +26,8 @@ const {
 const { getDiscoverSearchPosts } = require('../services/discoverPostSearchService');
 const { normalizeQuerySearch } = require('../utils/searchQuery');
 const { isActiveBoost } = require('../services/boostService');
+const { recordContentExposure } = require('../services/contentExposureService');
+const exposureContentType = post => post?.content?.media?.some(media => media.type === 'video') ? 'video' : 'post';
 const log = require('../utils/logger');
 const { deleteNotificationsForTarget } = require('../services/notificationHistoryService');
 const { respondToMediaUploadError } = require('../utils/mediaUploadError');
@@ -489,6 +491,26 @@ const boostPost = async (req, res) => {
   }
 };
 
+// Private recommendation exposure is deliberately separate from public view
+// counters. Only authenticated clients reporting meaningful visibility/playback
+// reach this endpoint; fetched/prefetched metadata never does.
+const recordRecommendationExposure = async (req, res) => {
+  try {
+    const durationMs = normalizeEngagementDuration(req.body?.durationMs);
+    if (durationMs < 1000) return res.status(400).json({ success: false, message: 'Meaningful exposure requires at least one second' });
+    const post = await Post.findById(req.params.id).select('author visibility isActive hiddenByAdmin content.media.type');
+    if (!post || post.isActive === false) return res.status(404).json({ success: false, message: 'Post not found' });
+    if (!await requireVisiblePost(req, res, post)) return;
+    await recordContentExposure({
+      userId: req.user._id, postId: post._id, durationMs,
+      contentType: exposureContentType(post)
+    });
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to record exposure' });
+  }
+};
+
 // Record unique view for a clip (1 user = 1 view per post, no manipulation)
 const recordClipView = async (req, res) => {
   try {
@@ -755,6 +777,7 @@ const toggleLike = async (req, res) => {
       postId,
       authorId,
       eventType: isLiked ? 'like' : 'unlike',
+      contentType: exposureContentType(finalPost),
       context: req.body?.context || 'feed',
       source,
       boostCampaign: campaignId
@@ -1127,6 +1150,7 @@ const addComment = async (req, res) => {
       postId,
       authorId: post.author,
       eventType: 'comment',
+      contentType: exposureContentType(post),
       context: req.body?.context || 'feed',
       source,
       boostCampaign: campaignId,
@@ -1159,7 +1183,7 @@ const recordShare = async (req, res) => {
     const userId = req.user._id;
 
     const visiblePost = await Post.findById(postId)
-      .select('author visibility isActive hiddenByAdmin');
+      .select('author visibility isActive hiddenByAdmin content.media.type');
     if (!visiblePost) return res.status(404).json({ success: false, message: 'Post not found' });
     if (!await requireVisiblePost(req, res, visiblePost)) return;
 
@@ -1189,6 +1213,7 @@ const recordShare = async (req, res) => {
       postId,
       authorId: finalPost.author,
       eventType: 'share',
+      contentType: exposureContentType(visiblePost),
       context: req.body?.context || 'feed',
       source,
       boostCampaign: campaignId,
@@ -1219,7 +1244,7 @@ const toggleSave = async (req, res) => {
     const userId = req.user._id;
 
     const post = await Post.findOne({ _id: postId, isActive: true })
-      .select('author visibility isActive hiddenByAdmin boostMeta boostExpiresAt');
+      .select('author visibility isActive hiddenByAdmin boostMeta boostExpiresAt content.media.type');
     if (!post) {
       return res.status(404).json({ success: false, message: 'Post not found' });
     }
@@ -1264,6 +1289,7 @@ const toggleSave = async (req, res) => {
       postId,
       authorId: post.author,
       eventType: isSaved ? 'save' : 'unsave',
+      contentType: exposureContentType(post),
       context: req.body?.context || 'feed',
       source,
       boostCampaign: campaignId
@@ -1668,6 +1694,7 @@ const trackInteraction = async (req, res) => {
       postId,
       authorId: post.author,
       eventType: normalizedType,
+      contentType: exposureContentType(post),
       context: normalizedContext,
       durationMs: trackedDuration,
       completionRate: normalizeCompletionRate(completionRate),
@@ -1800,6 +1827,7 @@ module.exports = {
   getPostComments,
   getPostLikes,
   recordClipView,
+  recordRecommendationExposure,
   getPersonalizedFeed,
   toggleLike,
   addComment,

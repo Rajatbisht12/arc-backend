@@ -345,6 +345,9 @@ postSchema.index({ 'comments.user': 1, createdAt: -1 });
 postSchema.index({ 'comments.rootComment': 1 });
 postSchema.index({ 'boostMeta.status': 1, 'boostMeta.endTime': 1, 'boostMeta.remainingReach': 1 });
 postSchema.index({ 'metrics.organicViews': -1, createdAt: -1 });
+// Incremental discovery rechecks after a session exhausted unseen content.
+postSchema.index({ isActive: 1, updatedAt: -1, _id: -1 }, { name: 'discovery_updates' });
+postSchema.index({ isActive: 1, 'content.media.type': 1, updatedAt: -1, _id: -1 }, { name: 'discovery_video_updates' });
 // The recovery worker only scans unfinished Clip renditions. This multikey
 // index bounds that scan as the media library grows.
 postSchema.index({ 'content.media.playback.status': 1, 'content.media.playback.leaseExpiresAt': 1 });

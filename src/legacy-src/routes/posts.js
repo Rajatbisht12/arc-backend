@@ -12,6 +12,7 @@ const {
   getPostComments,
   getPostLikes,
   recordClipView,
+  recordRecommendationExposure,
   toggleLike,
   addComment,
   deleteComment,
@@ -104,6 +105,10 @@ router.get('/:id', publicOptionalAuth, getPost);
 router.get('/:id/comments', publicOptionalAuth, getPostComments);
 router.get('/:id/likes', publicOptionalAuth, getPostLikes);
 router.post('/:id/view', protect, engagementMetricValidation, handleValidationErrors, recordClipView);
+router.post('/:id/exposure', protect, param('id').isMongoId(),
+  body('durationMs').isInt({ min: 1000, max: MAX_ENGAGEMENT_DURATION_MS }),
+  body('context').isIn(['feed', 'clips', 'post', 'profile', 'search']),
+  handleValidationErrors, recordRecommendationExposure);
 router.post('/:id/like', protect, toggleLike);
 router.post('/:id/comment', protect, addCommentValidation, handleValidationErrors, addComment);
 router.delete('/:id/comments/:commentId', protect, commentDeleteValidation, handleValidationErrors, deleteComment);

@@ -63,9 +63,9 @@ try {
       recent.push(id);
     }
     if (pages === 1) {
-      const pendingIds = decodeCursor(result.pagination.nextCursor)?.pendingIds || [];
-      assert.ok(pendingIds.length > 0, 'unserved ranked candidates remain in the cursor');
-      deletedPendingId = pendingIds[0];
+      assert.ok(decodeCursor(result.pagination.nextCursor), 'server session continuation has a valid cursor');
+      const unserved = await Post.findOne({ _id: { $nin: [...served] }, visibility: 'public' }).select('_id').lean();
+      deletedPendingId = String(unserved._id);
       await Post.deleteOne({ _id: deletedPendingId });
     }
     assert.notEqual(result.pagination.nextCursor, cursor, 'cursor must advance');
