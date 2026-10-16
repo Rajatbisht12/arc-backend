@@ -47,6 +47,10 @@ const bootstrap = async () => {
   }
 
   await connectMongo();
+  const discoveryCollections = require(path.join(backendRootPath, "utils", "ensureDiscoveryCollections.js")) as {
+    ensureDiscoveryCollections: () => Promise<void>;
+  };
+  await discoveryCollections.ensureDiscoveryCollections();
 
   // DocumentDB empties a $lookup when the target collection is absent, so the
   // recruitment listing returns nothing until someone first applies. Create the

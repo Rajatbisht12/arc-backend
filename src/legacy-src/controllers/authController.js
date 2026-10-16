@@ -1025,6 +1025,9 @@ const deleteAccount = async (req, res) => {
         { $set: { isActive: false } }
       ),
       RecruitmentPostingQuota.deleteMany({ player: userId }),
+      require('../models/ContentExposure').deleteMany({ user: userId }),
+      require('../models/RecommendationDelivery').deleteMany({ user: userId }),
+      require('../models/RecommendationState').deleteMany({ user: userId }),
       TeamRecruitment.updateMany({}, { $pull: { applicants: { user: userId } } }),
       PlayerProfile.updateMany({}, { $pull: { interestedTeams: { team: userId } } }),
       Follow.deleteMany({ $or: [{ follower: userId }, { following: userId }] }),

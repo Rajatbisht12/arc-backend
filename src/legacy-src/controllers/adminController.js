@@ -857,6 +857,9 @@ const deleteUser = async (req, res) => {
     // applicant/interest arrays owned by other accounts.
     await Promise.all([
       Post.deleteMany({ author: userId }),
+      require('../models/ContentExposure').deleteMany({ user: userId }),
+      require('../models/RecommendationDelivery').deleteMany({ user: userId }),
+      require('../models/RecommendationState').deleteMany({ user: userId }),
       Message.deleteMany({ $or: [{ sender: userId }, { recipient: userId }] }),
       Notification.deleteMany({ $or: [{ recipient: userId }, { sender: userId }] }),
       Follow.deleteMany({ $or: [{ follower: userId }, { following: userId }] }),
