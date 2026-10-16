@@ -12,6 +12,7 @@ const State = require('../models/RecommendationState');
 const Engagement = require('../models/PostEngagement');
 const { getRecommendedPosts, recordEngagementEvent } = require('./recommendationService');
 const { recordContentExposure } = require('./contentExposureService');
+const { FRESH_WINDOW_MS, unseenCandidates } = require('./discoveryRankingService');
 const { recordRecommendationExposure, recordClipView, getPost, toggleSave } = require('../controllers/postController');
 const { ensureDiscoveryCollections } = require('../utils/ensureDiscoveryCollections');
 require('../utils/logger').debug = () => {};
@@ -36,8 +37,22 @@ try {
   const feed = (seed, options = {}, mode = 'feed') => getRecommendedPosts({ user, query: { limit: 10, sessionSeed: seed, ...options }, mode });
   const clear = async () => Promise.all([Post.deleteMany({}), Exposure.deleteMany({}), Delivery.deleteMany({}), State.deleteMany({}), Engagement.deleteMany({})]);
   await clear();
-  const fresh = await Post.insertMany(Array.from({ length: 23 }, (_, i) => makePost(i ? 1 : 47)));
-  const older = await Post.insertMany(Array.from({ length: 17 }, (_, i) => makePost(i ? 30 * 24 : 49, { views: 1_000_000 })));
+  check(FRESH_WINDOW_MS === 7 * 24 * HOUR, 'fresh unseen window is seven days, not the legacy 48 hours');
+  const boundaryNow = new Date();
+  const boundaryPosts = await Post.insertMany([49 * HOUR, 6 * 24 * HOUR, FRESH_WINDOW_MS, FRESH_WINDOW_MS + 1].map(age =>
+    makePost(0, { createdAt: new Date(boundaryNow.getTime() - age) })
+  ));
+  const boundaryQuery = {
+    filter: { isActive: true, visibility: 'public' }, userId: user._id,
+    session: 'seven-day-boundary', now: boundaryNow, candidateLimit: 10
+  };
+  const boundaryFresh = await unseenCandidates({ ...boundaryQuery, tier: 1 });
+  const boundaryOlder = await unseenCandidates({ ...boundaryQuery, tier: 2 });
+  check(boundaryFresh.length === 3 && boundaryPosts.slice(0, 3).every(post => boundaryFresh.some(item => String(item._id) === String(post._id))), '49-hour, six-day and exactly seven-day unseen content belongs to the fresh tier');
+  check(boundaryOlder.length === 1 && String(boundaryOlder[0]._id) === String(boundaryPosts[3]._id), 'content older than seven days by one millisecond belongs to the older unseen tier');
+  await clear();
+  const fresh = await Post.insertMany(Array.from({ length: 23 }, (_, i) => makePost(i ? 49 : 167)));
+  const older = await Post.insertMany(Array.from({ length: 17 }, (_, i) => makePost(i ? 30 * 24 : 169, { views: 1_000_000 })));
   const seen = await Post.insertMany([makePost(1), makePost(2)]);
   const acted = await Post.insertMany([makePost(1), makePost(2)]);
   for (let i = 0; i < seen.length; i++) await recordContentExposure({ userId: user._id, postId: seen[i]._id, durationMs: 1500, at: new Date(Date.now() - (10 - i) * HOUR), contentType: 'video' });
@@ -86,7 +101,7 @@ try {
   const upload = await Post.create(makePost(0));
   const freshAfterRepeat = await feed('fresh-upload', { cursor: repeatFirst.pagination.nextCursor });
   check(String(freshAfterRepeat.posts[0]._id) === String(upload._id), 'new uploads enter ahead of repeats without restarting the application');
-  const restoredVisibility = await Post.create(makePost(50, { visibility: 'private' }));
+  const restoredVisibility = await Post.create(makePost(169, { visibility: 'private' }));
   await Post.updateOne({ _id: restoredVisibility._id }, { $set: { visibility: 'public' } });
   const olderAfterRepeat = await feed('fresh-upload');
   check(String(olderAfterRepeat.posts[0]._id) === String(restoredVisibility._id) && olderAfterRepeat.posts[0]._ranking.tier === 2, 'incremental exhaustion checks discover newly eligible older posts before repeats');

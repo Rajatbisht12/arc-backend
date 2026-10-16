@@ -3,12 +3,12 @@
 Home Feed and Clips use the same authenticated backend recommendation policy.
 Eligible candidates are ordered by four strict tiers:
 
-1. Unseen and never explicitly interacted with, published in the last 48 hours.
+1. Unseen and never explicitly interacted with, published in the last 7 days.
 2. Other unseen and never explicitly interacted with content.
 3. Previously viewed content with no explicit interaction, after unseen content is exhausted.
 4. Previously interacted with content, after all higher tiers are exhausted.
 
-The 48-hour boundary uses the server's current UTC time and `Post.createdAt`.
+The 7-day boundary uses the server's current UTC time and `Post.createdAt`.
 The existing relevance, content quality, following, and diversity signals operate
 inside each tier. A popularity or paid boost score cannot promote a lower tier
 above available higher-tier inventory. Already visible cards stay in their
@@ -249,10 +249,11 @@ Actual staging DocumentDB execution plans remain a release check.
 
 ## Validation and changed files
 
-Backend `npm run test:discovery` passed 547 integration assertions plus the
+Backend `npm run test:discovery` passed 550 integration assertions plus the
 230-unique-Clip pagination regression, canonical author follow-state test, and
-three migration tests. Coverage includes all four strict tiers, 47/49-hour
-freshness boundaries, popularity not crossing tiers, canonical Home/Clips
+three migration tests. Coverage includes all four strict tiers, the inclusive
+7-day freshness boundary (and older by one millisecond), 49-hour/six-day unseen
+content, 167/169-hour ordering, popularity not crossing tiers, canonical Home/Clips
 identity, authenticated ownership, public-counter separation, save/unsave
 history, simultaneous requests, new and newly-public uploads after exhaustion,
 cursor-only session restoration, independent anonymous sessions, private/blocked/
