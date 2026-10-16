@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Post = require('../models/Post');
 const User = require('../models/User');
+const FollowRequest = require('../models/FollowRequest');
 const recommendation = require('./recommendationService');
 const mediaDelivery = require('../utils/privateMediaDelivery');
 
@@ -9,6 +10,7 @@ test('search service preserves visibility, paginates before DTO, and bounds broa
   const originals = {
     postFind: Post.find,
     userFind: User.find,
+    followRequestFind: FollowRequest.find,
     relationship: recommendation.getRelationshipContext,
     audience: recommendation.buildAudienceFilter,
     delivery: mediaDelivery.resolveClientMediaPayload
@@ -20,6 +22,9 @@ test('search service preserves visibility, paginates before DTO, and bounds broa
   let skip;
   let limit;
   let authorLookupCount = 0;
+  let pendingLookupCount = 0;
+  let pendingTargets = ['author-1'];
+  let relationshipContext = { currentUserId: null, followingIds: new Set() };
   const rows = [1, 2, 3].map((number) => ({
     _id: `post-${number}`,
     author: { _id: 'author-1', username: 'zoro', profile: { displayName: 'Zoro' } },
@@ -34,7 +39,7 @@ test('search service preserves visibility, paginates before DTO, and bounds broa
   }));
 
   try {
-    recommendation.getRelationshipContext = async () => ({ currentUserId: null, followingIds: new Set() });
+    recommendation.getRelationshipContext = async () => relationshipContext;
     recommendation.buildAudienceFilter = ({ mode }) => ({
       isActive: true,
       visibility: 'public',
@@ -81,14 +86,46 @@ test('search service preserves visibility, paginates before DTO, and bounds broa
     assert.deepEqual(result.posts.map((post) => post._id), ['post-1', 'post-2']);
     assert.deepEqual(result.posts.map((post) => post.content.media[0].type), ['image', 'video']);
     assert.equal(result.posts[1].content.media[0].coverUrl, 'https://example.invalid/cover.webp');
+    assert.equal(result.posts[0].author.followStatus, 'none');
+    assert.equal(result.posts[0].author.canFollow, true);
     assert.deepEqual(result.pagination, { current: 2, count: 2, hasMore: true, nextCursor: null, cursor: null });
 
-    await getDiscoverSearchPosts({ user: null, query: { search: 'a', context: 'search', page: 1, limit: 2 }, mode: 'clips' });
+    relationshipContext = { currentUserId: 'viewer-1', followingIds: new Set() };
+    FollowRequest.find = (filter) => {
+      pendingLookupCount += 1;
+      assert.deepEqual(filter, { requester: 'viewer-1', target: { $in: ['author-1'] }, status: 'pending' });
+      return { select() { return this; }, async lean() { return pendingTargets.map(target => ({ target })); } };
+    };
+    const pendingResult = await getDiscoverSearchPosts({ user: { _id: 'viewer-1', userType: 'player' }, query: { search: 'a', context: 'search', page: 1, limit: 2 }, mode: 'clips' });
     assert.deepEqual(postFilter['content.media'], { $elemMatch: { type: 'video' } });
     assert.equal(authorLookupCount, 1, 'one-character search must not fan out a creator-ID query');
+    assert.equal(pendingLookupCount, 1, 'one pending-request lookup covers all posts by this creator');
+    assert.equal(pendingResult.posts[0].author.followStatus, 'pending');
+    assert.equal(pendingResult.posts[0].author.canFollow, false);
+
+    pendingTargets = [];
+    relationshipContext = { currentUserId: 'viewer-1', followingIds: new Set(['author-1']) };
+    const followedResult = await getDiscoverSearchPosts({ user: { _id: 'viewer-1', userType: 'player' }, query: { search: 'a', page: 2, limit: 2 }, mode: 'clips' });
+    assert.equal(followedResult.posts[0].author.followStatus, 'accepted');
+    assert.equal(followedResult.posts[0].author.isFollowing, true);
+
+    relationshipContext = { currentUserId: 'viewer-1', followingIds: new Set() };
+    rows.forEach(row => { row.author.privacySettings = { allowFollowRequests: false }; });
+    const closedResult = await getDiscoverSearchPosts({ user: { _id: 'viewer-1', userType: 'player' }, query: { search: 'a', page: 2, limit: 2 }, mode: 'clips' });
+    assert.equal(closedResult.posts[0].author.followStatus, 'none');
+    assert.equal(closedResult.posts[0].author.canFollow, false);
+    const deepPage = await getDiscoverSearchPosts({ user: { _id: 'viewer-1', userType: 'player' }, query: { search: 'a', page: 5, limit: 30 }, mode: 'clips' });
+    assert.equal(skip, 120, 'page five retains the same author relationship contract');
+    assert.equal(deepPage.posts[0].author.canFollow, false);
+
+    relationshipContext = { currentUserId: 'author-1', followingIds: new Set() };
+    const ownResult = await getDiscoverSearchPosts({ user: { _id: 'author-1', userType: 'player' }, query: { search: 'a', page: 2, limit: 2 }, mode: 'clips' });
+    assert.equal(ownResult.posts[0].author.followStatus, undefined);
+    assert.equal(ownResult.posts[0].author.canFollow, undefined);
   } finally {
     Post.find = originals.postFind;
     User.find = originals.userFind;
+    FollowRequest.find = originals.followRequestFind;
     recommendation.getRelationshipContext = originals.relationship;
     recommendation.buildAudienceFilter = originals.audience;
     mediaDelivery.resolveClientMediaPayload = originals.delivery;

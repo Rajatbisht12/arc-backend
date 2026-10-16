@@ -127,11 +127,12 @@ function preserveTargetClipInExclusions(excludedIds, rawTargetClipId, mode) {
   return excludedIds.filter((id) => String(id) !== targetClipId);
 }
 
-function encodeCursor(post) {
+function encodeCursor(post, pendingIds = []) {
   if (!post?.createdAt || !post?._id) return null;
   return Buffer.from(JSON.stringify({
     createdAt: new Date(post.createdAt).toISOString(),
-    id: post._id.toString()
+    id: post._id.toString(),
+    ...(pendingIds.length ? { pendingIds: pendingIds.slice(0, MAX_LIMIT * CANDIDATE_MULTIPLIER) } : {})
   })).toString('base64url');
 }
 
@@ -142,7 +143,13 @@ function decodeCursor(cursor) {
     if (!decoded?.createdAt || !decoded?.id || !isValidObjectId(decoded.id)) return null;
     const createdAt = new Date(decoded.createdAt);
     if (Number.isNaN(createdAt.getTime())) return null;
-    return { createdAt, id: decoded.id };
+    return {
+      createdAt,
+      id: decoded.id,
+      pendingIds: Array.isArray(decoded.pendingIds)
+        ? [...new Set(decoded.pendingIds.filter(isValidObjectId))].slice(0, MAX_LIMIT * CANDIDATE_MULTIPLIER)
+        : []
+    };
   } catch {
     return null;
   }
@@ -314,7 +321,7 @@ function buildAudienceFilter({ user, mode, relationship, query }) {
   return filter;
 }
 
-function applyCursorAndExclusions(filter, { cursor, excludedIds }) {
+function applyCursorAndExclusions(filter, { cursor, excludedIds, strictCursor = false }) {
   const nextFilter = { ...filter };
   const and = Array.isArray(nextFilter.$and) ? [...nextFilter.$and] : [];
 
@@ -336,7 +343,7 @@ function applyCursorAndExclusions(filter, { cursor, excludedIds }) {
     // eligible (minus exclusions) so ranked-over posts are not skipped
     // forever. Once the exclusion window saturates, fall back to strictly
     // chronological progress to guarantee termination.
-    const allowNewerUnseen = excludedIds.length > 0 && excludedIds.length < Math.floor(MAX_EXCLUDED_IDS * 0.75);
+    const allowNewerUnseen = !strictCursor && excludedIds.length > 0 && excludedIds.length < Math.floor(MAX_EXCLUDED_IDS * 0.75);
     if (allowNewerUnseen) {
       and.push({
         $or: [
@@ -1140,23 +1147,57 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     ...requestedExcludedIds,
     ...(mode === 'clips' ? Array.from(watchedClipIds) : [])
   ])], query.targetClipId, mode);
+  const clipCursor = mode === 'clips' ? decodeCursor(query.cursor) : null;
+  const poolLimit = getCandidatePoolLimit(limit);
 
   let filter = applyCursorAndExclusions(baseFilter, {
     cursor: query.cursor,
-    excludedIds: effectiveExcludedIds
+    excludedIds: effectiveExcludedIds,
+    strictCursor: mode === 'clips'
   });
 
-  let candidates = await fetchSessionCandidates(filter, {
-    limit,
-    page,
-    cursor: query.cursor,
-    mode,
-    sessionSeed,
-    total,
-    // Discover/search results retain their chronological candidate contract;
-    // only the recommendation Home Feed rotates the source window.
-    allowExplorationWindow: query.context !== 'search'
-  });
+  // A ranked page serves only `limit` items from a larger chronological
+  // candidate window. Carry the unserved candidates in the Clips cursor;
+  // otherwise advancing the date boundary silently loses them once the
+  // client's bounded exclusion list fills up.
+  let olderCandidates = [];
+  let olderRequestLimit = poolLimit;
+  let candidates;
+  if (mode === 'clips' && clipCursor?.pendingIds.length) {
+    const pendingFilter = applyCursorAndExclusions({
+      ...baseFilter,
+      _id: { $in: clipCursor.pendingIds }
+    }, { cursor: null, excludedIds: effectiveExcludedIds });
+    const pendingCandidates = await fetchCandidates(pendingFilter, {
+      limit,
+      page: 1,
+      cursor: null,
+      candidateLimit: poolLimit
+    });
+    olderRequestLimit = Math.max(1, poolLimit - pendingCandidates.length);
+    if (pendingCandidates.length <= limit) {
+      olderCandidates = await fetchCandidates(filter, {
+        limit,
+        page: 1,
+        cursor: query.cursor,
+        candidateLimit: olderRequestLimit
+      });
+    }
+    candidates = [...pendingCandidates, ...olderCandidates];
+  } else {
+    olderCandidates = await fetchSessionCandidates(filter, {
+      limit,
+      page,
+      cursor: query.cursor,
+      mode,
+      sessionSeed,
+      total,
+      // Discover/search results retain their chronological candidate contract;
+      // only the recommendation Home Feed rotates the source window.
+      allowExplorationWindow: query.context !== 'search'
+    });
+    candidates = olderCandidates;
+  }
   let exhaustedFreshClips = false;
 
   if (mode === 'clips' && candidates.length < limit && watchedClipIds.size > 0) {
@@ -1169,9 +1210,11 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
         [...requestedExcludedIds, ...Array.from(freshIds)],
         query.targetClipId,
         mode
-      )
+      ),
+      strictCursor: true
     });
     const fallbackCandidates = await fetchCandidates(filter, { limit, page, cursor: query.cursor });
+    olderCandidates = [...olderCandidates, ...fallbackCandidates];
     candidates = [...freshCandidates, ...fallbackCandidates];
   }
 
@@ -1217,13 +1260,30 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     mode: impressionContext,
     sessionSeed
   });
-  const nextCursorPost = pickNextCursorPost({
-    selectedPosts,
-    candidates,
-    incomingCursor: query.cursor,
-    excludedCount: effectiveExcludedIds.length
-  });
-  const nextCursor = candidates.length >= limit ? encodeCursor(nextCursorPost) : null;
+  let nextCursor;
+  if (mode === 'clips') {
+    const deliveredIds = new Set(selectedPosts.map((post) => normalizeId(post._id)));
+    const pendingIds = candidates
+      .map((post) => normalizeId(post._id))
+      .filter((id) => id && !deliveredIds.has(id));
+    const oldestFetched = [...olderCandidates].sort((a, b) => {
+      const delta = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      return delta || String(a._id).localeCompare(String(b._id));
+    })[0];
+    const boundaryPost = oldestFetched || (clipCursor && { createdAt: clipCursor.createdAt, _id: clipCursor.id });
+    const olderMayRemain = olderCandidates.length >= olderRequestLimit;
+    nextCursor = selectedPosts.length && boundaryPost && (pendingIds.length || olderMayRemain)
+      ? encodeCursor(boundaryPost, pendingIds)
+      : null;
+  } else {
+    const nextCursorPost = pickNextCursorPost({
+      selectedPosts,
+      candidates,
+      incomingCursor: query.cursor,
+      excludedCount: effectiveExcludedIds.length
+    });
+    nextCursor = candidates.length >= limit ? encodeCursor(nextCursorPost) : null;
+  }
   const isGuest = !user || user.userType === 'guest';
   // Development-only ranking diagnostics (Phase 4 feed contract + Phase 14
   // observability). Never emitted in production so internal scoring stays

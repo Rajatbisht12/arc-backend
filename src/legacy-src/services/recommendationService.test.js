@@ -86,7 +86,7 @@ assert.strictEqual(
 
 const recommendationSource = fs.readFileSync(__filename.replace(/\.test\.js$/, '.js'), 'utf8');
 assert(
-  recommendationSource.includes('...(query.targetClipId ? { targetClip } : {})'),
+  recommendationSource.includes('...(query.targetClipId ? { targetClip: deliveredMedia.targetClip } : {})'),
   'the existing Clips response must expose the independently resolved target additively'
 );
 assert(
