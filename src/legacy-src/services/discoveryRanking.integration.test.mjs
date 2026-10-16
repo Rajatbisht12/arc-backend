@@ -53,9 +53,10 @@ try {
   await clear();
   const fresh = await Post.insertMany(Array.from({ length: 23 }, (_, i) => makePost(i ? 49 : 167)));
   const older = await Post.insertMany(Array.from({ length: 17 }, (_, i) => makePost(i ? 30 * 24 : 169, { views: 1_000_000 })));
-  const seen = await Post.insertMany([makePost(1), makePost(2)]);
-  const acted = await Post.insertMany([makePost(1), makePost(2)]);
-  for (let i = 0; i < seen.length; i++) await recordContentExposure({ userId: user._id, postId: seen[i]._id, durationMs: 1500, at: new Date(Date.now() - (10 - i) * HOUR), contentType: 'video' });
+  const nonVideo = hours => makePost(hours, { content: { text: 'Non-video fallback fixture', media: [] } });
+  const seen = await Post.insertMany([nonVideo(1), nonVideo(2)]);
+  const acted = await Post.insertMany([nonVideo(1), nonVideo(2)]);
+  for (let i = 0; i < seen.length; i++) await recordContentExposure({ userId: user._id, postId: seen[i]._id, durationMs: 1500, at: new Date(Date.now() - (10 - i) * HOUR), contentType: 'post' });
   await recordEngagementEvent({ userId: user._id, postId: acted[0]._id, authorId: author._id, eventType: 'like', context: 'feed' });
   await recordEngagementEvent({ userId: user._id, postId: acted[1]._id, authorId: author._id, eventType: 'comment', context: 'clips' });
   let cursor;
@@ -71,8 +72,8 @@ try {
   check(tiers.every((tier, i) => !i || tier >= tiers[i - 1]), 'strict tiers cannot be crossed by popularity, affinity or diversity');
   check(all.slice(0, 23).every(post => fresh.some(item => String(item._id) === String(post._id))), 'all fresh unseen precedes older unseen');
   check(all.slice(23, 40).every(post => older.some(item => String(item._id) === String(post._id))), 'older unseen precedes previously viewed/liked/commented');
-  check(String(all[40]._id) === String(seen[0]._id), 'repeat tier prefers least recently viewed');
-  check(tiers.slice(-2).every(tier => tier === 4), 'explicit actions are the final fallback');
+  check(String(all[40]._id) === String(seen[0]._id), 'non-video repeat tier prefers least recently viewed');
+  check(tiers.slice(-2).every(tier => tier === 4), 'non-video explicit actions remain the final fallback');
   check(await Exposure.countDocuments({ user: user._id }) === 4, 'serving and prefetching do not create exposure');
   // A new authenticated session/device uses the SAME persistent exposure rows.
   const device = await feed('another-device', { includeViewed: 'true' }, 'clips');
@@ -94,10 +95,10 @@ try {
   await recordEngagementEvent({ userId: user._id, postId: legacyRemoved._id, authorId: author._id, eventType: 'unsave' });
   check((await Exposure.findById(`${user._id}:${legacyRemoved._id}`).lean()).interacted, 'removing a legacy saved item preserves proof of interaction even before backfill');
   await clear();
-  const onlySeen = await Post.create(makePost(50));
+  const onlySeen = await Post.create(nonVideo(50));
   await recordContentExposure({ userId: user._id, postId: onlySeen._id, durationMs: 1000 });
   const repeatFirst = await feed('fresh-upload');
-  check(repeatFirst.posts[0]._ranking.tier === 3, 'viewed is eligible when unique catalog is exhausted');
+  check(repeatFirst.posts[0]._ranking.tier === 3, 'viewed non-video content remains eligible when unique catalog is exhausted');
   const upload = await Post.create(makePost(0));
   const freshAfterRepeat = await feed('fresh-upload', { cursor: repeatFirst.pagination.nextCursor });
   check(String(freshAfterRepeat.posts[0]._id) === String(upload._id), 'new uploads enter ahead of repeats without restarting the application');
@@ -107,6 +108,46 @@ try {
   check(String(olderAfterRepeat.posts[0]._id) === String(restoredVisibility._id) && olderAfterRepeat.posts[0]._ranking.tier === 2, 'incremental exhaustion checks discover newly eligible older posts before repeats');
   const savedCheckpoint = await State.findOne({ user: user._id }).lean();
   check(savedCheckpoint && savedCheckpoint.expiresAt > new Date(), 'unseen exhaustion is checkpointed with explicit expiry');
+
+  await clear();
+  const watched = await Post.insertMany(Array.from({ length: 8 }, (_, i) => makePost(i ? 1 : 120 * 24)));
+  for (const [index, durationMs] of [1000, 2000, 3000].entries()) {
+    const result = response();
+    await recordRecommendationExposure({ user, params: { id: String(watched[index]._id) }, body: { durationMs, context: index ? 'clips' : 'feed' } }, result);
+    check(result.code === 200, `${durationMs} ms is meaningful exposure without waiting for video completion`);
+  }
+  const legacyView = response();
+  await recordClipView({ user, params: { id: String(watched[3]._id) }, body: { context: 'clips', durationMs: 2000 } }, legacyView);
+  check(legacyView.code === 200 && Boolean(await Exposure.findById(`${user._id}:${watched[3]._id}`).lean()), 'legacy two-second view events immediately persist recommendation exposure');
+  for (const [index, eventType] of ['watch', 'dwell'].entries()) {
+    const post = watched[index + 4];
+    await recordEngagementEvent({ userId: user._id, postId: post._id, authorId: author._id, eventType, durationMs: 1000, context: 'profile', contentType: 'video' });
+    check(Boolean(await Exposure.findById(`${user._id}:${post._id}`).lean()), `one-second ${eventType} persists across recommendation surfaces immediately`);
+  }
+  // Legacy records can have a generic contentType or no meaningful timestamps.
+  // Actual media and durable identity, not those hints, must control exclusion.
+  await recordContentExposure({ userId: user._id, postId: watched[6]._id, durationMs: 1000, contentType: 'post', at: new Date(Date.now() - 120 * 24 * HOUR) });
+  await Exposure.create({ _id: `${user._id}:${watched[7]._id}`, user: user._id, post: watched[7]._id, contentType: 'post', interacted: true });
+  for (const mode of ['feed', 'clips']) {
+    for (let refresh = 0; refresh < 3; refresh++) {
+      const result = await feed(`watched-${mode}-${refresh}`, { includeViewed: 'true' }, mode);
+      check(result.posts.length === 0 && !result.pagination.hasMore && !result.pagination.nextCursor, `${mode} never recycles one/two-second watched or interacted videos, including refreshed repeat cycles`);
+      if (mode === 'clips') check(result.recommendation.exhaustedFreshClips, 'Clips reports genuine unseen-video exhaustion instead of promoting watched fallback');
+    }
+  }
+  // Expiration of bounded delivery/session records must not erase durable views.
+  await Delivery.deleteMany({});
+  await State.deleteMany({});
+  const afterSessionExpiry = await feed('after-session-expiry', {}, 'clips');
+  check(afterSessionExpiry.posts.length === 0, 'session expiry cannot make old watched videos unseen again');
+  const newVideos = await Post.insertMany([makePost(0), makePost(30 * 24)]);
+  for (const mode of ['feed', 'clips']) {
+    const result = await feed(`unseen-after-watched-${mode}`, {}, mode);
+    check(result.posts.length === 2 && result.posts.every(post => newVideos.some(item => String(item._id) === String(post._id))), `${mode} still discovers fresh and older unseen videos without recycling watched content`);
+    check(result.posts[0]._ranking.tier === 1 && result.posts[1]._ranking.tier === 2, `${mode} preserves seven-day freshness priority`);
+  }
+  const intentionalRewatch = await feed('direct-watched-video', { targetClipId: String(watched[0]._id) }, 'clips');
+  check(String(intentionalRewatch.targetClip._id) === String(watched[0]._id) && !intentionalRewatch.posts.some(post => String(post._id) === String(watched[0]._id)), 'an intentionally opened watched video remains accessible but is not recommended again');
 
   await clear();
   const allowed = await Post.create(makePost(1));

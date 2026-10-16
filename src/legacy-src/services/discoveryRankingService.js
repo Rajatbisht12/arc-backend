@@ -81,8 +81,10 @@ async function unseenCandidates({ filter, userId, session, tier, now, candidateL
   return Post.aggregate(pipeline).read('primary').option({ maxTimeMS: 5000 });
 }
 
-async function repeatCandidates({ filter, userId, session, tier, now, candidateLimit }) {
-  if (!userId) return [];
+async function repeatCandidates({ filter, userId, mode, session, tier, now, candidateLimit }) {
+  // Clips never recycle watched/interacted videos, even after unique inventory
+  // is exhausted or a client explicitly requests includeViewed/repeat cycles.
+  if (!userId || mode === 'clips') return [];
   const timeField = tier === 3 ? 'lastViewedAt' : 'lastInteractedAt';
   // Start at the viewer's indexed history, never at a full catalog sort or
   // an in-memory lifetime $nin list. Least recently exposed is considered first.
@@ -94,7 +96,10 @@ async function repeatCandidates({ filter, userId, session, tier, now, candidateL
     { $lookup: { from: Post.collection.name, localField: 'post', foreignField: '_id', as: '_post' } },
     { $unwind: '$_post' },
     { $replaceRoot: { newRoot: '$_post' } },
-    { $match: filter },
+    // Inspect the actual Post, not the historical exposure's contentType: older
+    // events may have labelled a video as a generic post. Mixed carousels that
+    // contain a video are also ineligible for repeat Home Feed delivery.
+    { $match: { $and: [filter, { 'content.media.type': { $ne: 'video' } }] } },
     ...activeAuthorLookup(),
     // A historical view followed by a current explicit action cannot leak into
     // tier 3 while its materialized interaction write is finishing.
@@ -162,7 +167,7 @@ async function getDiscoveryPage({ userId, mode, seed, baseFilter, excludedIds = 
     let attempts = 0;
     while (selected.length < limit && attempts++ < 4) {
       const fetch = tier <= 2 ? unseenCandidates : repeatCandidates;
-      const candidates = await fetch({ filter, userId, session, tier, now, candidateLimit, changedSince });
+      const candidates = await fetch({ filter, userId, mode, session, tier, now, candidateLimit, changedSince });
       if (!candidates.length) {
         if (tier <= 2) exhaustedUnseenTiers.add(tier);
         break; // source exhaustion, not a short scored window

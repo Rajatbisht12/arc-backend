@@ -13,7 +13,9 @@ TASK_FAMILY="arc-backend"
 TASK_DEF_FILE="./arc-task-def.json"
 TARGET_BANK_SCHEMA_VERSION="3"
 TARGET_MONETIZATION_SCHEMA_VERSION="1"
-TARGET_DISCOVERY_EXPOSURE_VERSION="1"
+# v2 also catches qualified legacy view/watch/dwell events written after the
+# initial exposure backfill but before those endpoints materialized views live.
+TARGET_DISCOVERY_EXPOSURE_VERSION="2"
 if [[ "${FORCE_DISCOVERY_EXPOSURE_MIGRATION:-0}" != "0" && "${FORCE_DISCOVERY_EXPOSURE_MIGRATION:-0}" != "1" ]]; then
   echo "FORCE_DISCOVERY_EXPOSURE_MIGRATION must be 0 or 1" >&2
   exit 1

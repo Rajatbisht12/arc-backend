@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const PostEngagement = require('../models/PostEngagement');
+const ContentExposure = require('../models/ContentExposure');
 const { trackInteraction } = require('../controllers/postController');
 const {
   MAX_ENGAGEMENT_DURATION_MS,
@@ -45,11 +46,19 @@ async function run() {
   const originalUpdateOne = PostEngagement.collection.updateOne;
   const originalInsertOne = PostEngagement.collection.insertOne;
   const originalBulkWrite = PostEngagement.collection.bulkWrite;
+  const originalExposureUpdateOne = ContentExposure.collection.updateOne;
+  const exposureUpdates = [];
   const updateOneCalls = [];
   const insertedDocs = [];
   const bulkWriteCalls = [];
   const viewStore = new Map();
   let duplicateKeyRetries = 0;
+
+  ContentExposure.collection.updateOne = async (filter, update, options) => {
+    assertNoUpdatePathConflicts(update);
+    exposureUpdates.push({ filter, update, options });
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
 
   PostEngagement.collection.updateOne = async (filter, update, options) => {
     await new Promise((resolve) => setImmediate(resolve));
@@ -112,6 +121,9 @@ async function run() {
     assert.strictEqual(Object.hasOwn(first.update.$setOnInsert, 'completionRate'), false);
     assert.deepStrictEqual(first.update.$max, { durationMs: 1500, completionRate: 0.25 });
     assert(first.update.$set.updatedAt instanceof Date);
+    assert.strictEqual(exposureUpdates.length, 1, 'a 1.5-second view immediately persists discovery exclusion');
+    assert.strictEqual(exposureUpdates[0].filter._id, `${USER_ID}:${POST_ID}`);
+    assert.strictEqual(exposureUpdates[0].update.$set.contentType, 'video');
 
     // Repeat view: a shorter observation cannot erase the best duration/progress.
     await recordEngagementEvent({
@@ -126,6 +138,7 @@ async function run() {
     const repeatedView = viewStore.get(`${USER_ID}:${POST_ID}:view:clips`);
     assert.strictEqual(repeatedView.durationMs, 1500);
     assert.strictEqual(repeatedView.completionRate, 0.25);
+    assert.strictEqual(exposureUpdates.length, 1, 'a sub-second observation does not create meaningful exposure');
 
     // Partial and full watch events remain append-only and normalize client contexts.
     await recordEngagementEvent({
@@ -153,6 +166,7 @@ async function run() {
     assert.strictEqual(insertedDocs[1].context, 'profile');
     assert.strictEqual(insertedDocs[1].durationMs, 30000);
     assert.strictEqual(insertedDocs[1].completionRate, 1);
+    assert.strictEqual(exposureUpdates.length, 3, 'watch endpoints also persist exposure without a backfill');
 
     // Concurrent view upserts all use atomic $max and converge on one unique record.
     await Promise.all([
@@ -265,6 +279,7 @@ async function run() {
     PostEngagement.collection.updateOne = originalUpdateOne;
     PostEngagement.collection.insertOne = originalInsertOne;
     PostEngagement.collection.bulkWrite = originalBulkWrite;
+    ContentExposure.collection.updateOne = originalExposureUpdateOne;
   }
 
   console.log('post engagement regression tests passed');

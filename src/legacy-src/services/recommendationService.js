@@ -1556,8 +1556,8 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     },
     recommendation: {
       algorithm: 'discovery-v3', mode, context: mode, sessionSeed,
-      signals: ['strict_exposure_tiers', 'fresh_unseen_48h', 'persistent_cross_surface_exposure', 'least_recent_repeats', 'personalization', 'diversity', 'privacy'],
-      exhaustedFreshClips: mode === 'clips' && page.lastTier >= 3
+      signals: ['strict_exposure_tiers', 'fresh_unseen_7d', 'persistent_cross_surface_exposure', 'watched_video_exclusion', 'least_recent_non_video_repeats', 'personalization', 'diversity', 'privacy'],
+      exhaustedFreshClips: mode === 'clips' && !page.nextCursor
     }
   };
 }
@@ -1593,8 +1593,13 @@ async function recordEngagementEvent({
   };
 
   try {
-    if (EXPLICIT_INTERACTIONS.has(eventType)) {
-      await recordContentExposure({ userId, postId, interaction: true,
+    const interaction = EXPLICIT_INTERACTIONS.has(eventType);
+    if (interaction || ['view', 'watch', 'dwell'].includes(eventType)) {
+      // The existing analytics/view endpoints may carry actual short watch
+      // durations too. Materialize them immediately, not only during a later
+      // historical backfill. Zero-duration fetches/instant activations still
+      // fail the shared one-second threshold without writing exposure history.
+      await recordContentExposure({ userId, postId, interaction, durationMs: normalizedDurationMs,
         contentType: contentType || (normalizedContext === 'clips' ? 'video' : undefined) });
     }
     if (eventType === 'view') {
