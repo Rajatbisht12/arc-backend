@@ -54,6 +54,25 @@ test('text/image/video/mixed exposures never return on repeated refresh, session
   assert.equal(await Exposure.countDocuments({ user: viewer._id }), 30);
 });
 
+test('rapid active-tab refreshes continue the delivery session without replaying unexposed items', async () => {
+  await Post.insertMany(Array.from({ length: 140 }, (_, i) => fixture(i % 2 ? 'image' : 'video')));
+  const delivered = new Set();
+  for (const mode of ['feed', 'clips']) {
+    delivered.clear();
+    for (let cycle = 0; cycle < 10; cycle++) {
+      const page = await request(mode, `tab-reselect-${mode}`, { limit: 5 });
+      assert.equal(page.posts.length, 5, `${mode} cycle ${cycle + 1} should have unseen inventory`);
+      for (const post of page.posts) {
+        assert.equal(delivered.has(post._id), false, `${mode} cycle ${cycle + 1} repeated a delivered Post ID`);
+        delivered.add(post._id);
+      }
+    }
+    assert.equal(delivered.size, 50);
+  }
+  assert.equal(await Exposure.countDocuments({ user: viewer._id }), 0,
+    'delivery reservations must not masquerade as one-second exposure records');
+});
+
 test('viewed and interacted non-video records cause genuine exhaustion, never fallback', async () => {
   const posts = await Post.insertMany(['text', 'image', 'video', 'mixed'].map(type => fixture(type, 60)));
   for (const [i, post] of posts.entries()) await recordContentExposure({ userId: viewer._id, postId: post._id,
