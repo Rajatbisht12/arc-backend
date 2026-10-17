@@ -49,7 +49,7 @@ try {
   check(unseen.length === boundaryPosts.length && boundaryPosts.every(post => unseen.some(item => String(item._id) === String(post._id))), 'all upload ages share one unseen tier, including both sides of the former seven-day boundary');
   await clear();
   const fresh = await Post.insertMany(Array.from({ length: 23 }, (_, i) => makePost(i ? 49 : 167)));
-  const older = await Post.insertMany(Array.from({ length: 17 }, (_, i) => makePost(i ? 30 * 24 : 169, { views: 1_000_000 })));
+  const older = await Post.insertMany(Array.from({ length: 17 }, (_, i) => makePost(i ? 60 * 24 : 46 * 24, { views: 1_000_000 })));
   const nonVideo = hours => makePost(hours, { content: { text: 'Non-video fallback fixture', media: [] } });
   const seen = await Post.insertMany([nonVideo(1), nonVideo(2)]);
   const acted = await Post.insertMany([nonVideo(1), nonVideo(2)]);
@@ -62,14 +62,14 @@ try {
     const result = await feed('tiers', cursor ? { cursor } : {});
     all.push(...result.posts);
     cursor = result.pagination.nextCursor;
-    check(all.length <= 44, 'finite catalog cannot repeat within a session');
+    check(all.length <= 40, 'finite unseen catalog cannot repeat within a session');
   } while (cursor);
-  check(new Set(all.map(post => String(post._id))).size === 44, 'every canonical item is served exactly once');
+  check(new Set(all.map(post => String(post._id))).size === 40, 'every unseen canonical item is served exactly once');
   const tiers = all.map(post => post._ranking.tier);
   check(tiers.every((tier, i) => !i || tier >= tiers[i - 1]), 'strict tiers cannot be crossed by popularity, affinity or diversity');
-  check(all.slice(0, 40).every(post => [...fresh, ...older].some(item => String(item._id) === String(post._id)) && post._ranking.tier === 1), 'all unseen content precedes previously viewed/liked/commented regardless of upload age');
-  check(String(all[40]._id) === String(seen[0]._id), 'non-video repeat tier prefers least recently viewed');
-  check(tiers.slice(-2).every(tier => tier === 3), 'non-video explicit actions remain the final fallback');
+  check(all.slice(0, 23).every(post => fresh.some(item => String(item._id) === String(post._id)) && post._ranking.tier === 1), 'unseen content within 45 days precedes older unseen content');
+  check(all.slice(23).every(post => older.some(item => String(item._id) === String(post._id)) && post._ranking.tier === 2), 'older unseen content stays eligible without consumed fallback');
+  check(!all.some(post => [...seen, ...acted].some(item => String(item._id) === String(post._id))), 'viewed/interacted non-video content never returns');
   check(await Exposure.countDocuments({ user: user._id }) === 4, 'serving and prefetching do not create exposure');
   // A new authenticated session/device uses the SAME persistent exposure rows.
   const device = await feed('another-device', { includeViewed: 'true' }, 'clips');
@@ -94,14 +94,14 @@ try {
   const onlySeen = await Post.create(nonVideo(50));
   await recordContentExposure({ userId: user._id, postId: onlySeen._id, durationMs: 1000 });
   const repeatFirst = await feed('fresh-upload');
-  check(repeatFirst.posts[0]._ranking.tier === 2, 'viewed non-video content remains eligible when unique catalog is exhausted');
+  check(!repeatFirst.posts.length && !repeatFirst.pagination.hasMore, 'viewed non-video content cannot recycle after unique catalog exhaustion');
   const upload = await Post.create(makePost(0));
   const freshAfterRepeat = await feed('fresh-upload', { cursor: repeatFirst.pagination.nextCursor });
   check(String(freshAfterRepeat.posts[0]._id) === String(upload._id), 'new uploads enter ahead of repeats without restarting the application');
-  const restoredVisibility = await Post.create(makePost(169, { visibility: 'private' }));
+  const restoredVisibility = await Post.create(makePost(60 * 24, { visibility: 'private' }));
   await Post.updateOne({ _id: restoredVisibility._id }, { $set: { visibility: 'public' } });
   const olderAfterRepeat = await feed('fresh-upload');
-  check(String(olderAfterRepeat.posts[0]._id) === String(restoredVisibility._id) && olderAfterRepeat.posts[0]._ranking.tier === 1, 'incremental exhaustion checks discover newly eligible older posts before repeats');
+  check(String(olderAfterRepeat.posts[0]._id) === String(restoredVisibility._id) && olderAfterRepeat.posts[0]._ranking.tier === 2, 'incremental exhaustion checks discover newly eligible older unseen posts');
   const savedCheckpoint = await State.findOne({ user: user._id }).lean();
   check(savedCheckpoint && savedCheckpoint.expiresAt > new Date(), 'unseen exhaustion is checkpointed with explicit expiry');
 

@@ -31,19 +31,18 @@ async function recordContentExposure({ userId, postId, contentType, durationMs, 
 }
 
 // Candidate selection precedes hydration, relationship and media URL work.
-// Re-read the small outgoing video page on the primary immediately before
-// delivery so a concurrent acknowledged watch cannot escape via that snapshot.
+// Re-read the small outgoing page on the primary immediately before delivery
+// so any concurrent acknowledged exposure cannot escape via that snapshot.
 // Match user/post as well as canonical keys to respect legacy exposure rows.
-async function excludeExposedVideos(posts, userId) {
+async function excludeExposedPosts(posts, userId) {
   if (!userId) return posts;
-  const videos = posts.filter(post => post?.content?.media?.some(media => media.type === 'video'));
-  if (!videos.length) return posts;
+  if (!posts.length) return posts;
   const rows = await ContentExposure.find({
-    user: userId, post: { $in: videos.map(post => post._id) },
+    user: userId, post: { $in: posts.map(post => post._id) },
     $or: [{ lastViewedAt: { $ne: null } }, { firstViewedAt: { $ne: null } }, { interacted: true }]
   }).read('primary').select('post').lean();
   const excluded = new Set(rows.map(row => String(row.post)));
   return posts.filter(post => !excluded.has(String(post._id)));
 }
 
-module.exports = { MEANINGFUL_EXPOSURE_MS, EXPLICIT_INTERACTIONS, exposureKey, buildExposureUpdate, recordContentExposure, excludeExposedVideos };
+module.exports = { MEANINGFUL_EXPOSURE_MS, EXPLICIT_INTERACTIONS, exposureKey, buildExposureUpdate, recordContentExposure, excludeExposedPosts };

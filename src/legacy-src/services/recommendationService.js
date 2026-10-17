@@ -12,7 +12,7 @@ const { normalizeTag } = require('../utils/hashtags');
 const log = require('../utils/logger');
 const { getBoostScore, isActiveBoost, getDeliverySource, recordBoostDelivery } = require('./boostService');
 const { getDiscoveryPage, decodeDiscoveryCursor, RANKING_POLICY } = require('./discoveryRankingService');
-const { EXPLICIT_INTERACTIONS, recordContentExposure, excludeExposedVideos } = require('./contentExposureService');
+const { EXPLICIT_INTERACTIONS, recordContentExposure, excludeExposedPosts } = require('./contentExposureService');
 
 const DEFAULT_LIMIT = 15;
 const MAX_LIMIT = 30;
@@ -1546,7 +1546,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     targetClip: targetClipPost ? formatted.get(normalizeId(targetClipPost._id)) : null
   });
   // Direct targets remain accessible; only automatic recommendations are gated.
-  delivered.posts = await excludeExposedVideos(delivered.posts, viewerId);
+  delivered.posts = await excludeExposedPosts(delivered.posts, viewerId);
   log.debug('discovery-page', { mode, count: delivered.posts.length, lastTier: page.lastTier, durationMs: Date.now() - startedAt });
   return {
     posts: delivered.posts,
@@ -1560,7 +1560,7 @@ async function getRecommendedPosts({ user, query = {}, mode = 'feed' }) {
     },
     recommendation: {
       algorithm: 'discovery-v3', rankingPolicy: RANKING_POLICY, mode, context: mode, sessionSeed,
-      signals: ['strict_exposure_tiers', 'unseen_any_age', 'persistent_cross_surface_exposure', 'watched_video_exclusion', 'least_recent_non_video_repeats', 'personalization', 'diversity', 'privacy'],
+      signals: ['strict_exposure_tiers', 'fresh_unseen_45d', 'persistent_cross_surface_exposure', 'consumed_content_exclusion', 'personalization', 'diversity', 'privacy'],
       // Legacy response name means unseen inventory, not a freshness window.
       exhaustedFreshClips: mode === 'clips' && !page.nextCursor
     }

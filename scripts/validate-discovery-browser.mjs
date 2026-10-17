@@ -95,7 +95,7 @@ try {
     await page.goto(origin);
     await page.locator('video').first().waitFor();
     const initial = requests.find(r => r.route === '/api/posts' && r.ids.length);
-    assert.equal(initial.rankingPolicy, 'unseen-age-neutral-v1');
+    assert.equal(initial.rankingPolicy, 'unseen-only-45d-v1');
     assert.ok(initial.tiers.every(tier => tier === 1));
     assert.ok(initial.uploadDays.some(days => days >= 30), 'older unseen video reaches the same initial tier as recent uploads');
     const watched = new Set();
@@ -128,7 +128,7 @@ try {
       assert.equal(response.status(), 200);
       const data = (await response.json()).data;
       assert.equal(data.recommendation.algorithm, 'discovery-v3');
-      assert.equal(data.recommendation.rankingPolicy, 'unseen-age-neutral-v1');
+      assert.equal(data.recommendation.rankingPolicy, 'unseen-only-45d-v1');
       assert.ok(data.posts.every(p => p._ranking.tier === 1));
       const repeats = data.posts.filter(p => watched.has(p._id));
       assert.equal(repeats.length, 0, `watched video repeated after ${surface} refresh ${refresh}`);

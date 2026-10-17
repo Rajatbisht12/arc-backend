@@ -6,7 +6,8 @@ const ContentExposure = require('../models/ContentExposure');
 const RecommendationDelivery = require('../models/RecommendationDelivery');
 const RecommendationState = require('../models/RecommendationState');
 
-const RANKING_POLICY = 'unseen-age-neutral-v1';
+const RANKING_POLICY = 'unseen-only-45d-v1';
+const FRESH_WINDOW_MS = 45 * 24 * 60 * 60 * 1000;
 const DELIVERY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_CANDIDATES = 240;
 const EXHAUSTION_CHECK_TTL_MS = 60_000;
@@ -57,13 +58,14 @@ function activeAuthorLookup() {
   ];
 }
 
-async function unseenCandidates({ filter, userId, session, now, candidateLimit, changedSince }) {
-  // Future-dated/unpublished content stays ineligible; there is no lower age
-  // boundary and no recent/older partition.
-  const match = { $and: [filter, { createdAt: { $lte: now } }] };
+async function unseenCandidates({ filter, userId, session, tier, now, candidateLimit, changedSince }) {
+  const boundary = new Date(now.getTime() - FRESH_WINDOW_MS);
+  // Both sources are strictly unseen. Older content stays eligible, never
+  // consumed fallback; a future publication is not eligible yet.
+  const match = { $and: [filter, { createdAt: tier === 2 ? { $lt: boundary } : { $gte: boundary, $lte: now } }] };
   if (changedSince) match.$and.push({ $or: [{ createdAt: { $gte: changedSince } }, { updatedAt: { $gte: changedSince } }] });
   // Stable, indexed candidate enumeration, independent of upload timestamps.
-  // Personalization/quality rank each bounded window; no recent-upload tier.
+  // Personalization/quality rank each bounded window within its unseen tier.
   const pipeline = [{ $match: match }, { $sort: { _id: 1 } }, ...activeAuthorLookup()];
   if (userId) {
     // Equality lookup by the built-in _id index works on DocumentDB without
@@ -83,35 +85,6 @@ async function unseenCandidates({ filter, userId, session, now, candidateLimit, 
   }
   pipeline.push(...deliveryLookup(session, now), { $limit: candidateLimit }, { $project: candidateProjection });
   return Post.aggregate(pipeline).read('primary').option({ maxTimeMS: 5000 });
-}
-
-async function repeatCandidates({ filter, userId, mode, session, tier, now, candidateLimit }) {
-  // Clips never recycle watched/interacted videos, even after unique inventory
-  // is exhausted or a client explicitly requests includeViewed/repeat cycles.
-  if (!userId || mode === 'clips') return [];
-  const timeField = tier === 2 ? 'lastViewedAt' : 'lastInteractedAt';
-  // Start at the viewer's indexed history, never at a full catalog sort or
-  // an in-memory lifetime $nin list. Least recently exposed is considered first.
-  const match = { user: objectId(userId), interacted: tier === 3 };
-  if (tier === 2) match.lastViewedAt = { $exists: true };
-  return ContentExposure.aggregate([
-    { $match: match },
-    { $sort: { [timeField]: 1, post: 1 } },
-    { $lookup: { from: Post.collection.name, localField: 'post', foreignField: '_id', as: '_post' } },
-    { $unwind: '$_post' },
-    { $replaceRoot: { newRoot: '$_post' } },
-    // Inspect the actual Post, not the historical exposure's contentType: older
-    // events may have labelled a video as a generic post. Mixed carousels that
-    // contain a video are also ineligible for repeat Home Feed delivery.
-    { $match: { $and: [filter, { 'content.media.type': { $ne: 'video' } }] } },
-    ...activeAuthorLookup(),
-    // A historical view followed by a current explicit action cannot leak into
-    // tier 2 while its materialized interaction write is finishing.
-    ...(tier === 2 ? [{ $match: { 'likes.user': { $ne: objectId(userId) }, 'comments.user': { $ne: objectId(userId) }, 'shares.user': { $ne: objectId(userId) } } }] : []),
-    ...deliveryLookup(session, now),
-    { $limit: candidateLimit },
-    { $project: candidateProjection }
-  ]).read('primary').option({ maxTimeMS: 5000 });
 }
 
 async function reserve(posts, { session, userId, now }) {
@@ -165,22 +138,19 @@ async function getDiscoveryPage({ userId, mode, seed, baseFilter, excludedIds = 
   const tierById = new Map();
   let hasMore = false;
   let lastTier = 0;
-  let unseenExhausted = false;
-  for (let tier = 1; tier <= 3; tier += 1) {
-    // Check higher tiers on EVERY page, including repeat pages: new uploads and
+  const exhaustedUnseenTiers = new Set();
+  for (let tier = 1; tier <= 2; tier += 1) {
+    // Check both unseen tiers on EVERY page: new uploads and
     // cross-device interactions become authoritative without a session reset.
     let attempts = 0;
     while (selected.length < limit && attempts++ < 4) {
-      const fetch = tier === 1 ? unseenCandidates : repeatCandidates;
-      const candidates = await fetch({ filter, userId, mode, session, tier, now, candidateLimit, changedSince });
+      const candidates = await unseenCandidates({ filter, userId, session, tier, now, candidateLimit, changedSince });
       if (!candidates.length) {
-        if (tier === 1) unseenExhausted = true;
+        exhaustedUnseenTiers.add(tier);
         break; // source exhaustion, not a short scored window
       }
       const remaining = limit - selected.length;
-      // Repeat order primarily follows least recent exposure. Personalization
-      // only breaks order within that bounded repeat window.
-      const ranked = tier === 1 ? rank(candidates, remaining) : candidates.slice(0, remaining).map(post => ({ post, score: null }));
+      const ranked = rank(candidates, remaining);
       const won = await reserve(ranked.map(item => item.post), { session, userId, now });
       const wonIds = new Set(won.map(id));
       for (const item of ranked) if (wonIds.has(id(item.post))) {
@@ -189,13 +159,13 @@ async function getDiscoveryPage({ userId, mode, seed, baseFilter, excludedIds = 
         lastTier = tier;
       }
       if (selected.length >= limit) { hasMore = true; break; }
-      // A short batch does not authorize fallback until a fresh global query
+      // A short batch does not authorize the older tier until a new global query
       // confirms there are no eligible higher-tier rows left.
       if (attempts >= 4) { hasMore = true; break; }
     }
     if (selected.length >= limit || hasMore) break;
   }
-  if (unseenExhausted) {
+  if (exhaustedUnseenTiers.size === 2) {
     // Never extend a checkpoint past the first delivery expiration. The TTL
     // monitor may lag; eligibility checks expiry timestamps explicitly.
     const firstDelivery = await RecommendationDelivery.findOne({ session, expiresAt: { $gt: now } }).read('primary').sort({ expiresAt: 1 }).select('expiresAt').lean();
@@ -218,4 +188,4 @@ async function getDiscoveryPage({ userId, mode, seed, baseFilter, excludedIds = 
   return { selected, tierById, nextCursor, lastTier, session };
 }
 
-module.exports = { RANKING_POLICY, DELIVERY_TTL_MS, sessionKey, decodeDiscoveryCursor, castAudience, unseenCandidates, repeatCandidates, getDiscoveryPage };
+module.exports = { RANKING_POLICY, FRESH_WINDOW_MS, DELIVERY_TTL_MS, sessionKey, decodeDiscoveryCursor, castAudience, unseenCandidates, getDiscoveryPage };

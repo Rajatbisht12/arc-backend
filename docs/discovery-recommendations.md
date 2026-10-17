@@ -1,35 +1,33 @@
 # Discovery recommendations
 
 Home Feed and Clips use the same authenticated backend recommendation policy.
-Videos have a strict no-repeat policy: after at least one second of meaningful
-exposure, the same canonical video is excluded from both Home Feed and Clips
-recommendations. A one- or two-second watch is sufficient; completion is not
-required. Watching on one surface excludes it on the other, across sessions and
-devices. Videos with explicit interaction history are also excluded.
+All content has a permanent no-repeat policy: after at least one second of
+meaningful exposure, the canonical Post is excluded from both Home Feed and Clips
+recommendations across sessions and devices. Videos require actual visible
+playback progression; text/images require continuous foreground visibility.
+Explicit interaction history also excludes content. Metadata delivery is not a view.
 
 Eligible candidates are ordered by these strict tiers:
 
-1. All eligible unseen and never explicitly interacted with content, regardless of upload age.
-2. Previously viewed **non-video** posts with no explicit interaction, after unseen content is exhausted.
-3. Previously interacted with **non-video** posts, after all higher tiers are exhausted.
+1. Eligible unseen, non-interacted content published within the last 45 days.
+2. Eligible unseen, non-interacted content older than 45 days.
 
-Tiers 2 and 3 never return videos, including when all unseen videos have been
-exhausted. Clips stops with no continuation instead of recycling watched videos.
-Non-video Home Feed fallback behavior is unchanged. Public view counts and
-metadata prefetching remain independent from meaningful exposure.
+There is no consumed-content fallback, including for non-video posts. Both feeds
+return genuine exhaustion instead of recycling consumed content. Public view
+counts and metadata prefetching remain independent from meaningful exposure.
 
-There is no freshness window, upload-age score or new-upload kicker in automatic
-Home/Clips recommendations. Today's and older unseen uploads compete in the same
-tier. Bounded candidate windows use stable indexed Post ID enumeration, not an
-upload-date sort; relevance, content quality, following and diversity rank within
-each window. Publication timestamps remain stored and returned, and future-dated
+The 45-day boundary is inclusive and uses current server time and stored creation
+timestamps, not device time. It is a priority, not an expiration: older unseen
+content remains eligible. Bounded candidate windows use stable indexed Post ID
+enumeration; relevance, content quality, following and diversity rank within each
+window and tier. Publication timestamps remain stored and returned, and future-dated
 content is not made eligible. Intentional Search retains its separate existing
 ranking behavior. A popularity or paid boost score cannot promote a lower tier
 above available higher-tier inventory. Already visible cards stay in their
 existing order; the policy applies to subsequent recommendation requests.
 
 The response remains `discovery-v3` for cursor/client compatibility and advertises
-`rankingPolicy: unseen-age-neutral-v1` and the `unseen_any_age` signal. The policy
+`rankingPolicy: unseen-only-45d-v1` and the `fresh_unseen_45d` / `consumed_content_exclusion` signals. The policy
 versions the exhaustion-checkpoint hash so old ranking proofs are revalidated;
 session identities, delivery reservations and persistent exposure are not reset.
 The legacy response field `exhaustedFreshClips` still means unseen inventory
@@ -48,9 +46,9 @@ An unlike or unsave does not erase historical exposure or interaction. Home Feed
 videos and Clips are the same Post record, so watching either surface updates
 the same identity. Matching media URLs never merges independent content.
 Intentional profile, saved, search, and direct-link access remains available.
-The no-repeat rule is enforced against the actual Post's video media, not only
-the historical `contentType` hint, which may be generic in older exposure rows.
-Delivery/session expiry never makes a persistently watched video unseen again.
+The no-repeat rule uses canonical Post identity regardless of media type or the
+historical `contentType` hint. Delivery/session expiry never makes consumed
+content unseen again.
 
 Qualified `view`, `watch`, and `dwell` events from existing engagement endpoints
 now update exposure immediately as well as analytics. They use the same one-second
@@ -74,24 +72,26 @@ returned separately, so Home-to-Clips and intentional Search navigation can
 open previously viewed content immediately.
 
 `RecommendationState` keeps a 60-second, audience-specific checkpoint after the
-single unseen tier has been confirmed exhausted. Every request still checks newly
+two unseen tiers have been confirmed exhausted. Every request still checks newly
 created or updated posts; changed following/privacy/block filters invalidate the
 checkpoint. Its expiry never extends beyond the earliest delivery expiry. This
-avoids repeatedly scanning the old catalog during repeat browsing. It stores no
+avoids repeatedly scanning the old catalog after exhaustion. It stores no
 cached recommendation list and cannot promote a stale interacted candidate.
 Ranked feed lists are not cached in Redis; durable exposure is never held only
 in Redis. Exposure/eligibility reads use the primary database.
 
 Before returning an automatic recommendation page, the service also rechecks
-its outgoing video IDs against primary exposure records. This closes the gap
-between candidate selection and a concurrent watch acknowledgment during
+all outgoing Post IDs against primary exposure records. This closes the gap
+between candidate selection and a concurrent exposure acknowledgment during
 hydration. Direct targets remain exempt. Web and mobile retain failed qualified
 reports in an account-bound delivery outbox, flush pending work before new
 recommendation requests, and reconcile incoming pages without removing the
-currently watched card. The threshold remains one second of actual foreground
-video progress. No additional migration is required for this race/retry fix.
-See [refresh validation](watched-video-refresh-validation.md) for deployment
-findings, real-device checks, and remaining release requirements.
+currently visible card. The threshold remains one second of actual foreground
+video progress or continuous text/image visibility. The clients apply pending
+exclusions to all content types and stop automatic repeat cycles on authoritative
+exhaustion. No additional migration is required. See
+[current refresh validation](permanent-discovery-45d-validation.md) for evidence
+and release requirements; older reports describe historical policies.
 
 Exposure data is private, associated only with the authenticated user, and is
 not exposed as public watch history. Recommendations still apply current post
@@ -199,7 +199,8 @@ empty lookup collection cannot silently empty an otherwise valid feed.
 
 Exposure has a unique `(user, post)` index in addition to its deterministic
 `_id`, plus `(user, interacted, lastViewedAt, post)` and
-`(user, interacted, lastInteractedAt, post)` indexes for repeat retrieval.
+`(user, interacted, lastInteractedAt, post)` historical indexes. The latter indexes
+are retained unchanged; consumed-content fallback retrieval has been removed.
 Delivery/state have expiry TTL indexes and owner cleanup indexes. Post gets
 `discovery_updates` on `(isActive, updatedAt, _id)` and
 `discovery_video_updates` on `(isActive, content.media.type, updatedAt, _id)`.
@@ -235,8 +236,7 @@ Unseen retrieval streams the audience's stable indexed Post ID order with equali
 joins to one exposure key and one session-delivery key, before applying a bounded
 candidate limit (at most 240). This is a per-query work window, not a catalog cap:
 unselected candidates remain eligible for subsequent requests. Only selected
-cards are fully populated. Repeat retrieval starts from the viewer's indexed
-exposure rows in least-recent order, rather than sorting the whole Post catalog.
+cards are fully populated. Consumed-content repeat retrieval is not performed.
 Interest signals use bounded recent histories; exact eligibility does not use
 the previous 400/1,500-row view-history truncation. Saved status is projected for
 only the returned cards in one batch.
@@ -246,11 +246,9 @@ reservation attempts prevent contention from creating a request loop; partial
 contention retains a continuation instead of falsely declaring exhaustion.
 No new media players, video downloads, scroll resets or UI rankings were added.
 
-All eligible unseen inventory shares the first tier. Only confirmed unseen
-exhaustion permits **non-video Home Feed** viewed fallback, followed by non-video
-interacted fallback. Repeat inventory favors least recently viewed non-video
-posts; watched videos are never recycled, even with `includeViewed=true` or a
-new client recommendation cycle. A finite or empty catalog has
+Unseen inventory is partitioned into within-45-days and older tiers. Confirmed
+exhaustion never permits viewed or interacted fallback, even with
+`includeViewed=true` or a new client recommendation cycle. A finite or empty catalog has
 an explicit termination/continuation state; it must not cause a tight empty-page
 request loop or claim that more unique records exist than the catalog contains.
 
@@ -299,12 +297,13 @@ Actual staging DocumentDB execution plans remain a release check.
 
 ## Validation and changed files
 
-The age-neutral policy passes 568 existing integration assertions plus nine
-new age-neutral regressions, the four watched-refresh race regressions and the
-existing pagination/follow/migration suites. Chrome and WebKit desktop/mobile
-integration and physical Android Chrome also passed. See
-[the age-neutral validation report](age-neutral-discovery-validation.md) for
-exact changed files, test scope and deployment limitations.
+The current policy passes 568 integration assertions, nine within-tier ranking
+regressions, eight permanent all-content integration tests, four watched-refresh
+race tests and existing pagination/follow/migration suites. See
+[the current validation report](permanent-discovery-45d-validation.md) for exact
+files, repeated-refresh browser/device evidence and deployment limitations.
+The [age-neutral report](age-neutral-discovery-validation.md) records the prior
+policy and must not be used as the current specification.
 
 ### Historical validation before the age-neutral policy
 
