@@ -47,7 +47,7 @@ for (const mode of ['feed', 'clips']) {
     assert.equal(String(result.posts[0]._id), String(older._id), 'upload age must not override stronger quality/engagement');
     assert.equal(result.posts.some(p => String(p._id) === String(today._id)), true);
     assert.equal(result.recommendation.signals.includes('fresh_unseen_7d'), false);
-    assert.equal(result.recommendation.rankingPolicy, 'unseen-age-neutral-v1');
+    assert.equal(result.recommendation.rankingPolicy, 'unseen-only-45d-v1');
   });
   test(`${mode}: score is unchanged by upload age, while personalization still matters`, async () => {
     const post = (await makePost(0)).toObject();
@@ -74,19 +74,19 @@ for (const mode of ['feed', 'clips']) {
 test('bounded candidate enumeration does not depend on upload dates', async () => {
   const posts = await Post.insertMany(Array.from({ length: 250 }, (_, index) => ({
     author: author._id, visibility: 'public', isActive: true,
-    content: { text: `Window ${index}`, media: [] }, createdAt: new Date(Date.now() - index * DAY),
+    content: { text: `Window ${index}`, media: [] }, createdAt: new Date(Date.now() - index / 100 * DAY),
   })));
   const rank = candidates => candidates.slice(0, 1).map(post => ({ post, score: 0 }));
   const request = seed => getDiscoveryPage({ userId: viewer._id, mode: 'feed', seed,
     baseFilter: { isActive: true, visibility: 'public' }, limit: 1, rank });
   const first = await request('before-age-swap');
   await Post.collection.bulkWrite(posts.map((post, index) => ({ updateOne: { filter: { _id: post._id },
-    update: { $set: { createdAt: new Date(Date.now() - (250 - index) * DAY) } } } })));
+    update: { $set: { createdAt: new Date(Date.now() - (250 - index) / 100 * DAY) } } } })));
   const second = await request('after-age-swap');
   assert.equal(String(first.selected[0].post._id), String(second.selected[0].post._id));
 });
 
-test('three priorities retain persistent video exclusion and unchanged delivery TTL', async () => {
+test('consumed content has no fallback; delivery TTL remains unchanged', async () => {
   const unseen = await makePost(30);
   const viewed = await makePost(0, { content: { text: 'Viewed non-video', media: [] } });
   const interacted = await makePost(0, { content: { text: 'Interacted non-video', media: [] } });
@@ -96,8 +96,8 @@ test('three priorities retain persistent video exclusion and unchanged delivery 
   await recordContentExposure({ userId: viewer._id, postId: watched._id, contentType: 'video', durationMs: 1000 });
   const startedAt = Date.now();
   const result = await getRecommendedPosts({ user: viewer, mode: 'feed', query: { sessionSeed: 'new-priorities' } });
-  assert.deepEqual(result.posts.map(p => String(p._id)), [unseen, viewed, interacted].map(p => String(p._id)));
-  assert.deepEqual(result.posts.map(p => p._ranking.tier), [1, 2, 3]);
+  assert.deepEqual(result.posts.map(p => String(p._id)), [String(unseen._id)]);
+  assert.deepEqual(result.posts.map(p => p._ranking.tier), [1]);
   for (const mode of ['feed', 'clips']) for (let refresh = 0; refresh < 6; refresh++) {
     const page = await getRecommendedPosts({ user: viewer, mode, query: { sessionSeed: `${mode}-reload-${refresh}` } });
     assert.equal(page.posts.some(p => String(p._id) === String(watched._id)), false);
