@@ -23,6 +23,7 @@ const { invalidateUserCache } = require('../middleware/auth');
 const log = require('../utils/logger');
 const { normalizeQuerySearch, buildPrefixRegex } = require('../utils/searchQuery');
 const { getVisibleFollowCounts } = require('../services/discoverUserCounts');
+const { sampleSuggestedUsers } = require('../services/userSuggestionService');
 const { recordSuccessfulProfileVisit } = require('../services/profileVisitService');
 const {
   activePendingQuery,
@@ -136,6 +137,7 @@ const getUsers = async (req, res) => {
     const viewerId = req.user?._id;
     const isGuest = !req.user || req.user.userType === 'guest';
     const excludeFollowing = req.query.excludeFollowing === 'true' || req.query.suggestions === 'true';
+    const suggestions = req.query.suggestions === 'true' && viewerId && !isGuest && !search;
 
     // Build filter object
     const filter = {
@@ -151,6 +153,12 @@ const getUsers = async (req, res) => {
     if (skillLevel) filter['playerInfo.skillLevel'] = skillLevel;
     if (lookingForTeam === 'true') filter['playerInfo.lookingForTeam'] = true;
     if (recruiting === 'true') filter['teamInfo.recruitingFor.0'] = { $exists: true };
+    if (suggestions) {
+      filter.moderationStatus = { $nin: ['suspended', 'banned', 'soft_deleted'] };
+      filter.isSystemAccount = { $ne: true };
+      filter.userType = { $in: ['player', 'team', 'creator'] };
+      filter['privacySettings.allowFollowRequests'] = { $ne: false };
+    }
 
     if (viewerId && !isGuest) {
       const [followedIds, currentUser, usersBlockingViewer] = await Promise.all([
@@ -164,6 +172,16 @@ const getUsers = async (req, res) => {
         ...usersBlockingViewer.map(user => user._id),
       ];
       if (excludedIds.length > 0) andConditions.push({ _id: { $nin: excludedIds } });
+    }
+
+    if (suggestions) {
+      // Only surface profiles the viewer may actually open. Legacy accounts
+      // without explicit settings retain the existing public default.
+      andConditions.push({ $or: [
+        { 'privacySettings.profileVisibility': 'public' },
+        { 'privacySettings.profileVisibility': { $exists: false }, 'privacySettings.accountType': 'public' },
+        { 'privacySettings.profileVisibility': { $exists: false }, 'privacySettings.accountType': { $exists: false } },
+      ] });
     }
 
     // If searching for followers, return users who follow the current user.
@@ -205,14 +223,16 @@ const getUsers = async (req, res) => {
     // only. Avoid loading large team/player arrays and account metadata for
     // every search hit; other /api/users consumers keep their existing DTO.
     const searchProjection = '_id username userType profile.displayName profile.avatar profile.profilePicture profileImage avatarUrl profilePicture avatar picture photoURL privacySettings createdAt isActive';
-    const [candidateUsers, total] = await Promise.all([
-      User.find(filter)
-        .select(discoverSearch ? searchProjection : '-password -email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(discoverSearch ? limit + 1 : limit),
-      discoverSearch ? Promise.resolve(null) : User.countDocuments(filter)
-    ]);
+    const [candidateUsers, total] = suggestions
+      ? [await sampleSuggestedUsers(User, filter, Math.min(Math.max(limit, 1), 50), searchProjection), null]
+      : await Promise.all([
+        User.find(filter)
+          .select(discoverSearch ? searchProjection : '-password -email')
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(discoverSearch ? limit + 1 : limit),
+        discoverSearch ? Promise.resolve(null) : User.countDocuments(filter)
+      ]);
     const hasMore = discoverSearch && candidateUsers.length > limit;
     const users = hasMore ? candidateUsers.slice(0, limit) : candidateUsers;
 
@@ -232,6 +252,7 @@ const getUsers = async (req, res) => {
     const viewerFollowingIds = new Set(viewerFollows.map(f => f.following.toString()));
     const pendingTargetIds = new Set(pendingFollowRequests.map(request => request.target.toString()));
 
+    if (suggestions) res.set('Cache-Control', 'private, no-store');
     res.status(200).json({
       success: true,
       data: {
