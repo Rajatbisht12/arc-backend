@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Staging-only defense-in-depth guardrails; review and deploy separately. Does not create or modify storage.
+Parameters:
+  StagingTaskRoleName:
+    Type: String
+    AllowedPattern: '.*[Ss]taging.*'
+  StagingExecutionRoleName:
+    Type: String
+    AllowedPattern: '.*[Ss]taging.*'
+  StagingBackendSecretArn:
+    Type: String
+    AllowedPattern: 'arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:arc/staging/.+'
+  StagingBucketArn:
+    Type: String
+    AllowedPattern: 'arn:aws[a-z-]*:s3:::[a-z0-9.-]*staging[a-z0-9.-]*'
+Resources:
+  StageGuardrails:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SquadHuntStagingResourceIsolation
+      Roles: [!Ref StagingTaskRoleName, !Ref StagingExecutionRoleName]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Explicit deny overrides accidentally inherited broad read grants.
+          - Effect: Deny
+            Action: ['secretsmanager:GetSecretValue', 'secretsmanager:DescribeSecret']
+            NotResource: !Ref StagingBackendSecretArn
+          - Effect: Deny
+            Action: ['secretsmanager:BatchGetSecretValue']
+            Resource: '*'
+          - Effect: Deny
+            Action: 's3:*'
+            NotResource: [!Ref StagingBucketArn, !Sub '${StagingBucketArn}/*']
+          - Effect: Deny
+            Action: ['sts:AssumeRole', 'iam:PassRole']
+            Resource: '*'
+# This deny-only policy grants no access. Add separate least-privilege ALLOWs
+# for the staging secret, bucket and logging/KMS needs. Use separate DB/Redis
+# credentials and security groups; IAM policies alone cannot isolate sockets.

@@ -380,6 +380,9 @@ export const enqueueClipTranscode = async (
 // Only the independently deployed video worker consumes these jobs. Keep the
 // source bytes and all FFmpeg operations outside the API process.
 export const enqueueVideoUpload = async (sessionId: string, retryKey = '0'): Promise<void> => {
+  if (!env.CLIP_HLS_ENABLED || env.CLIP_HLS_WORKER_ENABLED) {
+    throw new Error('Upload-session jobs require a compatible dedicated video worker; legacy embedded consumers remain protected');
+  }
   await clipVideoQueue.add('process-upload', { sessionId: String(sessionId) }, {
     jobId: broadcastJobId('video-upload', String(sessionId), String(retryKey)),
     attempts: env.CLIP_HLS_JOB_ATTEMPTS,
@@ -399,6 +402,11 @@ const loadVideoUploadService = (): VideoUploadService => require(
 let uploadRecoveryInFlight = false;
 let uploadRecoveryTimer: NodeJS.Timeout | null = null;
 export const startVideoUploadScheduler = (): void => {
+  // Compatibility releases have no upload-session content (release preflight
+  // verifies that) and must not run new-pipeline maintenance or enqueue jobs
+  // into the embedded, legacy-only consumer. Dedicated workers may still drain
+  // already accepted sessions after new session creation has been disabled.
+  if (!env.POST_VIDEO_UPLOADS_ENABLED && env.CLIP_HLS_WORKER_ENABLED) return;
   if (uploadRecoveryTimer) return;
   const recover = async () => {
     if (uploadRecoveryInFlight) return;

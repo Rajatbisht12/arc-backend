@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const preflight = fs.readFileSync(path.join(__dirname, 'preflight-push-release.js'), 'utf8');
 
-async function runPreflight(args, failure) {
+async function runPreflight(args, failure, environment = {}) {
   const calls = [];
   const exits = [];
   let hydrated = false;
@@ -18,7 +18,7 @@ async function runPreflight(args, failure) {
     process: {
       argv: ['node', 'preflight-push-release.js', ...args],
       execPath: process.execPath,
-      env: {},
+      env: environment,
       exit(code) { exits.push(code); throw stop; }
     },
     console: { error() {} },
@@ -36,7 +36,7 @@ async function runPreflight(args, failure) {
             calls.push({ script, args, hydrated });
             assert.equal(command, process.execPath);
             assert.equal(options.cwd, root);
-            const status = failure?.script === script && args.includes(failure.arg) ? 2 : 0;
+            const status = failure?.script === script && (failure.arg == null || args.includes(failure.arg)) ? 2 : 0;
             return { status };
           }
         };
@@ -50,6 +50,17 @@ async function runPreflight(args, failure) {
 
 const discoveryCalls = result => result.calls
   .filter(call => call.script === 'migrate-discovery-exposure.js');
+
+test('compatibility release checks read-only video state before database preparation and fails closed', async () => {
+  const env = { VIDEO_DEPLOYMENT_MODE: 'compatibility' };
+  const passed = await runPreflight(['--audit-only'], undefined, env);
+  const gate = passed.calls.findIndex(call => call.script === 'verify-video-compatibility-release.js');
+  assert.ok(gate >= 0 && passed.calls[gate].hydrated);
+  assert.ok(gate < passed.calls.findIndex(call => call.script === 'migrate-bank-details.js'));
+  const failed = await runPreflight(['--audit-only'], { script: 'verify-video-compatibility-release.js' }, env);
+  assert.equal(failed.exits[0], 2);
+  assert.equal(failed.calls.at(-1).script, 'verify-video-compatibility-release.js');
+});
 
 test('first-rollout audit inspects discovery without applying it', async () => {
   const result = await runPreflight(['--audit-only', '--migrate-discovery-exposure']);

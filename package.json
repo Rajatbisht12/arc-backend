@@ -13,6 +13,8 @@
     "start": "node dist/launcher.js",
     "start:clip-worker": "node dist/video-worker-launcher.js",
     "typecheck": "tsc --noEmit",
+    "test:video-deployment-safety": "node --import tsx --test src/config/runtimeIsolation.test.ts && node --test scripts/video-deployment-safety.test.js scripts/discovery-deployment.test.js src/legacy-src/middleware/upload.inclusive-limit.test.js scripts/migrate-video-upload-indexes.test.js",
+    "test:video-compatibility-smoke": "node --test scripts/video-compatibility.smoke.test.js",
     "test:auth-oauth-contracts": "node src/legacy-src/controllers/authController.oauth.test.js",
     "test:auth-onboarding": "node src/legacy-src/utils/onboardingValidation.test.js && node src/legacy-src/middleware/auth.profile-completion.test.js && node src/legacy-src/controllers/authController.oauth.test.js && node src/legacy-src/models/User.oauthPasswordSetup.test.js && node src/legacy-src/config/passport.oauth.test.js",
     "test:username-reservations": "node --test src/legacy-src/services/usernameRegistryService.test.js scripts/migrate-username-registry.test.js && node --check scripts/migrate-username-registry.js",

@@ -1,5 +1,24 @@
 # Post video uploads: implementation and rollout
 
+## Compatibility deployment (before activation)
+
+See [deployment blocker resolution](POST_VIDEO_500MIB_DEPLOYMENT_BLOCKERS_RESOLUTION.md)
+for the tested release verdict and exact operator procedure. The API must retain:
+
+```dotenv
+POST_VIDEO_UPLOADS_ENABLED=false
+CLIP_HLS_ENABLED=true
+CLIP_HLS_WORKER_ENABLED=true
+POST_VIDEO_PRIVATE_DELIVERY_ENABLED=false
+POST_VIDEO_SOURCE_RETENTION_DAYS=0
+```
+
+`deploy.sh` now explicitly pins these values plus API-task-only
+`VIDEO_DEPLOYMENT_MODE=compatibility`, references an immutable image digest, and
+refuses conflicting active topology or undrained new-pipeline work. No new video
+index migration or private signing secrets are needed to run this mode. Do not
+turn off the embedded worker by copying the later activation configuration.
+
 ## Contract and dependencies
 
 The new path is additive and disabled by default. A post video may be at most
@@ -46,8 +65,13 @@ S3 expiry rule covering playback objects referenced by active posts.
 
 ## Infrastructure and activation order
 
-1. Build/deploy backend with POST_VIDEO_UPLOADS_ENABLED=false. Apply/verify the
-   additive indexes. Do not run destructive migrations.
+1. Build/deploy the API in compatibility mode above. Video indexes are NOT a
+   prerequisite for this deployment. Separately, with approval in isolated
+   staging, run `node scripts/migrate-video-upload-indexes.js --apply` and
+   `--verify` before enabling sessions. Repeat on production only with approval.
+   The publication index uses the DocumentDB-supported nonempty-string filter
+   `$gt: ''` and a new name; it never drops an existing index. Actual execution
+   on isolated DocumentDB 5.0 is still an activation verification requirement.
 2. Review and deploy the `infra/post-video-worker.yaml` stack. Start a worker
    using the same immutable image version as the API. API task environment must
    set CLIP_HLS_WORKER_ENABLED=false before accepting the new video path.
@@ -64,8 +88,16 @@ S3 expiry rule covering playback objects referenced by active posts.
 5. Configure the private-delivery signing settings in `infra/post-video.env.example`.
    Keep signing keys in Secrets Manager. Never place private keys in Web/app env.
    The worker launcher uses the existing runtime Secrets Manager loader; the
-   task role must retain its current secrets-read, database, Redis and legacy
-   Clip storage permissions. The new IAM template is additive, not a replacement.
+   production task role must retain its current secrets-read, database, Redis
+   and legacy Clip storage permissions. Staging must use a separate role/secret,
+   database, Redis and bucket. `DEPLOYMENT_ENVIRONMENT=staging`, explicit
+   `BACKEND_SECRET_ID=arc/staging/...`, and four `STAGING_*` resource guards must
+   be provided by the task; copied production endpoints/static AWS keys fail
+   startup. The loader never defaults a staging task to the production secret.
+   The new IAM template is additive, not a replacement. Review the separate
+   deny-only `infra/post-video-staging-isolation.yaml` guardrails and independent
+   security groups/credentials before deploying any staging worker. Validation
+   of a template is not proof that these guardrails are attached live.
 6. Deploy Web/native clients while policy still reports disabled. Native builds
    must include the new bounded part-copy native method.
 7. In staging, exercise the real-file matrix, resume, failed jobs, deletion,
