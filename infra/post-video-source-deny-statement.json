@@ -1,0 +1,7 @@
+{
+  "Sid": "DenyCloudFrontPrivateVideoSources",
+  "Effect": "Deny",
+  "Principal": {"Service": "cloudfront.amazonaws.com"},
+  "Action": "s3:GetObject",
+  "Resource": "REPLACE_WITH_MEDIA_BUCKET_ARN/post-video-sources/*"
+}

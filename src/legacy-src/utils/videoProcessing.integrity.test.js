@@ -56,6 +56,12 @@ const uploadFile = async (filePath, mimetype) => {
   return { buffer, size: buffer.length, mimetype, originalname: path.basename(filePath) };
 };
 
+test('worker resource limits reject oversized duration/dimensions before packet validation', async () => {
+  await assert.rejects(validateVideoFile(mp4WithAudio, { maxDurationSeconds: 1 }), { code: 'VIDEO_RESOURCE_LIMIT' });
+  await assert.rejects(validateVideoFile(mp4WithoutAudio, { maxDimension: 500 }), { code: 'VIDEO_RESOURCE_LIMIT' });
+  await assert.rejects(validateVideoFile(mp4WithoutAudio, { maxPixels: 1000 }), { code: 'VIDEO_RESOURCE_LIMIT' });
+});
+
 test('valid MP4 with audio is remuxed, validated and retains its duration', async () => {
   const result = await processPostVideo(await uploadFile(mp4WithAudio, 'video/mp4'));
   assert.equal(result.optimized, true);

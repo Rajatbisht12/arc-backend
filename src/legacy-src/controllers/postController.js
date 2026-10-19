@@ -33,6 +33,7 @@ const { deleteNotificationsForTarget } = require('../services/notificationHistor
 const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const { toPostMediaItem } = require('../utils/postMediaDimensions');
 const { processPostVideo } = require('../utils/videoProcessing');
+const { parseIds, postIdentity, acquirePublication, finishPublication, reserveReadyVideos, arrangeMedia, finalizeVideoPost } = require('../services/videoPostPublicationService');
 const { enqueueClipTranscode } = require('../utils/jobQueue');
 const { resolvePostAccess, filterPostsForViewer } = require('../utils/privacyPolicy');
 const {
@@ -94,9 +95,22 @@ async function incrementAttributionMetric({ postId, source, campaignId, metric, 
 
 // Create new post
 const createPost = async (req, res) => {
+  let publicationLease;
   try {
     const { text, postType, tags, visibility, recruitmentInfo, mentions } = req.body;
     const authorId = req.user._id;
+    const videoUploadIds = parseIds(req.body.videoUploadIds);
+    const clientPostId = req.body.clientPostId ? String(req.body.clientPostId).toLowerCase() : null;
+    const reservedPostId = clientPostId || videoUploadIds.length ? postIdentity(authorId, clientPostId) : null;
+    if (reservedPostId) {
+      const existing = await Post.findOne({ _id: reservedPostId, author: authorId, clientPostId });
+      if (existing) {
+        await finalizeVideoPost(authorId, existing._id, existing.content.media.map(row => row.uploadSessionId).filter(Boolean));
+        await existing.populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType');
+        return res.status(200).json({ success: true, message: 'Post already created', data: { post: await resolveClientMediaPayload(formatPostDTO(existing, false, true)) } });
+      }
+    }
+    if (reservedPostId) publicationLease = await acquirePublication(authorId, reservedPostId);
     const rawTags = tags !== undefined ? tags : req.body['tags[]'];
     const parsedTags = Array.isArray(rawTags)
       ? rawTags.map(tag => String(tag).trim()).filter(Boolean)
@@ -142,6 +156,9 @@ const createPost = async (req, res) => {
     const mediaFiles = Array.isArray(req.files) ? req.files : (req.files?.media || []);
     const coverFile = Array.isArray(req.files) ? null : req.files?.cover?.[0];
     const uploadId = randomUUID();
+    if (mediaFiles.length + videoUploadIds.length > 5) return res.status(400).json({ success: false, code: 'MEDIA_COUNT_LIMIT', message: 'A post may contain up to five photos and videos.' });
+    if (videoUploadIds.length && mediaFiles.some(file => String(file.mimetype || '').startsWith('video/'))) return res.status(400).json({ success: false, code: 'MIXED_VIDEO_UPLOAD_PATH', message: 'Finish uploading all videos before publishing.' });
+    const sessionMedia = await reserveReadyVideos({ owner: authorId, ids: videoUploadIds, postId: reservedPostId, claimToken: publicationLease?.token });
 
     // Handle media uploads
     let mediaData = [];
@@ -184,9 +201,10 @@ const createPost = async (req, res) => {
           }));
         mediaData = uploadResults.map(toPostMediaItem);
         if (coverFile) {
-          const [coverUpload] = await uploadMultipleFiles([coverFile], 'gaming-social/post-covers');
+          const coverFolder = sessionMedia.length ? `post-video-playback/${authorId}/${sessionMedia[0].uploadSessionId}/${sessionMedia[0].playback.version}/covers` : 'gaming-social/post-covers';
+          const [coverUpload] = await uploadMultipleFiles([coverFile], coverFolder);
           coverData = coverUpload ? {
-            url: coverUpload.url,
+            url: sessionMedia.length ? coverUpload.publicId : coverUpload.url,
             publicId: coverUpload.publicId
           } : null;
         }
@@ -194,6 +212,8 @@ const createPost = async (req, res) => {
         return respondToMediaUploadError(res, uploadError, 'Failed to upload media files');
       }
     }
+
+    mediaData = arrangeMedia(mediaData, sessionMedia, req.body.mediaOrder);
 
     if (coverData) {
       const videoMedia = mediaData.find(item => item.type === 'video');
@@ -288,6 +308,7 @@ const createPost = async (req, res) => {
 
     // Create post data (allow post with only media, no caption)
     const postData = {
+      ...(reservedPostId ? { _id: reservedPostId, clientPostId } : {}),
       author: authorId,
       content: {
         text: typeof text === 'string' ? text : '',
@@ -328,7 +349,17 @@ const createPost = async (req, res) => {
       if (process.env.NODE_ENV === 'development') { console.log('Creating achievement post with info:', postData.achievementInfo);}
     }
 
-    const post = await Post.create(postData);
+    let post;
+    try { post = await Post.create(postData); }
+    catch (error) {
+      if (error.code !== 11000 || !reservedPostId) throw error;
+      post = await Post.findOne({ _id: reservedPostId, author: authorId, clientPostId });
+      if (!post) throw error;
+      await finalizeVideoPost(authorId, post._id, post.content.media.map(row => row.uploadSessionId).filter(Boolean));
+      await post.populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType');
+      return res.status(200).json({ success: true, message: 'Post already created', data: { post: await resolveClientMediaPayload(formatPostDTO(post, false, true)) } });
+    }
+    await finalizeVideoPost(authorId, post._id, videoUploadIds);
 
     if (mediaData.some(media => media.type === 'video')) {
       log.info('Post media published after integrity verification', {
@@ -375,7 +406,7 @@ const createPost = async (req, res) => {
 
     // Add post to user's posts array
     await User.findByIdAndUpdate(authorId, {
-      $push: { posts: post._id }
+      $addToSet: { posts: post._id }
     });
 
     // Create mention notifications
@@ -404,11 +435,14 @@ const createPost = async (req, res) => {
     });
 
   } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ success: false, code: error.code || 'INVALID_VIDEO_UPLOAD', message: error.message });
     res.status(500).json({
       success: false,
       message: 'Failed to create post',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  } finally {
+    await finishPublication(publicationLease).catch(error => log.error('Post publication reservation cleanup failed', { postId: String(publicationLease?.postId || ''), error: String(error?.code || 'DATABASE_ERROR') }));
   }
 };
 
@@ -794,7 +828,7 @@ const toggleLike = async (req, res) => {
       data: {
         likeCount: uniqueLikeCount,
         isLiked,
-        post: await resolveClientMediaPayload(formatPostDTO(finalPost, req.user && req.user.userType === 'guest', authorId?.toString?.() === userId.toString()))
+        post: await resolveClientMediaPayload(formatPostDTO(finalPost, req.user && req.user.userType === 'guest', authorId?.toString?.() === userId.toString(), userId))
       }
     });
 
@@ -1346,7 +1380,7 @@ const getSavedPosts = async (req, res) => {
     const total = orderedPosts.length;
     const pageItems = orderedPosts.slice(skip, skip + limit);
     const deliveredPosts = await resolveClientMediaPayload(pageItems.map(({ post, savedAt }) => ({
-      ...formatPostDTO(post, false, post.author?._id?.toString() === userId.toString()),
+      ...formatPostDTO(post, false, post.author?._id?.toString() === userId.toString(), userId),
       isSaved: true,
       savedAt
     })));
@@ -1395,7 +1429,7 @@ const getLikedPosts = async (req, res) => {
     const savedIds = new Set((user?.savedPosts || []).map(item => item?.post?.toString()).filter(Boolean));
 
     const deliveredPosts = await resolveClientMediaPayload(posts.map(post => ({
-      ...formatPostDTO(post, false, post.author?._id?.toString() === userId.toString()),
+      ...formatPostDTO(post, false, post.author?._id?.toString() === userId.toString(), userId),
       isLiked: true,
       isSaved: savedIds.has(post._id.toString())
     })));

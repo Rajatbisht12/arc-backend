@@ -9,7 +9,7 @@
     "dev": "tsx watch src/launcher.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/launcher.js",
-    "start:clip-worker": "node dist/clip-worker.js",
+    "start:clip-worker": "node dist/video-worker-launcher.js",
     "typecheck": "tsc --noEmit",
     "test:auth-oauth-contracts": "node src/legacy-src/controllers/authController.oauth.test.js",
     "test:auth-onboarding": "node src/legacy-src/utils/onboardingValidation.test.js && node src/legacy-src/middleware/auth.profile-completion.test.js && node src/legacy-src/controllers/authController.oauth.test.js && node src/legacy-src/models/User.oauthPasswordSetup.test.js && node src/legacy-src/config/passport.oauth.test.js",

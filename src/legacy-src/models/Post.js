@@ -6,6 +6,7 @@ const postSchema = new mongoose.Schema({
     ref: 'User',
     required: [true, 'Post author is required']
   },
+  clientPostId: { type: String },
   content: {
     text: {
       type: String,
@@ -22,6 +23,7 @@ const postSchema = new mongoose.Schema({
       maxlength: [2000, 'Post content cannot exceed 2000 characters']
     },
     media: [{
+      uploadSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'VideoUploadSession' },
       type: {
         type: String,
         enum: ['image', 'video'],
@@ -83,6 +85,7 @@ const postSchema = new mongoose.Schema({
         attempts: { type: Number, min: 0 },
         processingStartedAt: Date,
         completedAt: Date,
+        outputBytes: mongoose.Schema.Types.Mixed,
         failedAt: Date,
         failureCode: String,
         leaseToken: { type: String, select: false },
@@ -329,6 +332,7 @@ const postSchema = new mongoose.Schema({
 });
 
 // Indexes for better performance
+postSchema.index({ author: 1, clientPostId: 1 }, { unique: true, partialFilterExpression: { clientPostId: { $type: 'string' } }, name: 'post_owner_client_unique' });
 postSchema.index({ author: 1, createdAt: -1 });
 postSchema.index({ postType: 1, createdAt: -1 });
 postSchema.index({ tags: 1 });

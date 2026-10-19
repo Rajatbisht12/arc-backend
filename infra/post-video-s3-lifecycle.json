@@ -1,0 +1,8 @@
+{
+  "Rules": [{
+    "ID": "abort-abandoned-post-video-multipart",
+    "Status": "Enabled",
+    "Filter": {"Prefix": "post-video-sources/"},
+    "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 2}
+  }]
+}

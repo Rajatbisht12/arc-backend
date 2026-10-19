@@ -986,6 +986,11 @@ const deleteAccount = async (req, res) => {
     }
 
     let competitionCleanup = { cleanupPending: false, failures: [] };
+    // Durable media cleanup marker; transient account suspension does not set it.
+    // Never delete objects inside an account-deletion HTTP request.
+    await require('../models/VideoUploadSession').updateMany({ owner: userId }, {
+      $set: { ownerDeletedAt: new Date() }
+    }).catch(error => log.error('Video account cleanup marker failed', { userId: String(userId), error: String(error) }));
     try {
       const { cleanupAccountCompetitionReferences } = require('../services/accountCompetitionCleanupService');
       competitionCleanup = await cleanupAccountCompetitionReferences({
