@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { body, param } from "express-validator";
 import rateLimit from "express-rate-limit";
-import videoUploadController from "../../legacy-src/controllers/videoUploadController";
-import { handleValidationErrors, publicOptionalAuth, postController, publicPostSeoController, protect, uploadFields, validateAchievementPostBody } from "./posts.legacy-adapters";
+import { handleValidationErrors, publicOptionalAuth, postController, publicPostSeoController, videoUploadController, protect, uploadFields, validateAchievementPostBody } from "./posts.legacy-adapters";
 
 const router = Router();
 
