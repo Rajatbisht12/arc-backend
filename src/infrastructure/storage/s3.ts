@@ -6,6 +6,11 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
   ListObjectsV2Command,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  ListPartsCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createHash } from "crypto";
@@ -19,7 +24,7 @@ import { env } from "../../config/env";
 import { logger } from "../../config/logger";
 
 type S3Sender = Pick<S3Client, "send">;
-const createStorageClient = (): S3Sender => new S3Client({ region: env.AWS_REGION });
+const createStorageClient = (): S3Sender => new S3Client({ region: env.AWS_REGION, requestChecksumCalculation: "WHEN_REQUIRED" });
 let s3: S3Sender = createStorageClient();
 
 const BUCKET = env.AWS_S3_BUCKET ?? "";
@@ -29,6 +34,8 @@ const PRIVATE_MEDIA_PREFIXES = [
   "gaming-social/messages/",
   "gaming-social/stories/",
   "gaming-social/audio/user-uploads/",
+  "post-video-sources/",
+  "post-video-playback/",
 ];
 const PUBLIC_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const PRIVATE_MEDIA_CACHE_CONTROL = "private, max-age=900, no-transform";
@@ -408,13 +415,12 @@ export async function deleteFile(publicId: string): Promise<void> {
   await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: publicId }));
 }
 
-const IMMUTABLE_MEDIA_CACHE_CONTROL = PUBLIC_IMMUTABLE_CACHE_CONTROL;
-
 export function contentTypeForMediaPath(filePath: string): string {
   const extension = filePath.toLowerCase().split(".").pop();
   if (extension === "m3u8") return "application/vnd.apple.mpegurl";
   if (extension === "m4s") return "video/iso.segment";
   if (extension === "mp4") return "video/mp4";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
   return "application/octet-stream";
 }
 
@@ -428,7 +434,7 @@ export async function downloadFile(publicId: string, destinationPath: string): P
   if (Number(response.ContentLength) !== fileStat.size) {
     throw storageIntegrityError(`Downloaded object length mismatch for ${publicId}`);
   }
-  if (response.ChecksumSHA256) {
+  if (response.ChecksumSHA256 && response.ChecksumType !== "COMPOSITE" && !/-\d+$/.test(response.ChecksumSHA256)) {
     const checksum = await digestFile(destinationPath);
     if (checksum.base64 !== response.ChecksumSHA256) {
       throw storageIntegrityError(`Downloaded object checksum mismatch for ${publicId}`);
@@ -448,7 +454,7 @@ export async function uploadMediaFile(sourcePath: string, publicId: string): Pro
     body: createReadStream(sourcePath),
     contentLength: fileStat.size,
     contentType,
-    cacheControl: IMMUTABLE_MEDIA_CACHE_CONTROL,
+    cacheControl: cacheControlForKey(publicId),
     checksum,
   });
   return {
@@ -483,6 +489,79 @@ export async function deletePrefix(prefix: string): Promise<number> {
     continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
   } while (continuationToken);
   return deleted;
+}
+
+const assertVideoSourceKey = (key: string): void => {
+  if (!/^post-video-sources\/[a-f0-9]{24}\/[a-f0-9]{24}\/source\.[a-z0-9]+$/.test(key)) {
+    throw new Error("Invalid post video source key");
+  }
+};
+
+/** Multipart APIs are server-keyed; neither object keys nor upload IDs come from clients. */
+export async function createVideoMultipart(key: string, contentType: string, sessionId: string): Promise<string> {
+  assertBucket(); assertVideoSourceKey(key);
+  const result = await s3.send(new CreateMultipartUploadCommand({
+    Bucket: BUCKET, Key: key, ContentType: contentType,
+    CacheControl: "private, no-store", ServerSideEncryption: "AES256",
+    Metadata: { "upload-session": sessionId },
+  }));
+  if (!result.UploadId) throw new Error("S3 did not create a multipart upload");
+  return result.UploadId;
+}
+
+export async function presignVideoPart(key: string, uploadId: string, partNumber: number, size: number): Promise<string> {
+  assertBucket(); assertVideoSourceKey(key);
+  return getSignedUrl(s3 as S3Client, new UploadPartCommand({
+    Bucket: BUCKET, Key: key, UploadId: uploadId, PartNumber: partNumber, ContentLength: size,
+  }), { expiresIn: 900, signableHeaders: new Set(["content-length"]) });
+}
+
+export async function listVideoParts(key: string, uploadId: string): Promise<Array<{partNumber: number; size: number; etag: string}>> {
+  assertBucket(); assertVideoSourceKey(key);
+  const parts: Array<{partNumber: number; size: number; etag: string}> = [];
+  let marker: string | undefined;
+  do {
+    const result = await s3.send(new ListPartsCommand({ Bucket: BUCKET, Key: key, UploadId: uploadId, PartNumberMarker: marker }));
+    for (const part of result.Parts || []) {
+      if (part.PartNumber && part.ETag) parts.push({ partNumber: part.PartNumber, size: Number(part.Size), etag: part.ETag });
+    }
+    marker = result.IsTruncated ? result.NextPartNumberMarker : undefined;
+  } while (marker);
+  return parts;
+}
+
+export async function completeVideoMultipart(key: string, uploadId: string, parts: Array<{partNumber: number; etag: string}>): Promise<void> {
+  assertBucket(); assertVideoSourceKey(key);
+  await s3.send(new CompleteMultipartUploadCommand({ Bucket: BUCKET, Key: key, UploadId: uploadId,
+    MultipartUpload: { Parts: parts.map(part => ({ PartNumber: part.partNumber, ETag: part.etag })) },
+  }));
+}
+
+export async function abortVideoMultipart(key: string, uploadId: string): Promise<void> {
+  assertBucket(); assertVideoSourceKey(key);
+  try { await s3.send(new AbortMultipartUploadCommand({ Bucket: BUCKET, Key: key, UploadId: uploadId })); }
+  catch (error) { if ((error as { name?: string }).name !== "NoSuchUpload") throw error; }
+}
+
+export async function headVideoSource(key: string): Promise<{ size: number; sessionId: string; contentType: string }> {
+  assertBucket(); assertVideoSourceKey(key);
+  const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
+  return { size: Number(head.ContentLength), sessionId: String(head.Metadata?.["upload-session"] || ""), contentType: String(head.ContentType || "") };
+}
+
+export async function readVideoManifest(key: string): Promise<string> {
+  assertBucket();
+  if (!/^post-video-playback\/[a-f0-9]{24}\/[a-f0-9]{24}\/[a-zA-Z0-9_-]+\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_.-]+\.m3u8$/.test(key)) throw new Error("Invalid playback manifest key");
+  const response = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+  if (Number(response.ContentLength) > 1024 * 1024) throw new Error("Playback manifest exceeds size limit");
+  let bytes = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of response.Body as Readable) {
+    const buffer = Buffer.from(chunk); bytes += buffer.length;
+    if (bytes > 1024 * 1024) throw new Error("Playback manifest exceeds size limit");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 export async function uploadMultipleFiles(

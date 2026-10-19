@@ -1,6 +1,7 @@
-import { Worker, type Job } from "bullmq";
+import { Queue, Worker, type Job } from "bullmq";
 import mongoose from "mongoose";
 import path from "path";
+import { createServer } from 'http';
 import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { connectMongo } from "./infrastructure/database/mongodb";
@@ -18,8 +19,13 @@ const connection = {
 type ClipTranscodingService = {
   processClipTranscodeJob: (data: Record<string, unknown>) => Promise<unknown>;
 };
+type VideoUploadService = { processVideoUploadJob: (data: Record<string, unknown>) => Promise<unknown> };
 
 const processJob = async (job: Job) => {
+  if (job.name === 'process-upload') {
+    const service = require(path.join(backendRootPath, 'services', 'videoUploadService.js')) as VideoUploadService;
+    return service.processVideoUploadJob({ ...job.data, workerJobId: String(job.id || '') });
+  }
   if (job.name !== "transcode-hls") throw new Error(`Unknown clip video job: ${job.name}`);
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const service = require(path.join(backendRootPath, "services", "clipTranscodingService.js")) as ClipTranscodingService;
@@ -32,8 +38,28 @@ const bootstrap = async () => {
   const worker = new Worker("clip-video", processJob, {
     connection,
     concurrency: env.CLIP_HLS_WORKER_CONCURRENCY,
-    lockDuration: 120000
+    lockDuration: 120000,
+    maxStalledCount: 2,
   });
+  const queue = new Queue('clip-video', { connection });
+  const metricsTimer = setInterval(() => {
+    void queue.getJobCounts('waiting', 'active', 'delayed', 'failed').then(counts => {
+      console.info(JSON.stringify({ event: 'video_queue', ...counts }));
+    }).catch(() => logger.warn('Video queue metrics unavailable'));
+  }, 30000);
+  metricsTimer.unref();
+  worker.on('stalled', jobId => logger.warn('Video processing job stalled', { jobId }));
+  // This liveness/readiness endpoint has no public load balancer. ECS probes
+  // it locally; Redis disconnects make readiness fail until consumption resumes.
+  const health = createServer(async (_req, res) => {
+    try {
+      const client = await worker.client;
+      await client.ping();
+      res.statusCode = worker.isRunning() ? 200 : 503;
+      res.end(res.statusCode === 200 ? 'ready' : 'stopped');
+    } catch { res.statusCode = 503; res.end('queue unavailable'); }
+  });
+  health.listen(env.VIDEO_WORKER_HEALTH_PORT, '0.0.0.0');
   worker.on("ready", () => logger.info("Clip HLS worker ready", { concurrency: env.CLIP_HLS_WORKER_CONCURRENCY }));
   worker.on("completed", job => logger.info("Clip HLS job completed", { jobId: job.id }));
   worker.on("failed", (job, error) => logger.error("Clip HLS job failed", {
@@ -46,7 +72,10 @@ const bootstrap = async () => {
 
   const shutdown = async (signal: string) => {
     logger.info(`${signal} received, stopping Clip HLS worker`);
+    clearInterval(metricsTimer);
     await worker.close();
+    await queue.close();
+    await new Promise<void>(resolve => health.close(() => resolve()));
     await mongoose.disconnect();
     process.exit(0);
   };

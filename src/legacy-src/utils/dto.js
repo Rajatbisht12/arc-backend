@@ -158,6 +158,10 @@ const formatPostDTO = (post, isGuest = false, isAuthor = false, viewerId = null)
     ? post.toObject({ virtuals: true })
     : JSON.parse(JSON.stringify(post));
   const contentOwnerId = dto.author?._id || dto.author;
+  if (dto.content?.media?.some(media => media.uploadSessionId)) {
+    // Enumerable symbols survive DTO spreads but never serialize into JSON.
+    Object.defineProperty(dto, Symbol.for('squadhunt.postVideoViewer'), { enumerable: true, value: String(viewerId || (isAuthor ? contentOwnerId : '') || '') });
+  }
 
   // Stored URLs remain stable evidence of the uploaded S3 object. At response
   // time, route only public post/Clip media through the configured CDN. This

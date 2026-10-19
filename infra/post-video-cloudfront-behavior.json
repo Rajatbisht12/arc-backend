@@ -1,0 +1,9 @@
+{
+  "PathPattern": "post-video-playback/*",
+  "TargetOriginId": "REPLACE_WITH_EXISTING_S3_OAC_ORIGIN_ID",
+  "ViewerProtocolPolicy": "https-only",
+  "AllowedMethods": {"Quantity": 3, "Items": ["GET", "HEAD", "OPTIONS"], "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}},
+  "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+  "TrustedKeyGroups": {"Enabled": true, "Quantity": 1, "Items": ["REPLACE_WITH_TRUSTED_PUBLIC_KEY_GROUP_ID"]},
+  "Compress": false
+}

@@ -1,0 +1,9 @@
+{
+  "CORSRules": [{
+    "AllowedOrigins": ["https://squadhunt.com", "https://www.squadhunt.com", "http://localhost:3000"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["content-type", "content-length", "range", "x-amz-*"],
+    "ExposeHeaders": ["ETag", "Content-Length", "Content-Range", "Accept-Ranges", "x-amz-checksum-sha256"],
+    "MaxAgeSeconds": 3600
+  }]
+}

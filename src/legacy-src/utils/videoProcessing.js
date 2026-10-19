@@ -10,8 +10,9 @@ const FFMPEG_TIMEOUT_MS = 90_000;
 const MAX_FFMPEG_STDERR_BYTES = 64 * 1024;
 const VIDEO_DECODE_SAMPLE_SECONDS = 3;
 
-const runFfmpeg = (args) => new Promise((resolve, reject) => {
-  const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+const runFfmpeg = (args, { signal } = {}) => new Promise((resolve, reject) => {
+  if (signal?.aborted) { reject(signal.reason || new Error('Video processing cancelled')); return; }
+  const child = spawn('ffmpeg', ['-protocol_whitelist', 'file', ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   let settled = false;
 
@@ -19,6 +20,7 @@ const runFfmpeg = (args) => new Promise((resolve, reject) => {
     if (settled) return;
     settled = true;
     clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
     callback(value);
   };
 
@@ -28,6 +30,11 @@ const runFfmpeg = (args) => new Promise((resolve, reject) => {
     error.code = 'FFMPEG_TIMEOUT';
     settle(reject, error);
   }, FFMPEG_TIMEOUT_MS);
+  const abort = () => {
+    child.kill('SIGKILL');
+    settle(reject, signal.reason || new Error('Video processing cancelled'));
+  };
+  signal?.addEventListener('abort', abort, { once: true });
 
   child.stderr.on('data', (chunk) => {
     if (Buffer.byteLength(stderr) >= MAX_FFMPEG_STDERR_BYTES) return;
@@ -50,6 +57,7 @@ const runFfmpeg = (args) => new Promise((resolve, reject) => {
 
 const runFfprobe = (inputPath) => new Promise((resolve, reject) => {
   const child = spawn('ffprobe', [
+    '-protocol_whitelist', 'file',
     '-v', 'error',
     '-show_entries', 'format=duration',
     '-of', 'default=noprint_wrappers=1:nokey=1',
@@ -86,8 +94,10 @@ const runFfprobe = (inputPath) => new Promise((resolve, reject) => {
 
 const runVideoMetadataProbe = (inputPath) => new Promise((resolve, reject) => {
   const child = spawn('ffprobe', [
+    '-protocol_whitelist', 'file',
+    '-format_whitelist', 'mov,matroska,avi,asf,mpeg,mpegts,ogg,flv,rm,mxf',
     '-v', 'error',
-    '-show_entries', 'format=format_name,duration,size,bit_rate:stream=index,codec_type,codec_name,width,height,duration,bit_rate:stream_tags=rotate:stream_side_data=rotation',
+    '-show_entries', 'format=format_name,duration,size,bit_rate:stream=index,codec_type,codec_name,width,height,duration,bit_rate,avg_frame_rate:stream_tags=rotate:stream_side_data=rotation',
     '-of', 'json',
     inputPath,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -122,6 +132,8 @@ const runVideoMetadataProbe = (inputPath) => new Promise((resolve, reject) => {
       let height = Number(stream.height);
       if (Math.abs(rotation) % 180 === 90) [width, height] = [height, width];
       const duration = Number(parsed?.format?.duration);
+      const [frameNumerator, frameDenominator] = String(stream.avg_frame_rate || '0/1').split('/').map(Number);
+      const frameRate = frameDenominator > 0 ? frameNumerator / frameDenominator : 0;
       if (code !== 0 || !Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
         reject(new Error(stderr || 'Video dimensions could not be read'));
         return;
@@ -133,6 +145,8 @@ const runVideoMetadataProbe = (inputPath) => new Promise((resolve, reject) => {
         videoCodec: String(stream.codec_name || ''),
         audioCodec: audioStream ? String(audioStream.codec_name || '') : null,
         hasAudio: Boolean(audioStream),
+        rotation,
+        ...(Number.isFinite(frameRate) && frameRate > 0 ? { frameRate } : {}),
         bitRate: Number(stream.bit_rate) || Number(parsed?.format?.bit_rate) || undefined,
         ...(Number.isFinite(duration) && duration > 0 ? { duration } : {}),
       });
@@ -152,7 +166,7 @@ const mediaIntegrityError = (message, cause) => {
   return error;
 };
 
-const runPacketIntegrityScan = inputPath => runFfmpeg([
+const runPacketIntegrityScan = (inputPath, signal) => runFfmpeg([
   '-nostdin',
   '-hide_banner',
   '-loglevel', 'error',
@@ -165,9 +179,9 @@ const runPacketIntegrityScan = inputPath => runFfmpeg([
   '-dn',
   '-f', 'null',
   '-',
-]);
+], { signal });
 
-const runDecodeSample = (inputPath, startSeconds = 0) => runFfmpeg([
+const runDecodeSample = (inputPath, startSeconds = 0, signal) => runFfmpeg([
   '-nostdin',
   '-hide_banner',
   '-loglevel', 'error',
@@ -181,7 +195,7 @@ const runDecodeSample = (inputPath, startSeconds = 0) => runFfmpeg([
   '-dn',
   '-f', 'null',
   '-',
-]);
+], { signal });
 
 /**
  * ffprobe alone cannot detect a fast-start MP4 whose mdat payload was cut off:
@@ -189,15 +203,25 @@ const runDecodeSample = (inputPath, startSeconds = 0) => runFfmpeg([
  * packet and decode samples at both ends so truncated tails and invalid codecs
  * are rejected before any object becomes public.
  */
-const validateVideoFile = async (inputPath, { expectedDuration } = {}) => {
+const validateVideoFile = async (inputPath, { expectedDuration, signal, maxDurationSeconds, maxDimension, maxPixels } = {}) => {
+  signal?.throwIfAborted();
   const metadata = await runVideoMetadataProbe(inputPath);
   if (!Number.isFinite(metadata.duration) || metadata.duration <= 0 || !metadata.videoCodec) {
     throw new Error('Video stream metadata is incomplete');
   }
-  await runPacketIntegrityScan(inputPath);
-  await runDecodeSample(inputPath, 0);
+  // Apply worker resource policy before scanning packets or decoding samples.
+  // Legacy callers retain their existing limits unless they opt into a bound.
+  if ((maxDurationSeconds && metadata.duration > maxDurationSeconds)
+    || (maxDimension && Math.max(metadata.width, metadata.height) > maxDimension)
+    || (maxPixels && metadata.width * metadata.height > maxPixels)) {
+    const error = new Error('Video exceeds processing duration or resolution limits');
+    error.code = 'VIDEO_RESOURCE_LIMIT';
+    throw error;
+  }
+  await runPacketIntegrityScan(inputPath, signal);
+  await runDecodeSample(inputPath, 0, signal);
   if (metadata.duration > VIDEO_DECODE_SAMPLE_SECONDS * 2) {
-    await runDecodeSample(inputPath, Math.max(0, metadata.duration - VIDEO_DECODE_SAMPLE_SECONDS));
+    await runDecodeSample(inputPath, Math.max(0, metadata.duration - VIDEO_DECODE_SAMPLE_SECONDS), signal);
   }
   if (Number.isFinite(expectedDuration) && expectedDuration > 0) {
     const tolerance = Math.max(0.5, Math.min(2, expectedDuration * 0.02));

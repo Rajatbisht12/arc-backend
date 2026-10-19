@@ -27,11 +27,12 @@ let _enqueueBroadcast = null;
 let _enqueueBroadcastReceipts = null;
 let _removeBroadcastJobs = null;
 let _enqueueClipTranscode = null;
+let _enqueueVideoUpload = null;
 
 /**
  * Inject the queue functions from TypeScript land.
  */
-const setQueueFunctions = ({ enqueueEmail, enqueueAutomatedEmail, enqueueBulkNotifications, enqueuePushReceipts, enqueuePushSend, enqueueBroadcast, enqueueBroadcastReceipts, removeBroadcastJobs, enqueueClipTranscode }) => {
+const setQueueFunctions = ({ enqueueEmail, enqueueAutomatedEmail, enqueueBulkNotifications, enqueuePushReceipts, enqueuePushSend, enqueueBroadcast, enqueueBroadcastReceipts, removeBroadcastJobs, enqueueClipTranscode, enqueueVideoUpload }) => {
   _enqueueEmail = enqueueEmail;
   _enqueueAutomatedEmail = enqueueAutomatedEmail;
   _enqueueBulkNotifications = enqueueBulkNotifications;
@@ -41,6 +42,16 @@ const setQueueFunctions = ({ enqueueEmail, enqueueAutomatedEmail, enqueueBulkNot
   _enqueueBroadcastReceipts = enqueueBroadcastReceipts;
   _removeBroadcastJobs = removeBroadcastJobs;
   _enqueueClipTranscode = enqueueClipTranscode;
+  _enqueueVideoUpload = enqueueVideoUpload;
+};
+
+const enqueueVideoUpload = async (sessionId, retryKey = '0') => {
+  if (!_enqueueVideoUpload) {
+    const error = new Error('Video processing queue is unavailable');
+    error.statusCode = 503;
+    throw error;
+  }
+  return _enqueueVideoUpload(sessionId, retryKey);
 };
 
 const enqueueAutomatedEmail = async (eventId) => {
@@ -259,5 +270,6 @@ module.exports = {
   enqueueBroadcast,
   enqueueBroadcastReceipts,
   removeBroadcastJobs,
-  enqueueClipTranscode
+  enqueueClipTranscode,
+  enqueueVideoUpload
 };

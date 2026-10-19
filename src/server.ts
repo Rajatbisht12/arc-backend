@@ -17,6 +17,9 @@ import {
   startBroadcastScheduler,
   stopBroadcastScheduler,
   enqueueClipTranscode,
+  enqueueVideoUpload,
+  startVideoUploadScheduler,
+  stopVideoUploadScheduler,
   startClipTranscodeScheduler,
   stopClipTranscodeScheduler
 } from "./infrastructure/jobs/queue";
@@ -35,6 +38,9 @@ const safeRequire = <T>(modulePath: string): T | null => {
 };
 
 const bootstrap = async () => {
+  if (env.POST_VIDEO_UPLOADS_ENABLED && env.CLIP_HLS_WORKER_ENABLED) {
+    throw new Error('New video uploads require a dedicated worker: set CLIP_HLS_WORKER_ENABLED=false on the API task');
+  }
   if (env.NODE_ENV === "production") {
     const apnsPreflight = safeRequire<{ assertConfigured?: () => unknown }>(
       path.join(backendRootPath, "services", "apnsVoipPushService.js")
@@ -90,10 +96,12 @@ const bootstrap = async () => {
     enqueueBroadcast,
     enqueueBroadcastReceipts,
     removeBroadcastJobs,
-    enqueueClipTranscode
+    enqueueClipTranscode,
+    enqueueVideoUpload
   });
   startBroadcastScheduler();
   startClipTranscodeScheduler();
+  startVideoUploadScheduler();
 
   const app = createApp();
   const httpServer = createServer(app);
@@ -180,6 +188,7 @@ const bootstrap = async () => {
     try {
       stopBroadcastScheduler();
       stopClipTranscodeScheduler();
+      stopVideoUploadScheduler();
       stopLegacyBackgroundJobs();
       callSessionService?.stopCallSessionSweeper?.();
       apnsVoipPushService?.stopApnsVoipPushSweeper?.();

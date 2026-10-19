@@ -8,7 +8,16 @@ const {
   buildRenditionLadder,
   buildVariantArgs,
   writeMasterPlaylist,
+  fallbackProfile,
 } = require('./clipHlsProcessing');
+
+test('fallback caps both display dimensions and video bitrate without upscaling', () => {
+  assert.deepEqual(fallbackProfile({ width: 2160, height: 3840, bitRate: 50_000_000 }), { width: 720, height: 1280, videoBitrate: 2_400_000 });
+  assert.deepEqual(fallbackProfile({ width: 240, height: 426, bitRate: 500_000 }), { width: 240, height: 426, videoBitrate: 500_000 });
+  const ultrawide = fallbackProfile({ width: 3840, height: 1080 });
+  assert.equal(ultrawide.width, 1280);
+  assert.equal(ultrawide.height, 360);
+});
 
 test('rendition ladder never upscales landscape or portrait sources', () => {
   const landscape = buildRenditionLadder({ width: 1920, height: 1080 });

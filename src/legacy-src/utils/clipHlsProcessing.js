@@ -4,6 +4,7 @@ const path = require('path');
 const { validateVideoFile } = require('./videoProcessing');
 
 const HLS_SEGMENT_SECONDS = 2;
+const FFMPEG_THREADS = String(Math.max(1, Math.min(4, Number(process.env.VIDEO_FFMPEG_THREADS) || 2)));
 const MAX_PROCESS_STDERR_BYTES = 128 * 1024;
 const TRANSCODE_TIMEOUT_MS = Math.max(
   60_000,
@@ -72,8 +73,9 @@ const buildRenditionLadder = ({ width, height, bitRate }) => {
   return renditions;
 };
 
-const runProcess = (command, args, { timeoutMs = TRANSCODE_TIMEOUT_MS } = {}) => new Promise((resolve, reject) => {
-  const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+const runProcess = (command, args, { timeoutMs = TRANSCODE_TIMEOUT_MS, signal } = {}) => new Promise((resolve, reject) => {
+  if (signal?.aborted) { reject(signal.reason || new Error('Video processing cancelled')); return; }
+  const child = spawn(command, ['-protocol_whitelist', 'file', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   let settled = false;
@@ -81,6 +83,7 @@ const runProcess = (command, args, { timeoutMs = TRANSCODE_TIMEOUT_MS } = {}) =>
     if (settled) return;
     settled = true;
     clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
     callback(value);
   };
   const timeout = setTimeout(() => {
@@ -89,6 +92,11 @@ const runProcess = (command, args, { timeoutMs = TRANSCODE_TIMEOUT_MS } = {}) =>
     error.code = 'CLIP_TRANSCODE_TIMEOUT';
     settle(reject, error);
   }, timeoutMs);
+  const abort = () => {
+    child.kill('SIGKILL');
+    settle(reject, signal.reason || new Error('Video processing cancelled'));
+  };
+  signal?.addEventListener('abort', abort, { once: true });
   child.stdout.on('data', chunk => {
     if (Buffer.byteLength(stdout) < MAX_PROCESS_STDERR_BYTES) stdout += chunk.toString();
   });
@@ -146,6 +154,7 @@ const buildVariantArgs = ({ inputPath, outputPath, segmentPattern, rendition, ha
   args.push(
     '-vf', `scale=${rendition.width}:${rendition.height}:flags=lanczos,setsar=1`,
     '-c:v', 'libx264',
+    '-threads', FFMPEG_THREADS,
     '-preset', String(process.env.CLIP_HLS_X264_PRESET || 'veryfast'),
     '-profile:v', 'main',
     '-pix_fmt', 'yuv420p',
@@ -224,21 +233,43 @@ const validateVariant = async (variantDir, expected) => {
   }
 };
 
-const generateFastStartFallback = async ({ inputPath, outputPath }) => {
+const fallbackProfile = (metadata) => {
+  const factor = Math.min(1, 720 / Math.min(metadata.width, metadata.height), 1280 / Math.max(metadata.width, metadata.height));
+  return {
+    width: Math.max(2, Math.floor(metadata.width * factor / 2) * 2),
+    height: Math.max(2, Math.floor(metadata.height * factor / 2) * 2),
+    videoBitrate: Math.min(2_400_000, Math.max(300_000, Number(metadata.bitRate) || 2_400_000)),
+  };
+};
+
+// Progressive fallback is a delivery encode, never a stream copy of the source.
+const generateFastStartFallback = async ({ inputPath, outputPath, metadata, signal }) => {
+  const profile = fallbackProfile(metadata || await validateVideoFile(inputPath));
   await runProcess('ffmpeg', [
     '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
     '-i', inputPath,
     '-map', '0:v:0', '-map', '0:a:0?',
-    '-c', 'copy',
+    '-vf', `scale=${profile.width}:${profile.height}:flags=lanczos,setsar=1`,
+    '-c:v', 'libx264', '-threads', FFMPEG_THREADS,
+    '-preset', String(process.env.CLIP_HLS_X264_PRESET || 'veryfast'),
+    '-profile:v', 'main', '-pix_fmt', 'yuv420p',
+    '-b:v', String(profile.videoBitrate), '-maxrate', String(profile.videoBitrate),
+    '-bufsize', String(profile.videoBitrate * 2),
+    '-force_key_frames', `expr:gte(t,n_forced*${HLS_SEGMENT_SECONDS})`,
+    '-c:a', 'aac', '-b:a', '96000', '-ac', '2',
     '-movflags', '+faststart',
     '-sn', '-dn',
     outputPath,
-  ]);
+  ], { signal });
   return outputPath;
 };
 
-const generateClipHls = async ({ inputPath, outputDir }) => {
-  const metadata = await validateVideoFile(inputPath);
+const generateClipHls = async ({ inputPath, outputDir, signal }) => {
+  signal?.throwIfAborted();
+  const metadata = await validateVideoFile(inputPath, { signal,
+    maxDurationSeconds: Number(process.env.POST_VIDEO_MAX_DURATION_SECONDS) || 3600,
+    maxDimension: 8192, maxPixels: 33_554_432,
+  });
   const ladder = buildRenditionLadder(metadata);
   await fs.mkdir(outputDir, { recursive: true });
   const renditions = [];
@@ -252,7 +283,8 @@ const generateClipHls = async ({ inputPath, outputDir }) => {
       segmentPattern: path.join(variantDir, 'segment_%05d.m4s'),
       rendition,
       hasAudio: metadata.hasAudio,
-    }));
+    }), { signal });
+    signal?.throwIfAborted();
     await validateVariant(variantDir, {
       width: rendition.width,
       height: rendition.height,
@@ -261,23 +293,37 @@ const generateClipHls = async ({ inputPath, outputDir }) => {
     renditions.push({ ...rendition, hasAudio: metadata.hasAudio });
   }
   await writeMasterPlaylist(outputDir, renditions);
-  let fallbackPath = null;
-  try {
-    fallbackPath = await generateFastStartFallback({
-      inputPath,
-      outputPath: path.join(outputDir, 'fallback.mp4'),
-    });
-    await validateVideoFile(fallbackPath, { expectedDuration: metadata.duration });
-  } catch {
-    // The original upload remains a valid progressive fallback. A remux
-    // failure must not discard otherwise valid adaptive output.
-  }
-  return { metadata, renditions, fallbackPath };
+  const fallbackPath = await generateFastStartFallback({
+    inputPath, outputPath: path.join(outputDir, 'fallback.mp4'), metadata, signal,
+  });
+  await validateVideoFile(fallbackPath, { expectedDuration: metadata.duration, signal });
+  const thumbnailPath = path.join(outputDir, 'thumbnail.jpg');
+  await runProcess('ffmpeg', [
+    '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath,
+    '-frames:v', '1', '-vf', "scale='min(640,iw)':-2,setsar=1", '-q:v', '3',
+    '-threads', FFMPEG_THREADS, thumbnailPath,
+  ], { signal });
+  const fallbackBytes = (await fs.stat(fallbackPath)).size;
+  const thumbnailBytes = (await fs.stat(thumbnailPath)).size;
+  if (!fallbackBytes || !thumbnailBytes) throw new Error('Required video derivative is empty');
+  let totalBytes = 0;
+  const sumFiles = async directory => {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) await sumFiles(file);
+      else if (entry.isFile()) totalBytes += (await fs.stat(file)).size;
+    }
+  };
+  await sumFiles(outputDir);
+  return { metadata, renditions, fallbackPath, thumbnailPath,
+    outputBytes: { fallback: fallbackBytes, thumbnail: thumbnailBytes,
+      hls: totalBytes - fallbackBytes - thumbnailBytes, total: totalBytes } };
 };
 
 module.exports = {
   HLS_SEGMENT_SECONDS,
   STANDARD_RENDITIONS,
+  fallbackProfile,
   TRANSCODE_TIMEOUT_MS,
   buildRenditionLadder,
   buildVariantArgs,

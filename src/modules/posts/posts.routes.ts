@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { body, param } from "express-validator";
 import rateLimit from "express-rate-limit";
+import videoUploadController from "../../legacy-src/controllers/videoUploadController";
 import { handleValidationErrors, publicOptionalAuth, postController, publicPostSeoController, protect, uploadFields, validateAchievementPostBody } from "./posts.legacy-adapters";
 
 const router = Router();
@@ -10,7 +11,7 @@ const createPostValidation = [
   body().custom((_, { req }) => {
     const hasText = req.body.text != null && String(req.body.text).trim().length > 0;
     const files = req.files as undefined | unknown[] | Record<string, unknown[]>;
-    const hasMedia = Array.isArray(files) ? files.length > 0 : Boolean(files?.media?.length);
+    const hasMedia = (Array.isArray(files) ? files.length > 0 : Boolean(files?.media?.length)) || Boolean(req.body.videoUploadIds);
     if (!hasText && !hasMedia) {
       throw new Error("Post must have some text or at least one image/video");
     }
@@ -59,6 +60,20 @@ const postAvailabilityLimiter = rateLimit({
   message: { success: false, message: "Too many post lookup requests. Try again later." }
 });
 
+const videoUploadLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false, keyGenerator: (req) => String((req as typeof req & { user?: { _id?: string } }).user?._id || "anonymous"), message: { success: false, code: "UPLOAD_RATE_LIMIT", message: "Too many upload requests. Try again shortly." } });
+// Five concurrent videos may each poll processing every two seconds. Keep
+// read-only polling separate so it cannot consume the part/completion budget.
+const videoStatusLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, standardHeaders: true, legacyHeaders: false, keyGenerator: (req) => String((req as typeof req & { user?: { _id?: string } }).user?._id || "anonymous"), message: { success: false, code: "UPLOAD_RATE_LIMIT", message: "Too many upload status requests. Try again shortly." } });
+const videoCreateLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, keyGenerator: (req) => String((req as typeof req & { user?: { _id?: string } }).user?._id || "anonymous"), message: { success: false, code: "UPLOAD_RATE_LIMIT", message: "Too many new video uploads. Try again later." } });
+router.get("/video-uploads/policy", protect, videoUploadController.policy);
+router.get("/video-playback/*", videoUploadController.playbackManifest);
+router.post("/video-uploads", protect, videoCreateLimiter, videoUploadController.create);
+router.get("/video-uploads/:id", protect, videoStatusLimiter, videoUploadController.get);
+router.get("/video-uploads/:id/parts", protect, videoStatusLimiter, videoUploadController.listParts);
+router.post("/video-uploads/:id/parts", protect, videoUploadLimiter, videoUploadController.signParts);
+router.post("/video-uploads/:id/complete", protect, videoUploadLimiter, videoUploadController.complete);
+router.post("/video-uploads/:id/retry", protect, videoUploadLimiter, videoUploadController.retry);
+router.delete("/video-uploads/:id", protect, videoUploadLimiter, videoUploadController.cancel);
 router.post("/", protect, uploadFields([{ name: "media", maxCount: 5 }, { name: "cover", maxCount: 1 }]), createPostValidation, handleValidationErrors, postController.createPost);
 router.get("/", publicOptionalAuth, postController.getPosts);
 router.get("/clips", publicOptionalAuth, postController.getClips);

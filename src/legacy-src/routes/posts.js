@@ -4,6 +4,8 @@ const { protect, publicOptionalAuth } = require('../middleware/auth');
 const { uploadFields } = require('../middleware/upload');
 const { handleValidationErrors } = require('../middleware/validation');
 const { validateAchievementPostBody } = require('../utils/achievementPostPolicy');
+const videoUploadController = require('../controllers/videoUploadController');
+const rateLimit = require('express-rate-limit');
 const {
   createPost,
   getPosts,
@@ -37,9 +39,9 @@ const createPostValidation = [
   body()
     .custom((value, { req }) => {
       const hasText = req.body.text != null && String(req.body.text).trim().length > 0;
-      const hasMedia = Array.isArray(req.files)
+      const hasMedia = Boolean(req.body.videoUploadIds) || (Array.isArray(req.files)
         ? req.files.length > 0
-        : Boolean(req.files?.media?.length);
+        : Boolean(req.files?.media?.length));
       if (!hasText && !hasMedia) {
         throw new Error('Post must have some text or at least one image/video');
       }
@@ -98,6 +100,18 @@ const interactionValidation = [
 ];
 
 // Routes
+const uploadLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false, keyGenerator: req => String(req.user?._id || 'anonymous') });
+const videoStatusLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, standardHeaders: true, legacyHeaders: false, keyGenerator: req => String(req.user?._id || 'anonymous') });
+const createVideoLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, keyGenerator: req => String(req.user?._id || 'anonymous') });
+router.get('/video-uploads/policy', protect, videoUploadController.policy);
+router.get('/video-playback/*', videoUploadController.playbackManifest);
+router.post('/video-uploads', protect, createVideoLimiter, videoUploadController.create);
+router.get('/video-uploads/:id', protect, videoStatusLimiter, videoUploadController.get);
+router.get('/video-uploads/:id/parts', protect, videoStatusLimiter, videoUploadController.listParts);
+router.post('/video-uploads/:id/parts', protect, uploadLimiter, videoUploadController.signParts);
+router.post('/video-uploads/:id/complete', protect, uploadLimiter, videoUploadController.complete);
+router.post('/video-uploads/:id/retry', protect, uploadLimiter, videoUploadController.retry);
+router.delete('/video-uploads/:id', protect, uploadLimiter, videoUploadController.cancel);
 router.post('/', protect, uploadFields([{ name: 'media', maxCount: 5 }, { name: 'cover', maxCount: 1 }]), createPostValidation, handleValidationErrors, createPost);
 router.get('/', publicOptionalAuth, getPosts);
 router.get('/clips', publicOptionalAuth, getClips);

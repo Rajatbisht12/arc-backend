@@ -894,7 +894,7 @@ const getUser = async (req, res) => {
     }
     if (!isSelf) delete profileDto.privacySettings;
     const deliveredRecentPosts = await resolveClientMediaPayload(
-      await attachIsSavedFlags(recentPosts.map(p => formatPostDTO(p, isGuest, isSelf)), req.user)
+      await attachIsSavedFlags(recentPosts.map(p => formatPostDTO(p, isGuest, isSelf, req.user?._id)), req.user)
     );
     const responseData = {
       success: true,
@@ -1586,7 +1586,7 @@ const getUserPosts = async (req, res) => {
 
     const isGuest = isGuestViewer;
     const postDtos = await resolveClientMediaPayload(await attachIsSavedFlags(
-      posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString())),
+      posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString(), req.user?._id)),
       req.user
     ));
 
@@ -1669,7 +1669,7 @@ const getUserClips = async (req, res) => {
 
     const isGuest = isGuestViewer;
     const postDtos = await resolveClientMediaPayload(await attachIsSavedFlags(
-      posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString())),
+      posts.map(p => formatPostDTO(p, isGuest, req.user && req.user._id && !isGuest && p.author && p.author._id && p.author._id.toString() === req.user._id.toString(), req.user?._id)),
       req.user
     ));
 

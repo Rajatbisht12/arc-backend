@@ -1,5 +1,6 @@
 const path = require('path');
 const { rewritePublicMediaUrl } = require('./mediaDelivery');
+const { normalizedPlaybackKey, resolvePlaybackKey } = require('./postVideoDelivery');
 
 // These prefixes contain content whose visibility is decided by an
 // authenticated API query. They must never be converted to an unsigned CDN
@@ -76,14 +77,15 @@ const resolveClientMediaPayload = async (
     return signedByKey.get(key);
   };
 
-  const visit = async (node) => {
-    if (typeof node === 'string') return rewritePublicMediaUrl(node, environment);
+  const visit = async (node, inheritedViewer = '') => {
+    if (typeof node === 'string') return normalizedPlaybackKey(node) ? resolvePlaybackKey(node, environment, inheritedViewer) : rewritePublicMediaUrl(node, environment);
     if (!node || typeof node !== 'object' || node instanceof Date || Buffer.isBuffer(node)) return node;
     if (seen.has(node)) return node;
     seen.add(node);
+    const playbackViewer = node[Symbol.for('squadhunt.postVideoViewer')] ?? inheritedViewer;
 
     if (Array.isArray(node)) {
-      for (let index = 0; index < node.length; index += 1) node[index] = await visit(node[index]);
+      for (let index = 0; index < node.length; index += 1) node[index] = await visit(node[index], playbackViewer);
       return node;
     }
 
@@ -97,11 +99,12 @@ const resolveClientMediaPayload = async (
     }
 
     for (const [key, child] of Object.entries(node)) {
+      if (key === 'publicId' || key.endsWith('PublicId')) continue;
       if (key === 'url' || key === 'streamUrl' || key === 'publicId') {
-        if (typeof child === 'string' && !objectKey) node[key] = await visit(child);
+        if (typeof child === 'string' && !objectKey) node[key] = await visit(child, playbackViewer);
         continue;
       }
-      node[key] = await visit(child);
+      node[key] = await visit(child, playbackViewer);
     }
     return node;
   };

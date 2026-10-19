@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Dedicated SquadHunt video worker (review and deploy separately; no bucket mutation).
+Parameters:
+  Cluster:
+    Type: String
+  Image:
+    Type: String
+    Description: Immutable API-compatible image URI/digest
+  ExecutionRoleArn:
+    Type: String
+  TaskRoleArn:
+    Type: String
+    Description: Role with restricted source/output S3 access and existing runtime secrets access
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+  SecurityGroups:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 4
+  AlarmTopicArn:
+    Type: String
+    Description: Existing SNS operations topic
+Resources:
+  Logs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RetentionInDays: 30
+  Task:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: squadhunt-video-worker
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '2048'
+      Memory: '4096'
+      EphemeralStorage:
+        SizeInGiB: 40
+      ExecutionRoleArn: !Ref ExecutionRoleArn
+      TaskRoleArn: !Ref TaskRoleArn
+      ContainerDefinitions:
+        - Name: video-worker
+          Image: !Ref Image
+          Essential: true
+          Command: [node, --max-old-space-size=1024, dist/video-worker-launcher.js]
+          StopTimeout: 120
+          Environment:
+            - {Name: NODE_ENV, Value: production}
+            - {Name: CLIP_HLS_ENABLED, Value: 'true'}
+            - {Name: CLIP_HLS_WORKER_ENABLED, Value: 'false'}
+            - {Name: CLIP_HLS_WORKER_CONCURRENCY, Value: '1'}
+            - {Name: CLIP_HLS_JOB_ATTEMPTS, Value: '3'}
+            - {Name: VIDEO_FFMPEG_THREADS, Value: '2'}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref Logs
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: video
+          HealthCheck:
+            Command: [CMD-SHELL, 'curl -fsS --max-time 4 http://127.0.0.1:5002/ || exit 1']
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 90
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref Task
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCount
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref Subnets
+          SecurityGroups: !Ref SecurityGroups
+  QueueMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref Logs
+      FilterPattern: '{ $.event = "video_queue" }'
+      MetricTransformations:
+        - MetricNamespace: SquadHunt/Video
+          MetricName: WaitingJobs
+          MetricValue: '$.waiting'
+  QueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: SquadHunt/Video
+      MetricName: WaitingJobs
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [!Ref AlarmTopicArn]
+  WorkerErrorMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref Logs
+      FilterPattern: '"Clip HLS job failed"'
+      MetricTransformations:
+        - MetricNamespace: SquadHunt/Video
+          MetricName: FailedAttempts
+          MetricValue: '1'
+          DefaultValue: 0
+  ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: SquadHunt/Video
+      MetricName: FailedAttempts
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopicArn]
+Outputs:
+  WorkerService:
+    Value: !GetAtt Service.Name
+  LogGroup:
+    Value: !Ref Logs

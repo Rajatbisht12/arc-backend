@@ -377,6 +377,49 @@ export const enqueueClipTranscode = async (
   );
 };
 
+// Only the independently deployed video worker consumes these jobs. Keep the
+// source bytes and all FFmpeg operations outside the API process.
+export const enqueueVideoUpload = async (sessionId: string, retryKey = '0'): Promise<void> => {
+  await clipVideoQueue.add('process-upload', { sessionId: String(sessionId) }, {
+    jobId: broadcastJobId('video-upload', String(sessionId), String(retryKey)),
+    attempts: env.CLIP_HLS_JOB_ATTEMPTS,
+    backoff: { type: 'exponential', delay: 30000 },
+    removeOnComplete: 2000,
+    removeOnFail: 5000,
+  });
+};
+
+type VideoUploadService = {
+  recoverVideoUploads: () => Promise<unknown>;
+  cleanupVideoUploads: () => Promise<unknown>;
+};
+const loadVideoUploadService = (): VideoUploadService => require(
+  path.join(backendRootPath, 'services', 'videoUploadService.js')
+) as VideoUploadService;
+let uploadRecoveryInFlight = false;
+let uploadRecoveryTimer: NodeJS.Timeout | null = null;
+export const startVideoUploadScheduler = (): void => {
+  if (uploadRecoveryTimer) return;
+  const recover = async () => {
+    if (uploadRecoveryInFlight) return;
+    uploadRecoveryInFlight = true;
+    try {
+      const service = loadVideoUploadService();
+      await service.recoverVideoUploads();
+      await service.cleanupVideoUploads();
+    } catch (error) {
+      logger.error('Video upload recovery failed', { error: String(error) });
+    } finally { uploadRecoveryInFlight = false; }
+  };
+  void recover();
+  uploadRecoveryTimer = setInterval(() => void recover(), 60000);
+  uploadRecoveryTimer.unref();
+};
+export const stopVideoUploadScheduler = (): void => {
+  if (uploadRecoveryTimer) clearInterval(uploadRecoveryTimer);
+  uploadRecoveryTimer = null;
+};
+
 /**
  * Enqueue an email to be sent in the background.
  */
