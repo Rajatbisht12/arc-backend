@@ -25,6 +25,7 @@ const { normalizeProfileSocialLinksUpdate } = require('../utils/profileSocialLin
 const { normalizeUsernameInput, validateUsernameFormat, isCoreReservedUsername, escapeUsernameRegex } = require('../utils/usernamePolicy');
 const { usernameOwnerFilter } = require('../services/usernameLookupService');
 const { resolveBioMentions } = require('../utils/bioMentions');
+const { passwordPolicyError, passwordPolicyResponse } = require('../utils/passwordPolicy');
 
 const INVALID_LOGIN_MESSAGE = 'Invalid email or password.';
 
@@ -202,11 +203,9 @@ const register = async (req, res) => {
       });
     }
 
-    if (typeof password !== 'string' || password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: 'Password must be at least 6 characters long'
-      });
+    const registrationPasswordError = passwordPolicyError(password);
+    if (registrationPasswordError) {
+      return res.status(400).json(passwordPolicyResponse(registrationPasswordError));
     }
 
     const usernameValidationError = validateUsernameCandidate(username);
@@ -404,11 +403,9 @@ const resetPasswordWithOtp = async (req, res) => {
       });
     }
 
-    if (String(newPassword).length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: 'New password must be at least 6 characters long'
-      });
+    const resetPasswordError = passwordPolicyError(newPassword);
+    if (resetPasswordError) {
+      return res.status(400).json(passwordPolicyResponse(resetPasswordError));
     }
 
     const cleanEmail = email.toLowerCase();
@@ -775,6 +772,11 @@ const changePassword = async (req, res) => {
       });
     }
 
+    const changePasswordError = passwordPolicyError(newPassword);
+    if (changePasswordError) {
+      return res.status(400).json(passwordPolicyResponse(changePasswordError));
+    }
+
     // Get user with password
     const user = await User.findById(req.user._id).select('+password');
 
@@ -1130,7 +1132,9 @@ const completeProfile = async (req, res) => {
     ({ userType, displayName, gender, dob, bio } = onboardingProfile.value);
 
     const passwordSetupRequired = user.requiresPasswordSetup === true;
-    const isSettingPassword = passwordSetupRequired || password !== undefined;
+    // Legacy provider clients may still send a password on profile completion.
+    // Never replace an already-established local password during that flow.
+    const isSettingPassword = passwordSetupRequired || (password !== undefined && !user.password);
     if (isSettingPassword) {
       if (!user.googleId && !user.appleId) {
         return res.status(409).json({
@@ -1139,12 +1143,9 @@ const completeProfile = async (req, res) => {
           error: 'INVALID_PASSWORD_SETUP_STATE'
         });
       }
-      if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
-        return res.status(400).json({
-          success: false,
-          message: 'Password must be between 6 and 128 characters',
-          error: 'PASSWORD_POLICY_FAILED'
-        });
+      const setupPasswordError = passwordPolicyError(password);
+      if (setupPasswordError) {
+        return res.status(400).json(passwordPolicyResponse(setupPasswordError));
       }
     }
 

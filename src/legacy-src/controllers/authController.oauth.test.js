@@ -77,7 +77,7 @@ const appleToken = (subject, email) => jwt.sign({
 }, applePrivateKey, { algorithm: 'RS256', expiresIn: '5m', keyid: 'test-apple-key' });
 stubModule('axios', { get: async (url) => ({ data: url.includes('appleid.apple.com') ? { keys: [appleJwk] } : googleProfile }) });
 
-const { completeGoogleProfile, completeProfile, googleTokenLogin, appleMobileLogin, register } = require('./authController');
+const { completeGoogleProfile, completeProfile, googleTokenLogin, appleMobileLogin, register, resetPasswordWithOtp, changePassword } = require('./authController');
 
 const createRes = () => ({
   statusCode: 200,
@@ -372,7 +372,7 @@ const dateYearsAgo = (years) => {
     user: { _id: 'google-user-id' },
     body: {
       userType: 'team', displayName: 'Completed Team', gender: 'female',
-      dob: validDob, password: 'valid-password'
+      dob: validDob, password: 'Example!9A'
     }
   }, missingUsernameRes);
   assert.strictEqual(missingUsernameRes.statusCode, 400);
@@ -399,7 +399,7 @@ const dateYearsAgo = (years) => {
       displayName: 'New Player',
       username: 'new_player',
       email: 'new-player@example.com',
-      password: 'password',
+      password: 'Example!9A',
       dob: validDob,
       otp: '123456'
     }
@@ -414,7 +414,7 @@ const dateYearsAgo = (years) => {
       displayName: 'New Player',
       username: 'new_player',
       email: 'new-player@example.com',
-      password: 'password',
+      password: 'Example!9A',
       gender: 'male',
       otp: '123456'
     }
@@ -430,7 +430,7 @@ const dateYearsAgo = (years) => {
       gender: 'other',
       username: 'young_player',
       email: 'young@example.com',
-      password: 'password',
+      password: 'Example!9A',
       dob: dateYearsAgo(10),
       otp: '123456'
     }
@@ -470,6 +470,19 @@ const dateYearsAgo = (years) => {
   assert.strictEqual(weakPasswordRes.statusCode, 400);
   assert.strictEqual(weakPasswordRes.body.error, 'PASSWORD_POLICY_FAILED');
 
+  const weakRegistrationRes = createRes();
+  await register({ body: { email: 'new-player@example.com', username: 'new_player', password: 'Password123' } }, weakRegistrationRes);
+  assert.strictEqual(weakRegistrationRes.statusCode, 400);
+  assert.strictEqual(weakRegistrationRes.body.code, 'PASSWORD_POLICY_FAILED');
+  const weakResetRes = createRes();
+  await resetPasswordWithOtp({ body: { email: 'new-player@example.com', otp: '123456', newPassword: 'Password123' } }, weakResetRes);
+  assert.strictEqual(weakResetRes.statusCode, 400);
+  assert.strictEqual(weakResetRes.body.code, 'PASSWORD_POLICY_FAILED');
+  const weakChangeRes = createRes();
+  await changePassword({ body: { currentPassword: 'old-value', newPassword: 'Password123' } }, weakChangeRes);
+  assert.strictEqual(weakChangeRes.statusCode, 400);
+  assert.strictEqual(weakChangeRes.body.code, 'PASSWORD_POLICY_FAILED');
+
   const completionRes = createRes();
   await completeProfile({
     user: { _id: 'google-user-id' },
@@ -480,7 +493,7 @@ const dateYearsAgo = (years) => {
       gender: 'other',
       dob: validDob,
       bio: 'Ready to compete',
-      password: 'oauth-local-password'
+      password: 'Example!9A'
     }
   }, completionRes);
 
@@ -489,7 +502,7 @@ const dateYearsAgo = (years) => {
   assert.deepStrictEqual(invalidatedUserIds, ['google-user-id']);
   assert.strictEqual(completionUser.userType, 'team');
   assert.strictEqual(completionUser.username, 'completed_team');
-  assert.strictEqual(passwordObservedBeforeSave, 'oauth-local-password');
+  assert.strictEqual(passwordObservedBeforeSave, 'Example!9A');
   assert.strictEqual(completionUser.password, '$2b$10$hashed-oauth-password');
   assert.strictEqual(completionUser.profile.displayName, 'Completed Team');
   assert.strictEqual(completionUser.profile.gender, 'other');
@@ -537,11 +550,11 @@ const dateYearsAgo = (years) => {
       displayName: 'Completed Player',
       gender: 'male',
       dob: validDob,
-      password: 'player-local-password'
+      password: 'Player!9A'
     }
   }, playerCompletionRes);
   assert.strictEqual(playerCompletionRes.statusCode, 200);
-  assert.strictEqual(passwordObservedBeforeSave, 'player-local-password');
+  assert.strictEqual(passwordObservedBeforeSave, 'Player!9A');
   assert.strictEqual(completionUser.password, '$2b$10$hashed-player-password');
   assert.strictEqual(completionUser.requiresPasswordSetup, false);
   assert.strictEqual(completionUser.needsProfileCompletion, false);

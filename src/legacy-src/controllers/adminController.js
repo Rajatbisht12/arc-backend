@@ -35,6 +35,7 @@ const mongoose = require('mongoose');
 const { createSystemNotification } = require('../utils/notificationService');
 const { EMAIL_INTENTS } = require('../utils/notificationChannelPolicy');
 const { enqueuePasswordSecurityEmail } = require('../utils/securityEmail');
+const { passwordPolicyError, passwordPolicyResponse } = require('../utils/passwordPolicy');
 const { invalidateUserCache } = require('../middleware/auth');
 const { invalidateProfileCache } = require('../utils/profileCache');
 const { evictPresenceAudience } = require('../utils/presencePrivacy');
@@ -1473,11 +1474,9 @@ const resetUserPassword = async (req, res) => {
     const { newPassword } = req.body;
 
     // Validate password
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: 'Password must be at least 6 characters long'
-      });
+    const resetPasswordError = passwordPolicyError(newPassword);
+    if (resetPasswordError) {
+      return res.status(400).json(passwordPolicyResponse(resetPasswordError));
     }
 
     // Find user
