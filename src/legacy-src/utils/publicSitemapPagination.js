@@ -3,7 +3,9 @@ const { getJson, setJson } = require('./redisCache');
 // Page boundaries are keyed by immutable Mongo IDs, rather than deep skip()
 // offsets. Each response re-reads live records and rechecks SEO eligibility.
 // A short boundary lifetime lets newly public older records enter the sitemap
-// without retaining withdrawn records in a public response cache.
+// without retaining withdrawn records in a public response cache. Redis and the
+// per-instance cache can each hold a cursor for up to 60 seconds, so a page
+// boundary can take up to roughly two minutes to settle after such a change.
 const PAGE_SIZE = 10000;
 const CURSOR_TTL_SECONDS = 60;
 const COUNT_TTL_SECONDS = 30;
