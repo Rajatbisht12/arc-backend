@@ -17,6 +17,7 @@ const { attachIsSavedFlags } = require('../utils/savedFlags');
 const { getJson, setJson } = require('../utils/redisCache');
 const { profileCacheKey, invalidateProfileCache } = require('../utils/profileCache');
 const { usernameOwnerFilter } = require('../services/usernameLookupService');
+const { isPublicProfileSeoEligible } = require('../utils/publicProfileSeoPolicy');
 const { resolveBioMentions } = require('../utils/bioMentions');
 const { publishPrivacySettingsUpdate, evictPresenceAudience, removePresenceSubscription } = require('../utils/presencePrivacy');
 const { invalidateUserCache } = require('../middleware/auth');
@@ -611,6 +612,7 @@ const getUser = async (req, res) => {
         success: true,
         data: {
           user: minimalProfile(user),
+          publicSeoEligible: isPublicProfileSeoEligible(user),
           recentPosts: [],
           relationship: {
             isFollowing: privacyRelationship.isFollower,
@@ -898,6 +900,9 @@ const getUser = async (req, res) => {
       success: true,
       data: {
         user: profileDto,
+        // Viewer access and public indexability are distinct: an approved
+        // follower or owner may see a private profile, but it has no SEO page.
+        publicSeoEligible: isPublicProfileSeoEligible(user),
         isBlockedByMe,
         recentPosts: deliveredRecentPosts,
         relationship: {
