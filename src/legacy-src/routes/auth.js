@@ -6,6 +6,12 @@ const passport = require('passport');
 const rateLimit = require('express-rate-limit');
 const { recordSuccessfulLogin } = require('../utils/userLoginAudit');
 const { resolvePublicWebOrigin } = require('../utils/publicWebUrl');
+const { passwordPolicyError } = require('../utils/passwordPolicy');
+const newPasswordRule = (field) => body(field).custom((value) => {
+  const error = passwordPolicyError(value);
+  if (error) throw new Error(error);
+  return true;
+});
 const {
   progressiveLoginLimiter,
   progressiveOtpLoginLimiter
@@ -62,9 +68,7 @@ const registerValidation = [
   body('email')
     .isEmail()
     .withMessage('Please provide a valid email'),
-  body('password')
-    .isLength({ min: 6 })
-    .withMessage('Password must be at least 6 characters long'),
+  newPasswordRule('password'),
   body('userType')
     .isIn(['player', 'team'])
     .withMessage('User type must be either player or team'),
@@ -105,9 +109,7 @@ const changePasswordValidation = [
   body('currentPassword')
     .notEmpty()
     .withMessage('Current password is required'),
-  body('newPassword')
-    .isLength({ min: 6 })
-    .withMessage('New password must be at least 6 characters long')
+  newPasswordRule('newPassword')
 ];
 
 const deleteAccountValidation = [

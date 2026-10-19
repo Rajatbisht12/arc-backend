@@ -1,5 +1,6 @@
 const assert = require('assert');
 const User = require('./User');
+const bcrypt = require('bcryptjs');
 const usernameRegistryService = require('../services/usernameRegistryService');
 // This contract exercises the password pre-save hook without a database.
 usernameRegistryService.claimForUser = async () => false;
@@ -51,6 +52,18 @@ const runPreSaveHooks = (document) => new Promise((resolve, reject) => {
     needsProfileCompletion: false
   });
   assert.strictEqual(legacyDocument.requiresPasswordSetup, false);
+
+  // A previously stored six-character credential is still comparable. The
+  // new complexity policy applies only when a password is created/replaced.
+  const oldPasswordUser = new User({
+    email: 'old-password-contract@example.com',
+    username: 'old_password_user',
+    password: await bcrypt.hash('abc123', 4),
+    userType: 'player',
+    profile: { displayName: 'Old Password User' }
+  });
+  assert.strictEqual(await oldPasswordUser.comparePassword('abc123'), true);
+  assert.strictEqual(await oldPasswordUser.comparePassword('wrong1'), false);
 
   console.log('OAuth password hashing and legacy-default contract tests passed');
 })().catch((error) => {

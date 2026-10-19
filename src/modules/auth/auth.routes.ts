@@ -14,6 +14,14 @@ import {
 } from "./auth.legacy-adapters";
 import { resolvePublicWebOrigin } from "../../legacy-src/utils/publicWebUrl";
 import { turnstileWebAuthGuard } from "../../infrastructure/security/turnstile";
+// The JS utility is also used by the legacy controller and admin reset path.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { passwordPolicyError } = require("../../legacy-src/utils/passwordPolicy") as { passwordPolicyError: (value: unknown) => string };
+const newPasswordRule = (field: string) => body(field).custom((value) => {
+  const error = passwordPolicyError(value);
+  if (error) throw new Error(error);
+  return true;
+});
 
 const router = Router();
 
@@ -39,7 +47,7 @@ const registerValidation = [
     .matches(/^[a-zA-Z0-9_]+$/)
     .withMessage("Username can only contain letters, numbers and underscores (no spaces)"),
   body("email").isEmail().withMessage("Please provide a valid email"),
-  body("password").isString().isLength({ min: 6, max: 128 }).withMessage("Password must be between 6 and 128 characters"),
+  newPasswordRule("password"),
   body("userType").isIn(["player", "team"]).withMessage("User type must be either player or team"),
   body("displayName")
     .isLength({ min: 1, max: 50 })
@@ -53,7 +61,7 @@ const registerValidation = [
 const loginValidation = [
   body("email").optional().isEmail().withMessage("Please provide a valid email"),
   body("username").optional().isLength({ min: 3, max: 20 }).withMessage("Username must be between 3 and 20 characters"),
-  body("password").isString().isLength({ min: 1, max: 128 }).withMessage("Password is required"),
+  body("password").isString().notEmpty().withMessage("Password is required"),
   body().custom((value) => {
     if (!value.email && !value.username) {
       throw new Error("Either email or username must be provided");
@@ -63,11 +71,11 @@ const loginValidation = [
 ];
 
 const changePasswordValidation = [
-  body("currentPassword").isString().isLength({ min: 1, max: 128 }).withMessage("Current password is required"),
-  body("newPassword").isString().isLength({ min: 6, max: 128 }).withMessage("New password must be between 6 and 128 characters")
+  body("currentPassword").isString().notEmpty().withMessage("Current password is required"),
+  newPasswordRule("newPassword")
 ];
 
-const deleteAccountValidation = [body("password").isString().isLength({ min: 1, max: 128 }).withMessage("Password is required to delete account")];
+const deleteAccountValidation = [body("password").isString().notEmpty().withMessage("Password is required to delete account")];
 const usernameLookupValidation = [
   query("username").isString().isLength({ min: 3, max: 20 }).matches(/^[a-zA-Z0-9_]+$/).withMessage("Invalid username")
 ];
@@ -84,7 +92,7 @@ const verifyOtpValidation = [
 ];
 const resetPasswordValidation = [
   ...verifyOtpValidation,
-  body("newPassword").isString().isLength({ min: 6, max: 128 }).withMessage("New password must be between 6 and 128 characters")
+  newPasswordRule("newPassword")
 ];
 const googleTokenValidation = [
   body("access_token").isString().isLength({ min: 1, max: 8192 }).withMessage("Invalid Google access token"),
@@ -97,17 +105,15 @@ const appleTokenValidation = [
   body("requirePasswordSetup").optional().isBoolean().withMessage("Invalid password setup request")
 ];
 const profileCompletionValidation = [
-  body("password")
-    .optional()
-    .isString()
-    .isLength({ min: 6, max: 128 })
-    .withMessage("Password must be between 6 and 128 characters")
+  // The controller applies the policy only when this OAuth account is actually
+  // setting a password. Older completion clients may send an ignored value.
+  body("password").optional().isString().withMessage("Password must be text")
 ];
 const passwordCheckValidation = [
   body("password")
     .isString()
-    .isLength({ min: 6, max: 128 })
-    .withMessage("Password must be between 6 and 128 characters")
+    .notEmpty()
+    .withMessage("Password is required")
 ];
 
 const passwordCheckLimiter = rateLimit({
