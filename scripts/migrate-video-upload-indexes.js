@@ -8,7 +8,7 @@ const apply = process.argv.includes('--apply'), verify = process.argv.includes('
 if (apply && verify) throw new Error('Use either --apply or --verify');
 const expected = () => [
   ...Session.schema.indexes().map(([key, options]) => ({ model: Session, key, options })),
-  ...Post.schema.indexes().filter(([, options]) => options.name === 'post_owner_client_unique').map(([key, options]) => ({ model: Post, key, options })),
+  ...Post.schema.indexes().filter(([, options]) => options.name === 'post_owner_client_nonempty_unique_v2').map(([key, options]) => ({ model: Post, key, options })),
 ];
 const run = async () => {
   if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is required');

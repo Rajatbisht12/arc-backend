@@ -332,7 +332,10 @@ const postSchema = new mongoose.Schema({
 });
 
 // Indexes for better performance
-postSchema.index({ author: 1, clientPostId: 1 }, { unique: true, partialFilterExpression: { clientPostId: { $type: 'string' } }, name: 'post_owner_client_unique' });
+// DocumentDB 5.0 supports $gt, but not MongoDB's $type partial-index filter.
+// Publication IDs are validated nonempty UUIDs. Exclude missing/null/empty
+// legacy values without rewriting posts or replacing an already installed index.
+postSchema.index({ author: 1, clientPostId: 1 }, { unique: true, partialFilterExpression: { clientPostId: { $gt: '' } }, name: 'post_owner_client_nonempty_unique_v2' });
 postSchema.index({ author: 1, createdAt: -1 });
 postSchema.index({ postType: 1, createdAt: -1 });
 postSchema.index({ tags: 1 });

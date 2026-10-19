@@ -4,6 +4,15 @@
 
 set -euo pipefail
 
+# Release only a traceable clean source tree. This script is deliberately a
+# compatibility release, not the later large-video activation/drain workflow.
+SOURCE_REVISION=$(git rev-parse --verify HEAD)
+if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+  echo "Commit/stash release inputs first; refusing an untraceable dirty-tree deployment." >&2
+  exit 1
+fi
+SOURCE_REPOSITORY=$(node scripts/lib/video-release.js "$(git config --get remote.origin.url)")
+
 ACCOUNT_ID="906446637180"
 REGION="us-east-1"
 REPO="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/arc-backend"
@@ -254,8 +263,8 @@ if [[ "$RECOVERY_MODE" == "1" ]]; then
   assert_task_family_quiesced
 fi
 
-# Git short SHA as image tag (fallback: timestamp)
-TAG=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)
+# A build-specific tag plus immutable task digest preserves rebuild provenance.
+TAG="${SOURCE_REVISION:0:12}-$(date -u +%Y%m%d%H%M%S)"
 IMAGE="$REPO:$TAG"
 
 echo "==> Tag: $TAG"
@@ -275,6 +284,7 @@ node --test scripts/discovery-deployment.test.js
 # Windows and has caused the Git Bash Node process to terminate with exit 139.
 build_typescript
 npm run verify:email-policy-release
+npm run test:video-deployment-safety
 
 # 2. ECR login
 echo "==> ECR login..."
@@ -282,10 +292,21 @@ ecr_login
 
 # 3. Build
 echo "==> Building image..."
-docker build --platform linux/amd64 -t "$IMAGE" .
+docker build --platform linux/amd64 \
+  --build-arg SOURCE_REVISION="$SOURCE_REVISION" \
+  --build-arg SOURCE_REPOSITORY="$SOURCE_REPOSITORY" \
+  -t "$IMAGE" .
 
 # 4. Push
 push_image_with_retry
+EXPECTED_DIGEST=$(aws ecr describe-images --repository-name arc-backend \
+  --image-ids imageTag="$TAG" --query 'imageDetails[0].imageDigest' --output text)
+if [[ ! "$EXPECTED_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+  echo "Could not resolve the immutable ECR image digest" >&2
+  exit 1
+fi
+DEPLOY_IMAGE="$REPO@$EXPECTED_DIGEST"
+echo "==> Source=$SOURCE_REPOSITORY Commit=$SOURCE_REVISION Image=$DEPLOY_IMAGE"
 
 # 5. Fetch latest task definition, swap image, strip read-only fields
 echo "==> Registering new task definition..."
@@ -295,8 +316,8 @@ aws ecs describe-task-definition --task-definition "$ORIGINAL_TASK_DEF" \
     const chunks = [];
     process.stdin.on('data', c => chunks.push(c));
     process.stdin.on('end', () => {
-      const td = JSON.parse(chunks.join(''));
-      td.containerDefinitions[0].image = process.argv[1];
+      const { prepareCompatibilityTaskDefinition } = require('./scripts/lib/video-release');
+      const td = prepareCompatibilityTaskDefinition(JSON.parse(chunks.join('')), process.argv[1]);
       const env = td.containerDefinitions[0].environment ||= [];
       const marker = env.find(item => item.name === 'BANK_DETAILS_SCHEMA_VERSION');
       if (marker) marker.value = process.argv[2];
@@ -311,7 +332,7 @@ aws ecs describe-task-definition --task-definition "$ORIGINAL_TASK_DEF" \
        'compatibilities','registeredAt','registeredBy'].forEach(k => delete td[k]);
       process.stdout.write(JSON.stringify(td));
     });
-  " "$IMAGE" "$TARGET_BANK_SCHEMA_VERSION" "$TARGET_MONETIZATION_SCHEMA_VERSION" "$TARGET_DISCOVERY_EXPOSURE_VERSION" > "$TASK_DEF_FILE"
+  " "$DEPLOY_IMAGE" "$TARGET_BANK_SCHEMA_VERSION" "$TARGET_MONETIZATION_SCHEMA_VERSION" "$TARGET_DISCOVERY_EXPOSURE_VERSION" > "$TASK_DEF_FILE"
 
 NEW_REV=$(aws ecs register-task-definition \
   --cli-input-json "file://$TASK_DEF_FILE" \
@@ -334,7 +355,7 @@ NEW_TASK_IMAGE=$(aws ecs describe-task-definition \
   --task-definition "$NEW_TASK_DEF" \
   --query 'taskDefinition.containerDefinitions[0].image' \
   --output text)
-if [[ "$NEW_SCHEMA_VERSION" != "$TARGET_BANK_SCHEMA_VERSION" || "$NEW_MONETIZATION_SCHEMA_VERSION" != "$TARGET_MONETIZATION_SCHEMA_VERSION" || "$NEW_TASK_IMAGE" != "$IMAGE" ]]; then
+if [[ "$NEW_SCHEMA_VERSION" != "$TARGET_BANK_SCHEMA_VERSION" || "$NEW_MONETIZATION_SCHEMA_VERSION" != "$TARGET_MONETIZATION_SCHEMA_VERSION" || "$NEW_TASK_IMAGE" != "$DEPLOY_IMAGE" ]]; then
   echo "Registered task definition failed the bank-schema/image verification gate." >&2
   exit 1
 fi

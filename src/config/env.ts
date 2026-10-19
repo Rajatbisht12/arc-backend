@@ -1,5 +1,10 @@
 import "dotenv/config";
 import { z } from "zod";
+import { assertRuntimeIsolation } from './runtimeIsolation';
+import { assertVideoCompatibilityEnvironment } from '../legacy-src/config/videoDeploymentPolicy';
+
+assertRuntimeIsolation(process.env);
+if (process.env.VIDEO_DEPLOYMENT_MODE === 'compatibility') assertVideoCompatibilityEnvironment(process.env);
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),

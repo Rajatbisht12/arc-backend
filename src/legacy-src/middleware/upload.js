@@ -46,7 +46,9 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: MESSAGE_MEDIA_POLICY.maxFileBytes,
+    // Busboy emits its limit event when size reaches this value (exclusive).
+    // Allow the documented exact maximum, then reject the extra byte below.
+    fileSize: MESSAGE_MEDIA_POLICY.maxFileBytes + 1,
     files: 10 // Maximum 10 files
   }
 });
@@ -105,14 +107,22 @@ const sendUploadError = (res, err, maxCount = 10) => {
   });
 };
 
+const enforceInclusiveSize = (req) => {
+  const files = req.file ? [req.file]
+    : Array.isArray(req.files) ? req.files : Object.values(req.files || {}).flat();
+  const oversized = files.find(file => file.size > MESSAGE_MEDIA_POLICY.maxFileBytes);
+  return oversized ? new multer.MulterError('LIMIT_FILE_SIZE', oversized.fieldname) : null;
+};
+
 // Middleware for different upload types
 const uploadSingle = (fieldName) => {
   return (req, res, next) => {
     const uploadSingle = upload.single(fieldName);
     
     uploadSingle(req, res, (err) => {
-      if (err) {
-        return sendUploadError(res, err, 1);
+      const rejection = err || enforceInclusiveSize(req);
+      if (rejection) {
+        return sendUploadError(res, rejection, 1);
       }
       next();
     });
@@ -124,8 +134,9 @@ const uploadMultiple = (fieldName, maxCount = 10) => {
     const uploadMultiple = upload.array(fieldName, maxCount);
     
     uploadMultiple(req, res, (err) => {
-      if (err) {
-        return sendUploadError(res, err, maxCount);
+      const rejection = err || enforceInclusiveSize(req);
+      if (rejection) {
+        return sendUploadError(res, rejection, maxCount);
       }
       next();
     });
@@ -137,9 +148,10 @@ const uploadFields = (fields) => {
     const uploadFields = upload.fields(fields);
     
     uploadFields(req, res, (err) => {
-      if (err) {
+      const rejection = err || enforceInclusiveSize(req);
+      if (rejection) {
         const maxCount = fields.reduce((total, field) => total + Number(field.maxCount || 1), 0);
-        return sendUploadError(res, err, maxCount);
+        return sendUploadError(res, rejection, maxCount);
       }
       next();
     });

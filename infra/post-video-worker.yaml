@@ -1,6 +1,25 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Dedicated SquadHunt video worker (review and deploy separately; no bucket mutation).
 Parameters:
+  DeploymentEnvironment:
+    Type: String
+    Default: staging
+    AllowedValues: [staging, production]
+  BackendSecretId:
+    Type: String
+    Description: Explicit arc/staging/... or arc/prod/... secret; task role must not access the other environment
+  StagingMongoHost:
+    Type: String
+    Default: ''
+  StagingMongoDatabase:
+    Type: String
+    Default: ''
+  StagingRedisHost:
+    Type: String
+    Default: ''
+  StagingS3Bucket:
+    Type: String
+    Default: ''
   Cluster:
     Type: String
   Image:
@@ -50,6 +69,12 @@ Resources:
           StopTimeout: 120
           Environment:
             - {Name: NODE_ENV, Value: production}
+            - {Name: DEPLOYMENT_ENVIRONMENT, Value: !Ref DeploymentEnvironment}
+            - {Name: BACKEND_SECRET_ID, Value: !Ref BackendSecretId}
+            - {Name: STAGING_MONGODB_HOST, Value: !Ref StagingMongoHost}
+            - {Name: STAGING_MONGODB_DATABASE, Value: !Ref StagingMongoDatabase}
+            - {Name: STAGING_REDIS_HOST, Value: !Ref StagingRedisHost}
+            - {Name: STAGING_S3_BUCKET, Value: !Ref StagingS3Bucket}
             - {Name: CLIP_HLS_ENABLED, Value: 'true'}
             - {Name: CLIP_HLS_WORKER_ENABLED, Value: 'false'}
             - {Name: CLIP_HLS_WORKER_CONCURRENCY, Value: '1'}

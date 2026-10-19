@@ -35,6 +35,10 @@ const main = async () => {
   const { loadSecretsManagerEnv } = require('../dist/config/secrets.js');
   await loadSecretsManagerEnv();
 
+  // Read-only video-state/queue gate, before any database preparation/migration.
+  // No upload-session indexes are installed for a disabled compatibility release.
+  if (process.env.VIDEO_DEPLOYMENT_MODE === 'compatibility') run('verify-video-compatibility-release.js');
+
   // Financial data must be decryptable and indexed before production traffic
   // reaches the new revision. This also blocks a keyless ECS deployment.
   run('verify-bank-details-config.js', ['--release']);

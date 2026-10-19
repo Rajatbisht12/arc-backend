@@ -14,6 +14,10 @@ RUN npm run build
 
 # ---------- Stage 2: Production ----------
 FROM node:22-alpine AS runtime
+ARG SOURCE_REVISION
+ARG SOURCE_REPOSITORY
+LABEL org.opencontainers.image.revision=$SOURCE_REVISION \
+      org.opencontainers.image.source=$SOURCE_REPOSITORY
 WORKDIR /app
 
 # Non-root user for security
