@@ -9,6 +9,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const Session = require('../models/VideoUploadSession');
 const Post = require('../models/Post');
 const User = require('../models/User');
+const Follow = require('../models/Follow');
 const publication = require('./videoPostPublicationService');
 const service = require('./videoUploadService');
 const controller = require('../controllers/videoUploadController');
@@ -140,4 +141,126 @@ test('stale worker leases recover and duplicate deliveries publish outputs only 
   const ready = await Session.findById(row._id); assert.equal(ready.status, 'READY'); assert.equal(ready.attempts, 2);
   assert.equal((await service.processVideoUploadJob({ sessionId: String(row._id) })).skipped, true);
   assert.equal(generations, 1);
+});
+test('READY maintenance removes only superseded attempt outputs and retries failed deletion', { skip: !available }, async () => {
+  await Session.deleteMany({}); await Post.deleteMany({});
+  const row = await newReady();
+  const stale = `post-video-playback/${owner}/${row._id}/interrupted-attempt`;
+  const outside = `post-video-playback/${other}/${row._id}/not-owned`;
+  await Session.updateOne({ _id: row._id }, { $set: { outputPrefixes: [stale, row.output.prefix, outside] } });
+  const deleted = []; let fail = true;
+  service.__setDependenciesForTests({ storage: { deletePrefix: async prefix => {
+    if (fail) throw new Error('Temporary storage error');
+    deleted.push(prefix);
+  } } });
+  await service.cleanupVideoUploads();
+  assert.ok((await Session.findById(row._id)).cleanupErrorAt);
+  assert.ok((await Session.findById(row._id)).outputPrefixes.includes(stale));
+  fail = false;
+  await service.cleanupVideoUploads();
+  await service.cleanupVideoUploads();
+  assert.deepEqual(deleted, [`${stale}/`]);
+  const after = await Session.findById(row._id);
+  assert.equal(after.output.prefix, row.output.prefix);
+  assert.ok(after.outputPrefixes.includes(row.output.prefix));
+  assert.ok(after.outputPrefixes.includes(outside), 'unsafe paths are never deleted');
+  assert.equal(after.sourceCleanedAt, undefined, 'live source retention is unchanged');
+});
+
+test('renewal rechecks current ACLs, requires a live publication and never trusts an old bearer', { skip: !available }, async () => {
+  await User.updateOne({ _id: owner }, { $set: { 'privacySettings.profileVisibility': 'public', blockedUsers: [], isActive: true } });
+  await User.create({ _id: other, username: 'renewal_viewer', email: 'renewal_viewer@example.invalid', password: 'Fixture!123', profile: { displayName: 'Renewal fixture' }, userType: 'player', isActive: true });
+  const session = await newReady();
+  const post = await Post.create({ author: owner, visibility: 'public', content: { text: 'Renewal fixture', media: [{ type: 'video', url: session.output.fallbackKey, publicId: session.output.fallbackKey, uploadSessionId: session._id }] } });
+  await Session.updateOne({ _id: session._id }, { $set: { postId: post._id } });
+  const request = async (viewer) => {
+    const res = { statusCode: 200, headers: {}, set(key, value) { this.headers[key] = value; return this; }, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    await controller.renewPlaybackGrant({ params: { id: String(session._id) }, user: viewer ? { _id: viewer } : undefined, query: { token: 'old-bearer-is-not-authentication' } }, res);
+    assert.equal(res.headers['Cache-Control'], 'private, no-store');
+    if (res.statusCode !== 200) assert.equal(res.body.data, undefined, 'denial never includes signed media');
+    return res;
+  };
+  const publicGrant = await request(); assert.equal(publicGrant.statusCode, 200);
+  const auth = publicGrant.body.data.playback.authorization;
+  assert.equal(auth.renewalPath, `/api/posts/video-playback-grants/${session._id}`);
+  assert.ok(auth.expiresInSeconds <= 300 && auth.expiresInSeconds > 269);
+  assert.ok(auth.refreshAfterSeconds <= 240);
+  assert.match(publicGrant.body.data.playback.fallbackMp4Url, /Expires=/);
+  assert.ok(!JSON.stringify(publicGrant.body).includes('post-video-sources'));
+  await User.updateOne({ _id: owner }, { $set: { 'privacySettings.profileVisibility': 'private' } });
+  assert.equal((await request()).statusCode, 403);
+  assert.equal((await request(other)).statusCode, 403);
+  assert.equal((await request(owner)).statusCode, 200);
+  await Follow.create({ follower: other, following: owner, status: 'accepted' });
+  assert.equal((await request(other)).statusCode, 200);
+  await User.updateOne({ _id: owner }, { $set: { blockedUsers: [other] } });
+  assert.equal((await request(other)).statusCode, 403);
+  await User.updateOne({ _id: owner }, { $set: { blockedUsers: [] } });
+  await User.updateOne({ _id: other }, { $set: { isActive: false } });
+  assert.equal((await request(other)).statusCode, 403);
+  await User.updateOne({ _id: other }, { $set: { isActive: true } });
+  await Post.updateOne({ _id: post._id }, { $set: { hiddenByAdmin: true } });
+  assert.equal((await request(owner)).statusCode, 403);
+  await Post.updateOne({ _id: post._id }, { $set: { hiddenByAdmin: false, isActive: false } });
+  assert.equal((await request(owner)).statusCode, 403);
+  await Post.updateOne({ _id: post._id }, { $set: { isActive: true, 'content.media': [] } });
+  assert.equal((await request(owner)).statusCode, 403);
+  await Session.updateOne({ _id: session._id }, { $set: { status: 'PROCESSING' } });
+  assert.equal((await request(owner)).statusCode, 404);
+});
+
+test('heartbeat renews a healthy lease; cancellation during encoding cannot resurrect READY', { skip: !available }, async t => {
+  await Session.deleteMany({}); await Post.deleteMany({});
+  const row = await newReady();
+  await Session.updateOne({ _id: row._id }, { $set: { status: 'QUEUED', attempts: 0, uploadVerifiedAt: new Date() }, $unset: { output: 1 } });
+  let heartbeat, finish, started;
+  const encoding = new Promise(resolve => { started = resolve; });
+  const originalInterval = global.setInterval;
+  t.mock.method(global, 'setInterval', (fn, delay, ...args) => delay === 30000 ? (heartbeat = fn, { unref() {} }) : originalInterval(fn, delay, ...args));
+  const deleted = [];
+  service.__setDependenciesForTests({ storage: {
+    headVideoSource: async () => ({ size: row.size, sessionId: String(row._id) }),
+    downloadFile: async (_key, target) => fsp.writeFile(target, 'lease-only fixture'),
+    uploadMediaFile: async () => { throw Error('Cancelled output must never upload'); },
+    deletePrefix: async prefix => deleted.push(prefix),
+  }, generate: async ({ signal }) => {
+    started(signal); return new Promise(resolve => { finish = resolve; });
+  } });
+  const running = service.processVideoUploadJob({ sessionId: String(row._id) });
+  const signal = await encoding;
+  const initial = await Session.findById(row._id);
+  const now = Date.now(); t.mock.method(Date, 'now', () => now + 120000);
+  await heartbeat();
+  const extended = await Session.findById(row._id);
+  assert.ok(extended.leaseExpiresAt.getTime() >= initial.leaseExpiresAt.getTime() + 119000);
+  assert.equal((await service.processVideoUploadJob({ sessionId: String(row._id) })).skipped, true);
+  assert.equal((await service.cancelSession(owner, String(row._id))).status, 'CANCELLED');
+  await heartbeat(); assert.equal(signal.aborted, true);
+  finish({}); await assert.rejects(running, { code: 'PROCESSING_CANCELLED' });
+  const after = await Session.findById(row._id);
+  assert.equal(after.status, 'CANCELLED'); assert.equal(after.output, undefined);
+  assert.equal(deleted.length, 1); assert.ok(!deleted[0].includes('post-video-sources'));
+});
+
+test('lost lease during output publication cannot replace the newer winner or remove its files', { skip: !available }, async () => {
+  await Session.deleteMany({}); await Post.deleteMany({});
+  const row = await newReady();
+  await Session.updateOne({ _id: row._id }, { $set: { status: 'QUEUED', attempts: 0, uploadVerifiedAt: new Date() }, $unset: { output: 1 } });
+  const winner = `post-video-playback/${owner}/${row._id}/different-winner`;
+  const deleted = []; let changed = false;
+  service.__setDependenciesForTests({ storage: {
+    headVideoSource: async () => ({ size: row.size, sessionId: String(row._id) }),
+    downloadFile: async (_key, target) => fsp.writeFile(target, 'publication-race-only fixture'),
+    uploadMediaFile: async () => {
+      if (!changed) { changed = true; await Session.updateOne({ _id: row._id }, { $set: { status: 'READY', leaseToken: 'different-lease', output: { prefix: winner } } }); }
+    }, deletePrefix: async prefix => deleted.push(prefix),
+  }, generate: async ({ outputDir }) => {
+    await fsp.mkdir(outputDir, { recursive: true });
+    for (const name of ['master.m3u8', 'fallback.mp4', 'thumbnail.jpg']) await fsp.writeFile(path.join(outputDir, name), name);
+    return { metadata: { duration: 2, width: 640, height: 360 }, renditions: [] };
+  } });
+  const result = await service.processVideoUploadJob({ sessionId: String(row._id) });
+  assert.equal(result.skipped, true);
+  assert.equal((await Session.findById(row._id)).output.prefix, winner);
+  assert.equal(deleted.length, 1); assert.ok(!deleted[0].includes('different-winner')); assert.ok(!deleted[0].includes('post-video-sources'));
 });

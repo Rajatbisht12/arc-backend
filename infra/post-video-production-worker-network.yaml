@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private egress and scoped database access for the production post-video worker. Review as a change set; do not apply with the compatibility deployment.
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+  PrivateRouteTables:
+    Type: List<String>
+    Description: Route tables associated with the worker private subnets; S3 gateway endpoint adds only its service route.
+  DocumentDbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+Resources:
+  WorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Dedicated post-video worker, no inbound listeners
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - {IpProtocol: '-1', CidrIp: '0.0.0.0/0', Description: Routing limited to VPC and reviewed endpoints}
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTPS from the post-video worker to private AWS endpoints
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref WorkerSecurityGroup}
+      SecurityGroupEgress:
+        - {IpProtocol: '-1', CidrIp: '0.0.0.0/0'}
+  DocumentDbFromWorker:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DocumentDbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 27017
+      ToPort: 27017
+      SourceSecurityGroupId: !Ref WorkerSecurityGroup
+  RedisFromWorker:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RedisSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !Ref WorkerSecurityGroup
+  S3Gateway:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Gateway
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      RouteTableIds: !Ref PrivateRouteTables
+  EcrApi:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnets
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+  EcrDkr:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnets
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnets
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+  SecretsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.secretsmanager'
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnets
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+Outputs:
+  WorkerSecurityGroup:
+    Value: !Ref WorkerSecurityGroup
+  EndpointSecurityGroup:
+    Value: !Ref EndpointSecurityGroup

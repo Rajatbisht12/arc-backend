@@ -7,6 +7,7 @@ const VideoUploadSession = require('../models/VideoUploadSession');
 const Post = require('../models/Post');
 const { MAX_VIDEO_BYTES, MAX_POST_VIDEO_BYTES, MAX_VIDEOS, PART_SIZE, UUID, uploadError, validateVideoInput, expectedPartSize, verifyParts } = require('../utils/postVideoPolicy');
 const { privateDeliveryReady, assertDeliveryReady } = require('../utils/postVideoDelivery');
+const { isPostVideoOwnerAllowed } = require('../config/postVideoRolloutPolicy');
 
 const SESSION_SELECT = '+objectKey +multipartUploadId +leaseToken +completionLeaseToken';
 const UPLOAD_STATES = ['CREATED', 'UPLOADING'];
@@ -22,14 +23,18 @@ const storage = () => storageOverride || require(path.join(__dirname, '../../../
 const enqueue = (id, attempt = 0) => (enqueueOverride || require('../utils/jobQueue').enqueueVideoUpload)(String(id), String(attempt));
 const enabled = () => process.env.POST_VIDEO_UPLOADS_ENABLED === 'true' && process.env.CLIP_HLS_WORKER_ENABLED === 'false' && privateDeliveryReady() && Boolean(process.env.AWS_S3_BUCKET);
 const requireAvailable = () => { assertDeliveryReady(); if (!process.env.AWS_S3_BUCKET) throw uploadError('VIDEO_UPLOADS_UNAVAILABLE', 'Video uploading is temporarily unavailable.', 503); };
-const requireEnabled = () => { if (!enabled()) throw uploadError('VIDEO_UPLOADS_UNAVAILABLE', 'Video uploading is being prepared. Please try again later.', 503); assertDeliveryReady(); };
+const requireEnabled = owner => {
+  if (!enabled()) throw uploadError('VIDEO_UPLOADS_UNAVAILABLE', 'Video uploading is being prepared. Please try again later.', 503);
+  if (!isPostVideoOwnerAllowed(owner)) throw uploadError('VIDEO_UPLOAD_NOT_ENABLED_FOR_ACCOUNT', 'Large video uploads are not available for this account yet.', 403);
+  assertDeliveryReady();
+};
 const dto = session => ({
   id: String(session._id), status: session.status, size: session.size, partSize: session.partSize,
   partCount: session.partCount, expiresAt: new Date(session.expiresAt).toISOString(),
   ...(session.error?.code ? { error: { code: session.error.code, message: session.error.message } } : {}),
   ...(session.postId ? { postId: String(session.postId) } : {}),
 });
-const policy = () => ({ enabled: enabled(), maxVideoBytes: MAX_VIDEO_BYTES, maxPostVideoBytes: MAX_POST_VIDEO_BYTES, maxVideos: MAX_VIDEOS, partSize: PART_SIZE });
+const policy = owner => ({ enabled: enabled() && isPostVideoOwnerAllowed(owner), maxVideoBytes: MAX_VIDEO_BYTES, maxPostVideoBytes: MAX_POST_VIDEO_BYTES, maxVideos: MAX_VIDEOS, partSize: PART_SIZE });
 const owned = async (id, owner) => {
   if (!mongoose.isValidObjectId(id)) throw uploadError('UPLOAD_NOT_FOUND', 'Video upload not found.', 404);
   const session = await Session.findOne({ _id: id, owner }).select(SESSION_SELECT);
@@ -44,7 +49,7 @@ const assertLive = session => {
 const lockSchema = new mongoose.Schema({ _id: mongoose.Schema.Types.ObjectId, token: String, expiresAt: Date }, { autoIndex: false });
 const OwnerLock = mongoose.models.VideoUploadOwnerLock || mongoose.model('VideoUploadOwnerLock', lockSchema);
 const createSession = async (owner, input) => {
-  requireEnabled();
+  requireEnabled(owner);
   const data = validateVideoInput(input);
   let session = await Session.findOne({ owner, clientUploadId: data.clientUploadId }).select(SESSION_SELECT);
   if (!session) {
@@ -171,6 +176,24 @@ const publishOutputs = async (outputDir, prefix, generated) => {
     renditions: generated.renditions.map(row => ({ name: row.name, width: row.width, height: row.height, bandwidth: Math.ceil((row.maxRate + (row.hasAudio ? row.audioBitrate : 0)) * 1.1), averageBandwidth: row.videoBitrate + (row.hasAudio ? row.audioBitrate : 0), playlistUrl: `${prefix}/${row.name}/index.m3u8`, playlistPublicId: `${prefix}/${row.name}/index.m3u8` })),
   };
 };
+// A killed process cannot run its catch/finally cleanup. Once a replacement
+// has committed READY, old attempt prefixes are never the published output.
+// Keep failed deletions recorded for bounded maintenance retries.
+const cleanupSupersededOutputs = async row => {
+  const active = row.output?.prefix;
+  if (row.status !== 'READY' || !active) return;
+  const root = `post-video-playback/${row.owner}/${row._id}/`;
+  const obsolete = [...new Set(row.outputPrefixes || [])].filter(prefix => prefix !== active);
+  for (const prefix of obsolete) {
+    try {
+      const version = String(prefix).slice(root.length);
+      if (!String(prefix).startsWith(root) || !/^[a-zA-Z0-9_-]+$/.test(version)) throw new Error('Unsafe superseded output prefix');
+      await storage().deletePrefix(`${prefix}/`);
+      await Session.updateOne({ _id: row._id, status: 'READY', 'output.prefix': active }, { $pull: { outputPrefixes: prefix } });
+    } catch { await Session.updateOne({ _id: row._id }, { $set: { cleanupErrorAt: new Date() } }); }
+  }
+  if (obsolete.length) await Session.updateOne({ _id: row._id }, { $set: { cleanupCheckedAt: new Date() } });
+};
 const processVideoUploadJob = async ({ sessionId }) => {
   if (!mongoose.isValidObjectId(sessionId)) throw new Error('Invalid video upload session ID');
   const leaseToken = randomUUID();
@@ -203,6 +226,9 @@ const processVideoUploadJob = async ({ sessionId }) => {
     const output = await publishOutputs(outputDir, prefix, generated);
     const result = await Session.updateOne({ _id: sessionId, ownerDeletedAt: null, status: 'PROCESSING', leaseToken }, { $set: { status: 'READY', metadata: generated.metadata, output, completedAt: new Date() }, $unset: { leaseToken: 1, leaseExpiresAt: 1, error: 1 } });
     if (!result.matchedCount) { await storage().deletePrefix(`${prefix}/`); return { skipped: true, reason: 'cancelled' }; }
+    // A transient cleanup/DB error must not turn a committed READY job into a
+    // processing failure. Maintenance will retry from the durable prefix list.
+    await cleanupSupersededOutputs({ _id: session._id, owner: session.owner, status: 'READY', output, outputPrefixes: session.outputPrefixes }).catch(() => {});
     return { sessionId, outputBytes: output.outputBytes };
   } catch (error) {
     await storage().deletePrefix(`${prefix}/`).catch(() => {});
@@ -219,6 +245,9 @@ const recoverVideoUploads = async () => {
   return sessions.length;
 };
 const cleanupVideoUploads = async () => {
+  const superseded = await Session.find({ status: 'READY', 'outputPrefixes.1': { $exists: true } })
+    .sort({ cleanupCheckedAt: 1, _id: 1 }).limit(50).select('_id owner status output outputPrefixes');
+  for (const row of superseded) await cleanupSupersededOutputs(row);
   // Never TTL-delete source records: cancellation/expiry cleanup is resumable and private sources are retained unless explicitly configured.
   const sessions = await Session.find({ postId: null, cleanedAt: null, $or: [{ status: { $in: ['CANCELLED', 'EXPIRED'] } }, { expiresAt: { $lte: new Date() } }] }).sort({ expiresAt: 1, _id: 1 }).limit(50).select(SESSION_SELECT);
   let count = 0;

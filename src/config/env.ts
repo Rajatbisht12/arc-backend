@@ -2,9 +2,11 @@ import "dotenv/config";
 import { z } from "zod";
 import { assertRuntimeIsolation } from './runtimeIsolation';
 import { assertVideoCompatibilityEnvironment } from '../legacy-src/config/videoDeploymentPolicy';
+import { assertPostVideoRolloutConfiguration } from '../legacy-src/config/postVideoRolloutPolicy';
 
 assertRuntimeIsolation(process.env);
 if (process.env.VIDEO_DEPLOYMENT_MODE === 'compatibility') assertVideoCompatibilityEnvironment(process.env);
+assertPostVideoRolloutConfiguration(process.env);
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -109,6 +111,8 @@ const envSchema = z.object({
   CLIP_HLS_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
   CLIP_HLS_JOB_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   POST_VIDEO_UPLOADS_ENABLED: z.string().default('false').transform(v => v === 'true'),
+  POST_VIDEO_ROLLOUT_MODE: z.enum(['canary', 'all']).default('canary'),
+  POST_VIDEO_CANARY_USER_IDS: z.string().optional(),
   VIDEO_FFMPEG_THREADS: z.coerce.number().int().min(1).max(4).default(2),
   POST_VIDEO_MAX_DURATION_SECONDS: z.coerce.number().int().min(30).max(3600).default(3600),
   VIDEO_WORKER_HEALTH_PORT: z.coerce.number().int().min(1024).max(65535).default(5002),

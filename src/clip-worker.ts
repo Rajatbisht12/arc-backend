@@ -6,6 +6,7 @@ import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { connectMongo } from "./infrastructure/database/mongodb";
 import { backendRootPath } from "./modules/legacy/legacy.paths";
+import { startVideoWorkerObservation } from './infrastructure/jobs/videoWorkerResourceSample';
 
 const connection = {
   host: env.REDIS_HOST,
@@ -22,14 +23,23 @@ type ClipTranscodingService = {
 type VideoUploadService = { processVideoUploadJob: (data: Record<string, unknown>) => Promise<unknown> };
 
 const processJob = async (job: Job) => {
-  if (job.name === 'process-upload') {
-    const service = require(path.join(backendRootPath, 'services', 'videoUploadService.js')) as VideoUploadService;
-    return service.processVideoUploadJob({ ...job.data, workerJobId: String(job.id || '') });
+  const stopObservation = await startVideoWorkerObservation(
+    process.env.VIDEO_WORKER_RESOURCE_METRICS_ENABLED === 'true',
+    String(job.id || ''), job.name,
+  ).catch(() => async () => {});
+  try {
+    if (job.name === 'process-upload') {
+      const service = require(path.join(backendRootPath, 'services', 'videoUploadService.js')) as VideoUploadService;
+      return await service.processVideoUploadJob({ ...job.data, workerJobId: String(job.id || '') });
+    }
+    if (job.name !== "transcode-hls") throw new Error(`Unknown clip video job: ${job.name}`);
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const service = require(path.join(backendRootPath, "services", "clipTranscodingService.js")) as ClipTranscodingService;
+    return await service.processClipTranscodeJob({ ...job.data, workerJobId: String(job.id || "") });
+  } finally {
+    // Telemetry is optional: a logging failure must not fail a completed job.
+    await stopObservation().catch(() => {});
   }
-  if (job.name !== "transcode-hls") throw new Error(`Unknown clip video job: ${job.name}`);
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const service = require(path.join(backendRootPath, "services", "clipTranscodingService.js")) as ClipTranscodingService;
-  return service.processClipTranscodeJob({ ...job.data, workerJobId: String(job.id || "") });
 };
 
 const bootstrap = async () => {

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Dedicated SquadHunt video worker (review and deploy separately; no bucket mutation).
+Description: Dedicated SquadHunt video worker. Use private subnets with verified ECR, S3, logs and Secrets Manager connectivity; no bucket mutation.
 Parameters:
   DeploymentEnvironment:
     Type: String
@@ -20,6 +20,14 @@ Parameters:
   StagingS3Bucket:
     Type: String
     Default: ''
+  StagingApiOrigin:
+    Type: String
+    Default: ''
+    Description: Exact HTTPS origin from the approved staging API stack output (task-only binding)
+  StagingMediaOrigin:
+    Type: String
+    Default: ''
+    Description: Exact HTTPS origin from the approved staging media stack output (task-only binding)
   Cluster:
     Type: String
   Image:
@@ -36,29 +44,35 @@ Parameters:
     Type: List<AWS::EC2::SecurityGroup::Id>
   DesiredCount:
     Type: Number
-    Default: 1
+    Default: 0
     MinValue: 0
     MaxValue: 4
   AlarmTopicArn:
     Type: String
     Description: Existing SNS operations topic
+  EnableResourceMetrics:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
 Resources:
   Logs:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      LogGroupName: !Sub '/squadhunt/video/${AWS::StackName}'
       RetentionInDays: 30
   Task:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: squadhunt-video-worker
+      Family: !Sub '${AWS::StackName}-worker'
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
       Cpu: '2048'
       Memory: '4096'
       EphemeralStorage:
         SizeInGiB: 40
+      RuntimePlatform: {CpuArchitecture: X86_64, OperatingSystemFamily: LINUX}
       ExecutionRoleArn: !Ref ExecutionRoleArn
       TaskRoleArn: !Ref TaskRoleArn
       ContainerDefinitions:
@@ -75,11 +89,16 @@ Resources:
             - {Name: STAGING_MONGODB_DATABASE, Value: !Ref StagingMongoDatabase}
             - {Name: STAGING_REDIS_HOST, Value: !Ref StagingRedisHost}
             - {Name: STAGING_S3_BUCKET, Value: !Ref StagingS3Bucket}
+            - {Name: STAGING_API_ORIGIN, Value: !Ref StagingApiOrigin}
+            - {Name: STAGING_MEDIA_ORIGIN, Value: !Ref StagingMediaOrigin}
             - {Name: CLIP_HLS_ENABLED, Value: 'true'}
             - {Name: CLIP_HLS_WORKER_ENABLED, Value: 'false'}
+            - {Name: POST_VIDEO_UPLOADS_ENABLED, Value: 'false'}
             - {Name: CLIP_HLS_WORKER_CONCURRENCY, Value: '1'}
             - {Name: CLIP_HLS_JOB_ATTEMPTS, Value: '3'}
             - {Name: VIDEO_FFMPEG_THREADS, Value: '2'}
+            - {Name: VIDEO_WORKER_HEALTH_PORT, Value: '5002'}
+            - {Name: VIDEO_WORKER_RESOURCE_METRICS_ENABLED, Value: !Ref EnableResourceMetrics}
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -114,18 +133,18 @@ Resources:
       LogGroupName: !Ref Logs
       FilterPattern: '{ $.event = "video_queue" }'
       MetricTransformations:
-        - MetricNamespace: SquadHunt/Video
+        - MetricNamespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
           MetricName: WaitingJobs
           MetricValue: '$.waiting'
   QueueAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      Namespace: SquadHunt/Video
+      Namespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
       MetricName: WaitingJobs
       Statistic: Maximum
       Period: 60
       EvaluationPeriods: 5
-      Threshold: 10
+      Threshold: 2
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: breaching
       AlarmActions: [!Ref AlarmTopicArn]
@@ -135,20 +154,71 @@ Resources:
       LogGroupName: !Ref Logs
       FilterPattern: '"Clip HLS job failed"'
       MetricTransformations:
-        - MetricNamespace: SquadHunt/Video
+        - MetricNamespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
           MetricName: FailedAttempts
           MetricValue: '1'
           DefaultValue: 0
   ErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      Namespace: SquadHunt/Video
+      Namespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
       MetricName: FailedAttempts
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
       Threshold: 3
       ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopicArn]
+  WorkerResourceMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref Logs
+      FilterPattern: '{ $.event = "video_worker_resource_sample" }'
+      MetricTransformations:
+        - MetricNamespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
+          MetricName: PeakSampledMemoryBytes
+          MetricValue: '$.peakSampledContainerMemoryBytes'
+        - MetricNamespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
+          MetricName: PeakSampledScratchBytes
+          MetricValue: '$.peakSampledVideoScratchBytes'
+        - MetricNamespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
+          MetricName: JobWallSeconds
+          MetricValue: '$.jobWallSeconds'
+  WorkerMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
+      MetricName: PeakSampledMemoryBytes
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3221225472
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopicArn]
+  WorkerScratchAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
+      MetricName: PeakSampledScratchBytes
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 32212254720
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopicArn]
+  WorkerSlowJobAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
+      MetricName: JobWallSeconds
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 900
+      ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlarmTopicArn]
 Outputs:

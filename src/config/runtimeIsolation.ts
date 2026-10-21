@@ -25,7 +25,10 @@ export const runtimeSecretTarget = (environment: Environment) => {
 
 // Task-provided resource identities are independent of secret contents. Never
 // hydrate these controls from a secret that might have been copied incorrectly.
-export const isIsolationControl = (name: string) => ['DEPLOYMENT_ENVIRONMENT', 'BACKEND_SECRET_ID', 'VIDEO_DEPLOYMENT_MODE'].includes(name) || name.startsWith('STAGING_');
+export const isIsolationControl = (name: string) => [
+  'DEPLOYMENT_ENVIRONMENT', 'BACKEND_SECRET_ID', 'VIDEO_DEPLOYMENT_MODE',
+  'POST_VIDEO_ROLLOUT_MODE', 'POST_VIDEO_CANARY_USER_IDS',
+].includes(name) || name.startsWith('STAGING_');
 
 export const assertRuntimeIsolation = (environment: Environment): void => {
   if (runtimeSecretTarget(environment).deployment !== 'staging') return;
@@ -43,11 +46,32 @@ export const assertRuntimeIsolation = (environment: Environment): void => {
   if ((environment.REDIS_HOST || '').toLowerCase() !== guard('STAGING_REDIS_HOST').toLowerCase()) fail('REDIS_HOST matching staging endpoint');
   if ((environment.AWS_S3_BUCKET || '') !== guard('STAGING_S3_BUCKET')) fail('AWS_S3_BUCKET matching staging bucket');
   if (environment.AWS_S3_BUCKET_NAME && environment.AWS_S3_BUCKET_NAME !== environment.AWS_S3_BUCKET) fail('AWS_S3_BUCKET_NAME');
+  // CloudFront's generated HTTPS hostnames do not contain "staging". Allow
+  // them only when independently bound in the ECS task (never in the secret)
+  // to the outputs of the approved staging stack. This avoids requiring a
+  // change to production DNS merely to run isolated staging tests.
+  const boundOrigin = (name: string) => {
+    if (!environment[name]) return undefined;
+    try {
+      const url = new URL(environment[name]);
+      if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash
+          || url.pathname !== '/' || url.port
+          || (!stageName.test(url.hostname) && !/^d[a-z0-9]+\.cloudfront\.net$/.test(url.hostname))
+          || prodName.test(url.hostname)) return fail(name);
+      return url.origin;
+    } catch { return fail(name); }
+  };
+  const apiOrigin = boundOrigin('STAGING_API_ORIGIN');
+  const mediaOrigin = boundOrigin('STAGING_MEDIA_ORIGIN');
   for (const name of ['AWS_S3_CDN_URL', 'POST_VIDEO_CLOUDFRONT_URL', 'POST_VIDEO_API_ORIGIN', 'CLIENT_URL', 'GOOGLE_CALLBACK_URL']) {
     if (!environment[name]) continue;
     try {
       const url = new URL(environment[name]);
-      if (url.protocol !== 'https:' || !stageName.test(url.hostname) || prodName.test(url.hostname)) fail(name);
+      const binding = name === 'POST_VIDEO_API_ORIGIN' ? apiOrigin
+        : ['AWS_S3_CDN_URL', 'POST_VIDEO_CLOUDFRONT_URL'].includes(name) ? mediaOrigin : undefined;
+      if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash
+          || prodName.test(url.hostname)
+          || (binding ? url.origin !== binding || url.pathname !== '/' : !stageName.test(url.hostname))) fail(name);
     } catch { fail(name); }
   }
   const origins = String(environment.CORS_ORIGIN || '').split(',').filter(Boolean);

@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: NEW isolated DocumentDB 5.0 and Redis 7.1; empty databases, no production restores.
+Parameters:
+  SecretNamespace:
+    Type: String
+    Default: arc/staging/post-video
+    AllowedPattern: '^arc/staging/post-video(-r[0-9]+)?$'
+  PrivateSubnets: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  DatabaseSecurityGroup: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  CacheSecurityGroup: {Type: 'AWS::EC2::SecurityGroup::Id'}
+Resources:
+  DatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub '${SecretNamespace}/documentdb'
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"stagingadmin"}'
+        GenerateStringKey: password
+        PasswordLength: 40
+        ExcludePunctuation: true
+      Tags: [{Key: Environment, Value: staging}]
+  CacheSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub '${SecretNamespace}/redis'
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: password
+        PasswordLength: 40
+        ExcludePunctuation: true
+      Tags: [{Key: Environment, Value: staging}]
+  DatabaseSubnets:
+    Type: AWS::DocDB::DBSubnetGroup
+    Properties: {DBSubnetGroupDescription: Isolated staging DocumentDB, SubnetIds: !Ref PrivateSubnets}
+  Cluster:
+    Type: AWS::DocDB::DBCluster
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      DBClusterIdentifier: arc-video-staging-db
+      EngineVersion: 5.0.0
+      StorageEncrypted: true
+      BackupRetentionPeriod: 1
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DatabaseSubnets
+      VpcSecurityGroupIds: [!Ref DatabaseSecurityGroup]
+      Tags: [{Key: Environment, Value: staging}]
+  Instance:
+    Type: AWS::DocDB::DBInstance
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      DBInstanceIdentifier: arc-video-staging-db-1
+      DBClusterIdentifier: !Ref Cluster
+      DBInstanceClass: db.t3.medium
+      AutoMinorVersionUpgrade: false
+  CacheSubnets:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties: {Description: Isolated staging Redis, SubnetIds: !Ref PrivateSubnets}
+  CacheParameters:
+    Type: AWS::ElastiCache::ParameterGroup
+    Properties:
+      CacheParameterGroupFamily: redis7
+      Description: Preserve staging BullMQ jobs instead of evicting them
+      Properties: {maxmemory-policy: noeviction}
+  Cache:
+    Type: AWS::ElastiCache::ReplicationGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ReplicationGroupId: arc-video-staging-redis
+      ReplicationGroupDescription: Empty staging BullMQ, never restore production queues
+      Engine: redis
+      EngineVersion: '7.1'
+      CacheNodeType: cache.t4g.micro
+      NumCacheClusters: 1
+      AutomaticFailoverEnabled: false
+      MultiAZEnabled: false
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: true
+      AuthToken: !Sub '{{resolve:secretsmanager:${CacheSecret}:SecretString:password}}'
+      CacheSubnetGroupName: !Ref CacheSubnets
+      CacheParameterGroupName: !Ref CacheParameters
+      SecurityGroupIds: [!Ref CacheSecurityGroup]
+      Tags: [{Key: Environment, Value: staging}]
+Outputs:
+  MongoHost: {Value: !GetAtt Cluster.Endpoint}
+  RedisHost: {Value: !GetAtt Cache.PrimaryEndPoint.Address}
+  DatabaseSecretArn: {Value: !Ref DatabaseSecret}
+  CacheSecretArn: {Value: !Ref CacheSecret}

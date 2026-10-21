@@ -1,5 +1,11 @@
 # Post video uploads: implementation and rollout
 
+For the current read-only production inventory, account-scoped canary policy,
+private-worker network/role proposals, capacity alarms, activation sequence and
+rollback boundary, see [the production activation review](POST_VIDEO_500MIB_PRODUCTION_ACTIVATION_REVIEW.md).
+This older implementation outline is not an instruction to apply its merge
+templates directly to the live bucket or CloudFront distribution.
+
 ## Compatibility deployment (before activation)
 
 See [deployment blocker resolution](POST_VIDEO_500MIB_DEPLOYMENT_BLOCKERS_RESOLUTION.md)
@@ -70,11 +76,18 @@ S3 expiry rule covering playback objects referenced by active posts.
    staging, run `node scripts/migrate-video-upload-indexes.js --apply` and
    `--verify` before enabling sessions. Repeat on production only with approval.
    The publication index uses the DocumentDB-supported nonempty-string filter
-   `$gt: ''` and a new name; it never drops an existing index. Actual execution
-   on isolated DocumentDB 5.0 is still an activation verification requirement.
-2. Review and deploy the `infra/post-video-worker.yaml` stack. Start a worker
-   using the same immutable image version as the API. API task environment must
-   set CLIP_HLS_WORKER_ENABLED=false before accepting the new video path.
+   `$gt: ''` and a new name; it never drops an existing index. Apply/reapply/
+   verify passed on isolated DocumentDB 5.0; a production migration still
+   requires a separate approval and recorded pre/post index inventory.
+2. Review `infra/post-video-production-worker-network.yaml` and
+   `infra/post-video-production-worker-roles.yaml` before the
+   `infra/post-video-worker.yaml` stack. Existing private subnets lack NAT/VPC
+   endpoints; the worker cannot start there until ECR/S3/log/secret access and
+   scoped DocumentDB/Redis ingress are installed. Start the stack at zero tasks
+   with an immutable API-compatible image, then prove one healthy dedicated
+   consumer processes legacy HLS while the API embedded consumer remains on.
+   Switch the API embedded consumer off only after that proof. The guarded
+   compatibility `deploy.sh` does not perform this cutover.
 3. Merge the CORS and multipart-abort lifecycle rule in the supplied S3 template
    with existing rules; do not replace existing bucket configuration blindly.
 4. Configure a CloudFront trusted key group for post-video-playback/*, require
@@ -103,6 +116,10 @@ S3 expiry rule covering playback objects referenced by active posts.
 7. In staging, exercise the real-file matrix, resume, failed jobs, deletion,
    privacy, Feed/Clips, recommendation and device checks.
 8. Enable the flag for controlled accounts only after every readiness gate passes.
+   Production defaults to `POST_VIDEO_ROLLOUT_MODE=canary` and requires a
+   reviewed nonempty `POST_VIDEO_CANARY_USER_IDS` list in the API task
+   environment. Other accounts retain legacy upload behavior. A global rollout
+   requires an explicit, separately reviewed `POST_VIDEO_ROLLOUT_MODE=all`.
 
 Worker initial candidate: 2 vCPU, 4 GiB RAM, 40 GiB ephemeral storage, one job at
 a time, two FFmpeg threads. This is a bounded starting configuration, not a
@@ -134,9 +151,13 @@ do not change. Source retention and CDN revocation require separate approval.
 
 ## Readiness
 
-NOT READY until actual near-limit multipart transfer, processing outputs, resume,
-private CDN denial/authorization and Android device behavior are verified in a
-controlled environment. Builds or mocked tests alone do not satisfy these gates.
+The controlled staging matrix now covers near-limit multipart transfer,
+processing, recovery, private CDN denial/authorization, Android, iOS Simulator
+and Safari. **Production activation is still NOT READY**: production network,
+roles, delivery controls, worker, indexes and alarm delivery are not installed,
+and the exact release snapshot and controlled cutover are not approved. Physical
+iPhone and signed-release validation are deferred, not passed. See the linked
+production activation review for the current gates.
 
 ## Cleanup and revocation boundaries
 
@@ -153,6 +174,19 @@ READY originals of live content are retained by default (`POST_VIDEO_SOURCE_RETE
 until a positive retention value is explicitly approved. Never apply a blanket
 playback-prefix expiry rule. Manifest requests recheck current post/viewer access;
 already issued CloudFront MP4/thumbnail/segment grants remain usable until their
-expiry (up to one hour). This is bounded revocation, not instant revocation. A
-stricter product requirement would need shorter renewable grants or edge
-authorization, and must be validated before enabling private canaries.
+expiry. The approved 20 October follow-up limits NEW-pipeline grants to **five
+minutes maximum** (270–300 seconds with stable 30-second issuance buckets).
+This is bounded revocation, not instant revocation: requests already underway
+and downloaded bytes cannot be recalled. Legacy media delivery is unchanged.
+
+Updated players renew 60 seconds early through
+`GET /api/posts/video-playback-grants/:sessionId`, using current application
+authentication (or anonymous access only for public content). Every renewal
+rechecks current post/profile/follow/block/activity/deletion/moderation access;
+an old media bearer alone is not renewal authority. Responses and manifests are
+`private, no-store`. Background/offscreen players do not poll; expiry/denial
+stops further loading, and foreground recovery requires fresh authorization.
+Renewal-capable clients and their old-version compatibility/release policy must
+be verified before activation. Do not extend old-client grants to bypass the
+approved five-minute policy. See `POST_VIDEO_500MIB_RENEWAL_RECOVERY_PLAN.md`
+and its follow-up validation report. Production remains disabled.

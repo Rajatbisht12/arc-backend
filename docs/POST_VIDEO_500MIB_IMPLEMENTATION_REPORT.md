@@ -2,6 +2,22 @@
 
 Date: 19 October 2026. Verdict: **NOT READY** for activation.
 
+**21 October iOS/Safari follow-up:** the full native workspace now builds, and
+actual iOS Simulator transfers at exactly 500 MiB, recovery, HEVC/edited inputs,
+publication and playback have passed against isolated AWS staging. Safari's
+local-rendering and native-HLS blockers were fixed. See the current
+[iOS/Safari report](POST_VIDEO_500MIB_IOS_SAFARI_FINAL_REPORT.md) and its sanitized
+evidence for final browser/privacy/cleanup status and remaining activation gates.
+This does not authorize production changes or claim physical iPhone execution.
+
+Historical initial-implementation snapshot. The approved 20 October follow-up
+replaces the one-hour NEW-pipeline asset lifetime described below with
+five-minute renewable grants. See `POST_VIDEO_500MIB_RENEWAL_RECOVERY_PLAN.md`,
+the follow-up validation report and the current `POST_VIDEO_500MIB_ROLLOUT.md`.
+Earlier test limitations below are retained as historical evidence, not current
+claims of what round-2 staging did or did not verify. Production activation is
+still not authorized.
+
 Repository implementation and local verification are complete to the extent
 described below. This is not a claim that all acceptance criteria have passed.
 No production infrastructure was changed, no production post was submitted, and

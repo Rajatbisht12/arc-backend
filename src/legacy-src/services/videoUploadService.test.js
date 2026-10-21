@@ -34,6 +34,13 @@ test('rollback disables new sessions but continues authorized part signing for e
   assert.equal(signed[1][3], 3);
   await assert.rejects(service.createSession(owner, {}), { code: 'VIDEO_UPLOADS_UNAVAILABLE' });
 });
+test('production canary hides the large-upload policy and rejects new sessions for other owners', async () => {
+  Object.assign(process.env, { NODE_ENV: 'production', POST_VIDEO_UPLOADS_ENABLED: 'true', CLIP_HLS_WORKER_ENABLED: 'false',
+    POST_VIDEO_ROLLOUT_MODE: 'canary', POST_VIDEO_CANARY_USER_IDS: owner });
+  assert.equal(service.policy(owner).enabled, true);
+  assert.equal(service.policy('c'.repeat(24)).enabled, false);
+  await assert.rejects(service.createSession('c'.repeat(24), {}), { code: 'VIDEO_UPLOAD_NOT_ENABLED_FOR_ACCOUNT', statusCode: 403 });
+});
 test('ownership and expiry checked before S3 signing; batch is bounded', async () => {
   service.__setDependenciesForTests({ Session: mockModel(mockSession()), storage: { presignVideoPart: () => { throw new Error('must not sign'); } } });
   await assert.rejects(service.signParts('c'.repeat(24), id, [1]), { code: 'UPLOAD_NOT_FOUND' });

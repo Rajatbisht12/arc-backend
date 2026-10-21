@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: NEW staging API, task roles and private CloudFront VPC origin. Bootstrap at zero tasks; hydrate ONLY new staging secrets before starting.
+Parameters:
+  SecretNamespace:
+    Type: String
+    Default: arc/staging/post-video
+    AllowedPattern: '^arc/staging/post-video(-r[0-9]+)?$'
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  PrivateSubnets: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  ApiSecurityGroup: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  AlbSecurityGroup: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  MongoHost: {Type: String, AllowedPattern: '.*staging.*'}
+  RedisHost: {Type: String, AllowedPattern: '.*staging.*'}
+  BucketName: {Type: String, AllowedPattern: '^squadhunt-video-staging-[a-z0-9-]+$'}
+  ApiOrigin: {Type: String, Default: ''}
+  MediaOrigin: {Type: String, Default: ''}
+  Image:
+    Type: String
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/squadhunt-video-staging@sha256:[a-f0-9]{64}$'
+    Description: Build/push reviewed staging source on the Docker laptop, then pin its immutable digest; never deploy to arc-backend.
+  DesiredCount: {Type: Number, Default: 0, AllowedValues: [0, 1]}
+Resources:
+  BackendSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub '${SecretNamespace}/backend'
+      Description: New generated staging credentials ONLY; no production secret copies
+      SecretString: '{}'
+      Tags: [{Key: Environment, Value: staging}]
+  Logs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: {RetentionInDays: 7}
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: squadhunt-video-staging
+      ClusterSettings: [{Name: containerInsights, Value: disabled}]
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: ecs-tasks.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: staging-image-and-logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: ['ecr:BatchCheckLayerAvailability', 'ecr:GetDownloadUrlForLayer', 'ecr:BatchGetImage']
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/squadhunt-video-staging'
+              - Effect: Allow
+                Action: ['logs:CreateLogStream', 'logs:PutLogEvents']
+                Resource:
+                  - !GetAtt Logs.Arn
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/squadhunt/video/squadhunt-video-staging-worker:*'
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: ecs-tasks.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: staging-only-runtime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref BackendSecret}
+              - Effect: Deny
+                Action: ['secretsmanager:GetSecretValue', 'secretsmanager:DescribeSecret']
+                NotResource: !Ref BackendSecret
+              - {Effect: Deny, Action: ['secretsmanager:BatchGetSecretValue', 'sts:AssumeRole', 'iam:PassRole'], Resource: '*'}
+              - Effect: Deny
+                Action: 's3:*'
+                NotResource: [!Sub 'arn:${AWS::Partition}:s3:::${BucketName}', !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/*']
+              - Effect: Allow
+                Action: ['s3:GetBucketLocation', 's3:ListBucket', 's3:ListBucketMultipartUploads']
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${BucketName}'
+              - Effect: Allow
+                Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject', 's3:AbortMultipartUpload', 's3:ListMultipartUploadParts']
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/*'
+  Task:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-api'
+      Cpu: '512'
+      Memory: '1024'
+      RuntimePlatform: {CpuArchitecture: X86_64, OperatingSystemFamily: LINUX}
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: api
+          Image: !Ref Image
+          Command: [node, --max-old-space-size=512, dist/launcher.js]
+          Essential: true
+          PortMappings: [{ContainerPort: 5001}]
+          Environment:
+            - {Name: NODE_ENV, Value: production}
+            - {Name: DEPLOYMENT_ENVIRONMENT, Value: staging}
+            - {Name: BACKEND_SECRET_ID, Value: !Ref BackendSecret}
+            - {Name: STAGING_MONGODB_HOST, Value: !Ref MongoHost}
+            - {Name: STAGING_MONGODB_DATABASE, Value: squadhunt_staging}
+            - {Name: STAGING_REDIS_HOST, Value: !Ref RedisHost}
+            - {Name: STAGING_S3_BUCKET, Value: !Ref BucketName}
+            - {Name: STAGING_API_ORIGIN, Value: !Ref ApiOrigin}
+            - {Name: STAGING_MEDIA_ORIGIN, Value: !Ref MediaOrigin}
+            - {Name: MONGODB_TLS, Value: 'true'}
+            - {Name: MONGODB_TLS_CA_FILE, Value: /app/rds-ca-bundle.pem}
+            - {Name: REDIS_TLS, Value: 'true'}
+            - {Name: POST_VIDEO_API_ORIGIN, Value: !Ref ApiOrigin}
+            - {Name: POST_VIDEO_CLOUDFRONT_URL, Value: !Ref MediaOrigin}
+            - {Name: AWS_REGION, Value: !Ref AWS::Region}
+            - {Name: PORT, Value: '5001'}
+            - {Name: POST_VIDEO_UPLOADS_ENABLED, Value: 'true'}
+            - {Name: CLIP_HLS_ENABLED, Value: 'true'}
+            - {Name: CLIP_HLS_WORKER_ENABLED, Value: 'false'}
+            - {Name: POST_VIDEO_PRIVATE_DELIVERY_ENABLED, Value: 'true'}
+            - {Name: POST_VIDEO_SOURCE_RETENTION_DAYS, Value: '0'}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: staging-api}
+          HealthCheck:
+            Command: [CMD-SHELL, 'curl -fsS --max-time 4 http://127.0.0.1:5001/health || exit 1']
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 90
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: squadhunt-video-staging-alb
+      Scheme: internal
+      Type: application
+      Subnets: !Ref PrivateSubnets
+      SecurityGroups: [!Ref AlbSecurityGroup]
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 5001
+      TargetType: ip
+      HealthCheckPath: /health
+      Matcher: {HttpCode: '200'}
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions: [{Type: forward, TargetGroupArn: !Ref TargetGroup}]
+  VpcOrigin:
+    Type: AWS::CloudFront::VpcOrigin
+    DependsOn: Listener
+    Properties:
+      VpcOriginEndpointConfig:
+        Arn: !Ref Alb
+        Name: !Sub '${AWS::StackName}-private-api'
+        HTTPPort: 80
+        HTTPSPort: 443
+        OriginProtocolPolicy: http-only
+        OriginSSLProtocols: [TLSv1.2]
+  Headers:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub '${AWS::StackName}-not-indexable'
+        CustomHeadersConfig:
+          Items:
+            - {Header: X-Robots-Tag, Value: 'noindex, nofollow, noarchive, nosnippet', Override: true}
+  ApiDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub '${AWS::StackName} staging API, no production origin/DNS'
+        Enabled: true
+        PriceClass: PriceClass_100
+        ViewerCertificate: {CloudFrontDefaultCertificate: true}
+        Origins:
+          - Id: staging-private-api
+            DomainName: !GetAtt Alb.DNSName
+            VpcOriginConfig: {VpcOriginId: !GetAtt VpcOrigin.Id}
+        DefaultCacheBehavior:
+          TargetOriginId: staging-private-api
+          ViewerProtocolPolicy: https-only
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+          ResponseHeadersPolicyId: !Ref Headers
+      Tags: [{Key: Environment, Value: staging}]
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      ServiceName: squadhunt-video-staging-api
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref Task
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCount
+      HealthCheckGracePeriodSeconds: 90
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+      NetworkConfiguration:
+        AwsvpcConfiguration: {AssignPublicIp: DISABLED, Subnets: !Ref PrivateSubnets, SecurityGroups: [!Ref ApiSecurityGroup]}
+      LoadBalancers: [{ContainerName: api, ContainerPort: 5001, TargetGroupArn: !Ref TargetGroup}]
+Outputs:
+  ApiOrigin: {Value: !Sub 'https://${ApiDistribution.DomainName}'}
+  ClusterArn: {Value: !GetAtt Cluster.Arn}
+  TaskDefinitionArn: {Value: !Ref Task}
+  ExecutionRoleArn: {Value: !GetAtt ExecutionRole.Arn}
+  TaskRoleArn: {Value: !GetAtt TaskRole.Arn}
+  BackendSecretArn: {Value: !Ref BackendSecret}
+  ImageRepository: {Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/squadhunt-video-staging'}

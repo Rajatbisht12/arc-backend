@@ -66,6 +66,8 @@ const videoStatusLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, stan
 const videoCreateLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, keyGenerator: (req) => String((req as typeof req & { user?: { _id?: string } }).user?._id || "anonymous"), message: { success: false, code: "UPLOAD_RATE_LIMIT", message: "Too many new video uploads. Try again later." } });
 router.get("/video-uploads/policy", protect, videoUploadController.policy);
 router.get("/video-playback/*", videoUploadController.playbackManifest);
+const videoGrantLimiter = rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false, message: { success: false, code: "PLAYBACK_RATE_LIMIT", message: "Too many playback renewals. Try again shortly." } });
+router.get("/video-playback-grants/:id", publicOptionalAuth, videoGrantLimiter, postIdValidation, handleValidationErrors, videoUploadController.renewPlaybackGrant);
 router.post("/video-uploads", protect, videoCreateLimiter, videoUploadController.create);
 router.get("/video-uploads/:id", protect, videoStatusLimiter, videoUploadController.get);
 router.get("/video-uploads/:id/parts", protect, videoStatusLimiter, videoUploadController.listParts);
