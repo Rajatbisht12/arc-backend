@@ -54,6 +54,8 @@ Parameters:
     Type: String
     Default: 'true'
     AllowedValues: ['true', 'false']
+Conditions:
+  WorkerExpected: !Not [!Equals [!Ref DesiredCount, 0]]
 Resources:
   Logs:
     Type: AWS::Logs::LogGroup
@@ -146,7 +148,7 @@ Resources:
       EvaluationPeriods: 5
       Threshold: 2
       ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: breaching
+      TreatMissingData: !If [WorkerExpected, breaching, notBreaching]
       AlarmActions: [!Ref AlarmTopicArn]
   WorkerErrorMetric:
     Type: AWS::Logs::MetricFilter
@@ -179,9 +181,21 @@ Resources:
         - MetricNamespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
           MetricName: PeakSampledMemoryBytes
           MetricValue: '$.peakSampledContainerMemoryBytes'
+  WorkerScratchMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref Logs
+      FilterPattern: '{ $.event = "video_worker_resource_sample" }'
+      MetricTransformations:
         - MetricNamespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
           MetricName: PeakSampledScratchBytes
           MetricValue: '$.peakSampledVideoScratchBytes'
+  WorkerJobDurationMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref Logs
+      FilterPattern: '{ $.event = "video_worker_resource_sample" }'
+      MetricTransformations:
         - MetricNamespace: !Sub 'SquadHunt/Video/${AWS::StackName}'
           MetricName: JobWallSeconds
           MetricValue: '$.jobWallSeconds'

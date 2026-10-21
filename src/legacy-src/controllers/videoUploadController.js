@@ -64,7 +64,10 @@ const playbackManifest = async (req, res) => {
   } catch (error) { res.status(Number(error.statusCode) || 503).json({ success: false, code: error.code || 'PLAYBACK_UNAVAILABLE', message: 'Video playback is unavailable. Refresh the post and try again.' }); }
 };
 module.exports = {
-  policy: respond(req => service.policy(req.user._id)),
+  policy: (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    return respond(request => service.policy(request.user._id))(req, res);
+  },
   create: respond(async req => ({ session: await service.createSession(req.user._id, req.body) })),
   get: respond(async req => ({ session: await service.getSession(req.user._id, req.params.id) })),
   listParts: respond(async req => ({ parts: await service.listParts(req.user._id, req.params.id) })),
