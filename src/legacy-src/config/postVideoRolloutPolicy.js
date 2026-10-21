@@ -32,4 +32,10 @@ const isPostVideoOwnerAllowed = (owner, environment = process.env) => {
   return canaryOwners(environment).has(String(owner || '').toLowerCase());
 };
 
-module.exports = { assertPostVideoRolloutConfiguration, isPostVideoOwnerAllowed };
+// A paused canary may still have READY sessions awaiting publication, so this
+// restriction deliberately does not depend on POST_VIDEO_UPLOADS_ENABLED.
+const requiresOwnerOnlyCanaryPost = (hasNewVideoUpload, environment = process.env) => Boolean(hasNewVideoUpload)
+  && isProduction(environment)
+  && (environment.POST_VIDEO_ROLLOUT_MODE || 'canary') === 'canary';
+
+module.exports = { assertPostVideoRolloutConfiguration, isPostVideoOwnerAllowed, requiresOwnerOnlyCanaryPost };

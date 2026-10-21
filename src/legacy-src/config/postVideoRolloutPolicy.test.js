@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { assertPostVideoRolloutConfiguration, isPostVideoOwnerAllowed } = require('./postVideoRolloutPolicy');
+const { assertPostVideoRolloutConfiguration, isPostVideoOwnerAllowed, requiresOwnerOnlyCanaryPost } = require('./postVideoRolloutPolicy');
 
 const owner = 'a'.repeat(24);
 const other = 'b'.repeat(24);
@@ -27,4 +27,12 @@ test('disabled production and isolated staging preserve their existing policy', 
   assert.doesNotThrow(() => assertPostVideoRolloutConfiguration({ ...production, POST_VIDEO_UPLOADS_ENABLED: 'false' }));
   const stage = { ...production, DEPLOYMENT_ENVIRONMENT: 'staging' };
   assert.equal(isPostVideoOwnerAllowed(other, stage), true);
+});
+
+test('production canary video posts stay owner-only even after uploads are paused', () => {
+  assert.equal(requiresOwnerOnlyCanaryPost(true, { ...production, POST_VIDEO_CANARY_USER_IDS: owner }), true);
+  assert.equal(requiresOwnerOnlyCanaryPost(true, { ...production, POST_VIDEO_UPLOADS_ENABLED: 'false' }), true);
+  assert.equal(requiresOwnerOnlyCanaryPost(false, production), false);
+  assert.equal(requiresOwnerOnlyCanaryPost(true, { ...production, POST_VIDEO_ROLLOUT_MODE: 'all' }), false);
+  assert.equal(requiresOwnerOnlyCanaryPost(true, { ...production, DEPLOYMENT_ENVIRONMENT: 'staging' }), false);
 });

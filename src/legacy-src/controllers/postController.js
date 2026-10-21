@@ -34,6 +34,7 @@ const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const { toPostMediaItem } = require('../utils/postMediaDimensions');
 const { processPostVideo } = require('../utils/videoProcessing');
 const { parseIds, postIdentity, acquirePublication, finishPublication, reserveReadyVideos, arrangeMedia, finalizeVideoPost } = require('../services/videoPostPublicationService');
+const { requiresOwnerOnlyCanaryPost } = require('../config/postVideoRolloutPolicy');
 const { enqueueClipTranscode } = require('../utils/jobQueue');
 const { resolvePostAccess, filterPostsForViewer } = require('../utils/privacyPolicy');
 const {
@@ -100,6 +101,7 @@ const createPost = async (req, res) => {
     const { text, postType, tags, visibility, recruitmentInfo, mentions } = req.body;
     const authorId = req.user._id;
     const videoUploadIds = parseIds(req.body.videoUploadIds);
+    const canaryRestricted = requiresOwnerOnlyCanaryPost(videoUploadIds.length);
     const clientPostId = req.body.clientPostId ? String(req.body.clientPostId).toLowerCase() : null;
     const reservedPostId = clientPostId || videoUploadIds.length ? postIdentity(authorId, clientPostId) : null;
     if (reservedPostId) {
@@ -319,7 +321,8 @@ const createPost = async (req, res) => {
       // explicit tags, all normalized + deduped for case-insensitive search.
       tags: indexedTags,
       mentions: mentionedUserIds,
-      visibility: visibility || 'public'
+      visibility: canaryRestricted ? 'private' : visibility || 'public',
+      ...(canaryRestricted ? { postVideoCanaryRestricted: true } : {})
     };
     // Server-side enforcement: a post with no image has nothing for a music
     // track to play over, so the attachment is dropped rather than stored.
@@ -410,7 +413,7 @@ const createPost = async (req, res) => {
     });
 
     // Create mention notifications
-    if (mentionedUserIds.length > 0) {
+    if (!canaryRestricted && mentionedUserIds.length > 0) {
       for (const mentionedUserId of mentionedUserIds) {
         // Don't notify if user mentioned themselves
         if (mentionedUserId.toString() !== authorId.toString()) {
@@ -1475,6 +1478,16 @@ const updatePost = async (req, res) => {
       return res.status(403).json({
         success: false,
         message: 'You can only update your own posts'
+      });
+    }
+
+    // The allowlist controls creation, not viewing. Keep canary media
+    // owner-only even if a later edit or feature pause changes the request.
+    if (post.postVideoCanaryRestricted && visibility !== undefined && visibility !== 'private') {
+      return res.status(403).json({
+        success: false,
+        code: 'CANARY_POST_PRIVATE',
+        message: 'This test video must remain private during the canary.'
       });
     }
 

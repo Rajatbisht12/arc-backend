@@ -7,6 +7,9 @@ const postSchema = new mongoose.Schema({
     required: [true, 'Post author is required']
   },
   clientPostId: { type: String },
+  // Persist the production large-video canary's owner-only publication rule
+  // across feature pauses and later rollout-mode changes.
+  postVideoCanaryRestricted: { type: Boolean, immutable: true },
   content: {
     text: {
       type: String,

@@ -12,6 +12,9 @@ Parameters:
     Type: AWS::EC2::SecurityGroup::Id
   RedisSecurityGroup:
     Type: AWS::EC2::SecurityGroup::Id
+  ApiTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Existing API task group; private DNS also routes its AWS service calls through these endpoints.
 Resources:
   WorkerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -27,6 +30,7 @@ Resources:
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref WorkerSecurityGroup}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref ApiTaskSecurityGroup}
       SecurityGroupEgress:
         - {IpProtocol: '-1', CidrIp: '0.0.0.0/0'}
   DocumentDbFromWorker:

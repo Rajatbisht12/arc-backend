@@ -13,7 +13,9 @@ const Follow = require('../models/Follow');
 const publication = require('./videoPostPublicationService');
 const service = require('./videoUploadService');
 const controller = require('../controllers/videoUploadController');
+const postController = require('../controllers/postController');
 const { tokenForPrefix } = require('../utils/postVideoDelivery');
+const { resolvePostAccess } = require('../utils/privacyPolicy');
 const oldEnvironment = { ...process.env };
 const systemBinary = process.env.MONGOMS_SYSTEM_BINARY || '/opt/homebrew/bin/mongod';
 const available = fs.existsSync(systemBinary);
@@ -59,6 +61,40 @@ test('concurrent cancellation versus publication permits only one winning transi
   ]);
   assert.equal(results.filter(row => row.status === 'fulfilled').length, 1);
   await publication.finishPublication(lease);
+});
+test('production canary publication remains owner-only even when the client requests public', { skip: !available }, async () => {
+  const keys = ['NODE_ENV', 'DEPLOYMENT_ENVIRONMENT', 'POST_VIDEO_ROLLOUT_MODE', 'POST_VIDEO_CANARY_USER_IDS'];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  Object.assign(process.env, { NODE_ENV: 'production', DEPLOYMENT_ENVIRONMENT: 'production', POST_VIDEO_ROLLOUT_MODE: 'canary', POST_VIDEO_CANARY_USER_IDS: String(owner) });
+  const session = await newReady();
+  const response = () => ({ statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
+  try {
+    const created = response();
+    await postController.createPost({ user: { _id: owner, userType: 'player' }, files: [], body: {
+      text: 'Synthetic canary fixture', postType: 'general', visibility: 'public',
+      videoUploadIds: JSON.stringify([String(session._id)]), clientPostId: randomUUID()
+    } }, created);
+    assert.equal(created.statusCode, 201, JSON.stringify(created.body));
+    const post = await Post.findOne({ author: owner, 'content.media.uploadSessionId': session._id });
+    assert.ok(post);
+    assert.equal(post.visibility, 'private');
+    assert.equal(post.postVideoCanaryRestricted, true);
+    assert.equal((await resolvePostAccess({ post, viewer: null })).allowed, false);
+    assert.equal((await resolvePostAccess({ post, viewer: { _id: owner } })).allowed, true);
+
+    const edited = response();
+    await postController.updatePost({ params: { id: String(post._id) }, user: { _id: owner }, body: { visibility: 'public' } }, edited);
+    assert.equal(edited.statusCode, 403);
+    assert.equal(edited.body.code, 'CANARY_POST_PRIVATE');
+    assert.equal((await Post.findById(post._id)).visibility, 'private');
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+    await Post.deleteMany({ 'content.media.uploadSessionId': session._id });
+    await Session.deleteOne({ _id: session._id });
+  }
 });
 test('successful publication preserves association and private manifest access is revoked after privacy/delete changes', { skip: !available }, async () => {
   const session = await newReady(); const postId = publication.postIdentity(owner, randomUUID());

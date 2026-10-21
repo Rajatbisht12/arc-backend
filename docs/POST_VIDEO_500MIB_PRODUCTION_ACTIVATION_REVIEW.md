@@ -1,5 +1,9 @@
 # Production 500 MiB activation review
 
+> Historical pre-deployment review. For the live phase-one infrastructure,
+> `arc-backend:206`, dedicated legacy-HLS proof and remaining activation
+> blockers, see [POST_VIDEO_500MIB_PRODUCTION_PHASE1_STATUS.md](POST_VIDEO_500MIB_PRODUCTION_PHASE1_STATUS.md).
+
 21 October 2026, Asia/Kolkata. This is a reviewed change proposal, **not**
 authorization to execute it. Physical iPhone and signed release build checks
 were explicitly deferred for this follow-up; their absence is not recorded as
