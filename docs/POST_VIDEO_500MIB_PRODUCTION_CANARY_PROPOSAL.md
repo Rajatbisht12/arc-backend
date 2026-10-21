@@ -1,9 +1,23 @@
 # Production large-video canary proposal — 21 October 2026
 
-**Proposal, not an authorization or deployment record.** The live API remains
-`arc-backend:206` with `POST_VIDEO_UPLOADS_ENABLED=false`, the embedded HLS
-worker enabled, and the dedicated worker at ECS/CloudFormation desired 0.
-The earlier approval covered a compatibility-only cutover, not 500 MiB uploads.
+> Historical proposal. Do not use the deployment/status assertions below as a
+> live runbook. On 22 October 2026 the single-owner `xyz` production canary is
+> **paused**: the API is stable on `arc-backend:208` with
+> `POST_VIDEO_UPLOADS_ENABLED=false` and the embedded HLS worker enabled; the
+> dedicated worker is at desired/running `0/0`. The synthetic legacy-path QA
+> post `6ad88a0ea204bfe96eff6618` and its exact source/54 generated objects
+> were deleted; CloudFront invalidation `ICFXIAUBKP4EVX4RDW6L648745`
+> completed. No new-pipeline production upload has passed. Five worker alarms
+> were OK at the pause check. The October 24 reminder schedules and recurring
+> private endpoint costs still require an operator decision.
+>
+> A stale open Web composer used a cached disabled policy and published that
+> first QA video through the legacy path. Local, **uncommitted and undeployed**
+> follow-up fixes now recheck policy at submission and reject an allowlisted
+> owner's legacy video request during an active canary. Do not resume the
+> production canary until these changes have been reviewed, released with
+> uploads still disabled, and smoke-tested. The approval below describes the
+> original canary boundary, not approval of a new production release.
 
 ## New fail-closed QA safeguard prepared locally
 

@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { assertPostVideoRolloutConfiguration, isPostVideoOwnerAllowed, requiresOwnerOnlyCanaryPost } = require('./postVideoRolloutPolicy');
+const { assertPostVideoRolloutConfiguration, isPostVideoOwnerAllowed, requiresOwnerOnlyCanaryPost, rejectsLegacyCanaryVideo } = require('./postVideoRolloutPolicy');
 
 const owner = 'a'.repeat(24);
 const other = 'b'.repeat(24);
@@ -35,4 +35,14 @@ test('production canary video posts stay owner-only even after uploads are pause
   assert.equal(requiresOwnerOnlyCanaryPost(false, production), false);
   assert.equal(requiresOwnerOnlyCanaryPost(true, { ...production, POST_VIDEO_ROLLOUT_MODE: 'all' }), false);
   assert.equal(requiresOwnerOnlyCanaryPost(true, { ...production, DEPLOYMENT_ENVIRONMENT: 'staging' }), false);
+});
+
+test('active canary rejects legacy video only for its allowlisted QA owner', () => {
+  const canary = { ...production, POST_VIDEO_CANARY_USER_IDS: owner };
+  assert.equal(rejectsLegacyCanaryVideo(owner, true, canary), true);
+  assert.equal(rejectsLegacyCanaryVideo(other, true, canary), false);
+  assert.equal(rejectsLegacyCanaryVideo(owner, false, canary), false);
+  assert.equal(rejectsLegacyCanaryVideo(owner, true, { ...canary, POST_VIDEO_UPLOADS_ENABLED: 'false' }), false);
+  assert.equal(rejectsLegacyCanaryVideo(owner, true, { ...canary, POST_VIDEO_ROLLOUT_MODE: 'all', POST_VIDEO_CANARY_USER_IDS: '' }), false);
+  assert.equal(rejectsLegacyCanaryVideo(owner, true, { ...canary, DEPLOYMENT_ENVIRONMENT: 'staging' }), false);
 });

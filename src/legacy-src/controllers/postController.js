@@ -34,7 +34,7 @@ const { respondToMediaUploadError } = require('../utils/mediaUploadError');
 const { toPostMediaItem } = require('../utils/postMediaDimensions');
 const { processPostVideo } = require('../utils/videoProcessing');
 const { parseIds, postIdentity, acquirePublication, finishPublication, reserveReadyVideos, arrangeMedia, finalizeVideoPost } = require('../services/videoPostPublicationService');
-const { requiresOwnerOnlyCanaryPost } = require('../config/postVideoRolloutPolicy');
+const { requiresOwnerOnlyCanaryPost, rejectsLegacyCanaryVideo } = require('../config/postVideoRolloutPolicy');
 const { enqueueClipTranscode } = require('../utils/jobQueue');
 const { resolvePostAccess, filterPostsForViewer } = require('../utils/privacyPolicy');
 const {
@@ -101,6 +101,10 @@ const createPost = async (req, res) => {
     const { text, postType, tags, visibility, recruitmentInfo, mentions } = req.body;
     const authorId = req.user._id;
     const videoUploadIds = parseIds(req.body.videoUploadIds);
+    const mediaFiles = Array.isArray(req.files) ? req.files : (req.files?.media || []);
+    if (rejectsLegacyCanaryVideo(authorId, mediaFiles.some(file => String(file.mimetype || '').startsWith('video/')))) {
+      return res.status(409).json({ success: false, code: 'CANARY_VIDEO_UPLOAD_PATH_REQUIRED', message: 'Refresh the post composer and retry the video upload. This test account cannot publish legacy videos during the canary.' });
+    }
     const canaryRestricted = requiresOwnerOnlyCanaryPost(videoUploadIds.length);
     const clientPostId = req.body.clientPostId ? String(req.body.clientPostId).toLowerCase() : null;
     const reservedPostId = clientPostId || videoUploadIds.length ? postIdentity(authorId, clientPostId) : null;
@@ -155,7 +159,6 @@ const createPost = async (req, res) => {
       }
     }
 
-    const mediaFiles = Array.isArray(req.files) ? req.files : (req.files?.media || []);
     const coverFile = Array.isArray(req.files) ? null : req.files?.cover?.[0];
     const uploadId = randomUUID();
     if (mediaFiles.length + videoUploadIds.length > 5) return res.status(400).json({ success: false, code: 'MEDIA_COUNT_LIMIT', message: 'A post may contain up to five photos and videos.' });

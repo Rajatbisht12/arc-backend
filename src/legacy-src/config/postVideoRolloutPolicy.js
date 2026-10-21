@@ -38,4 +38,11 @@ const requiresOwnerOnlyCanaryPost = (hasNewVideoUpload, environment = process.en
   && isProduction(environment)
   && (environment.POST_VIDEO_ROLLOUT_MODE || 'canary') === 'canary';
 
-module.exports = { assertPostVideoRolloutConfiguration, isPostVideoOwnerAllowed, requiresOwnerOnlyCanaryPost };
+// A stale or older client must not publish an ordinary public legacy video
+// from the QA owner while the new-video production canary is active.
+const rejectsLegacyCanaryVideo = (owner, hasLegacyVideo, environment = process.env) => Boolean(hasLegacyVideo)
+  && environment.POST_VIDEO_UPLOADS_ENABLED === 'true'
+  && requiresOwnerOnlyCanaryPost(true, environment)
+  && isPostVideoOwnerAllowed(owner, environment);
+
+module.exports = { assertPostVideoRolloutConfiguration, isPostVideoOwnerAllowed, requiresOwnerOnlyCanaryPost, rejectsLegacyCanaryVideo };
