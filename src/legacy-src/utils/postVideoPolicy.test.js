@@ -3,7 +3,8 @@ const test = require('node:test');
 const { MAX_VIDEO_BYTES, PART_SIZE, validateVideoInput, verifyParts, expectedPartSize } = require('./postVideoPolicy');
 const { parseIds, postIdentity, arrangeMedia } = require('../services/videoPostPublicationService');
 const { generateKeyPairSync } = require('crypto');
-const { privateDeliveryReady, resolvePlaybackKey, verifyPlaybackToken, rewriteManifest, tokenForPrefix } = require('./postVideoDelivery');
+const { privateDeliveryReady, resolvePlaybackKey, verifyPlaybackToken, rewriteManifest, tokenForPrefix, signPlaybackAsset, playbackAuthorization } = require('./postVideoDelivery');
+const { resolveClientMediaPayload } = require('./privateMediaDelivery');
 const owner = 'a'.repeat(24), id = 'b'.repeat(24);
 const clientUploadId = '123e4567-e89b-42d3-a456-426614174000';
 
@@ -47,6 +48,21 @@ test('private delivery fails closed and grants are signed and expire', () => {
   assert.throws(() => verifyPlaybackToken(tokenForPrefix(prefix, 1, environment), environment), { code: 'PLAYBACK_EXPIRED' });
   assert.match(resolvePlaybackKey(`${prefix}fallback.mp4`, environment), /Signature=.+&Key-Pair-Id=test-key/);
 });
+test('new-pipeline manifest and direct-asset grants never exceed the approved five-minute window', t => {
+  const epoch = 1_800_000_000_000;
+  let now = epoch;
+  t.mock.method(Date, 'now', () => now);
+  for (const offset of [0, 29_999, 30_000, 899_999]) {
+    now = epoch + offset;
+    const hls = new URL(resolvePlaybackKey(`${prefix}master.m3u8`, environment));
+    const grant = verifyPlaybackToken(hls.searchParams.get('token'), environment, now);
+    const mp4 = new URL(resolvePlaybackKey(`${prefix}fallback.mp4`, environment));
+    const expiry = Number(mp4.searchParams.get('Expires'));
+    assert.ok(grant.exp * 1000 <= now + 300_000, 'manifest grant must expire within five minutes');
+    assert.equal(expiry, grant.exp, 'direct assets must not outlive the manifest grant');
+    assert.ok(expiry * 1000 > now, 'fresh grants are usable');
+  }
+});
 test('HLS master, variant, init and segment URI grants stay within authorized prefix', () => {
   const token = tokenForPrefix(prefix, Math.floor(Date.now() / 1000) + 300, environment);
   const master = rewriteManifest('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900000\n360p/index.m3u8\n', `${prefix}master.m3u8`, token, environment);
@@ -55,4 +71,25 @@ test('HLS master, variant, init and segment URI grants stay within authorized pr
   assert.match(media, /URI="https:\/\/media.example.com\/.+init.mp4\?Expires=/);
   assert.match(media, /seg_000.m4s\?Expires=/);
   for (const uri of ['../../../../other.m3u8', 'https://evil.example/clip.ts', '/clip.ts', 'seg.ts?token=bad']) assert.throws(() => rewriteManifest(`#EXTM3U\n${uri}`, `${prefix}master.m3u8`, token, environment));
+});
+
+test('stable short buckets, response-only renewal metadata and legacy delivery stay separate', async t => {
+  let now = 1800000000000; t.mock.method(Date, 'now', () => now);
+  const first = resolvePlaybackKey(`${prefix}master.m3u8`, environment, owner);
+  now += 29000; assert.equal(resolvePlaybackKey(`${prefix}master.m3u8`, environment, owner), first);
+  const auth = playbackAuthorization(`${prefix}master.m3u8`);
+  assert.equal(auth.expiresInSeconds, 271); assert.equal(auth.refreshAfterSeconds, 211);
+  now += 1000; assert.notEqual(resolvePlaybackKey(`${prefix}master.m3u8`, environment, owner), first);
+  assert.throws(() => verifyPlaybackToken(tokenForPrefix(prefix, now/1000 + 3600, environment), environment), { code: 'PLAYBACK_EXPIRED' });
+  assert.throws(() => signPlaybackAsset(`${prefix}fallback.mp4`, now/1000 + 301, environment), { code: 'INVALID_PLAYBACK_EXPIRY' });
+  const dto = { type: 'video', url: `${prefix}fallback.mp4`, playback: { status: 'ready', hlsUrl: `${prefix}master.m3u8`, fallbackMp4Url: `${prefix}fallback.mp4` } };
+  dto[Symbol.for('squadhunt.postVideoViewer')] = owner;
+  const original = JSON.stringify(dto);
+  await resolveClientMediaPayload(dto, environment, async () => { throw Error('Legacy private signer not needed'); });
+  assert.ok(!original.includes('authorization'));
+  assert.equal(dto.playback.authorization.renewalPath, `/api/posts/video-playback-grants/${id}`);
+  assert.equal(verifyPlaybackToken(new URL(dto.playback.hlsUrl).searchParams.get('token'), environment).viewerId, owner);
+  const legacy = { type: 'video', url: 'https://legacy.example/video.mp4', playback: { status: 'ready', hlsUrl: 'https://legacy.example/master.m3u8' } };
+  await resolveClientMediaPayload(legacy, environment, async () => {});
+  assert.equal(legacy.playback.authorization, undefined); assert.equal(legacy.url, 'https://legacy.example/video.mp4');
 });

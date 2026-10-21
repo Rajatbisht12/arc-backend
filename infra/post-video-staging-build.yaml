@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Approved temporary staging-only image builder; no production secrets/storage/repository permissions.
+Parameters:
+  SourceBucket: {Type: String, AllowedPattern: '^squadhunt-video-staging-[a-z0-9-]+$'}
+  SourceKey: {Type: String, AllowedPattern: '^staging-build-source/[a-f0-9]{64}\.zip$'}
+  SourceSnapshot: {Type: String, AllowedPattern: '^[a-f0-9]{64}$'}
+  BaseRevision: {Type: String, AllowedPattern: '^[a-f0-9]{40}$'}
+Resources:
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: squadhunt-video-staging
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration: {ScanOnPush: true}
+  Logs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: {RetentionInDays: 7}
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: codebuild.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: build-staging-image-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 's3:GetObject', Resource: !Sub 'arn:${AWS::Partition}:s3:::${SourceBucket}/${SourceKey}'}
+              - {Effect: Allow, Action: ['s3:GetBucketLocation', 's3:GetBucketAcl'], Resource: !Sub 'arn:${AWS::Partition}:s3:::${SourceBucket}'}
+              - {Effect: Allow, Action: ['logs:CreateLogStream', 'logs:PutLogEvents'], Resource: !GetAtt Logs.Arn}
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: ['ecr:BatchCheckLayerAvailability', 'ecr:GetDownloadUrlForLayer', 'ecr:BatchGetImage', 'ecr:InitiateLayerUpload', 'ecr:UploadLayerPart', 'ecr:CompleteLayerUpload', 'ecr:PutImage', 'ecr:DescribeImages']
+                Resource: !GetAtt Repository.Arn
+              - {Effect: Deny, Action: ['secretsmanager:*', 'sts:AssumeRole', 'iam:PassRole'], Resource: '*'}
+  Project:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: squadhunt-video-staging-build
+      ServiceRole: !GetAtt Role.Arn
+      Artifacts: {Type: NO_ARTIFACTS}
+      TimeoutInMinutes: 20
+      QueuedTimeoutInMinutes: 10
+      ConcurrentBuildLimit: 1
+      LogsConfig:
+        CloudWatchLogs: {Status: ENABLED, GroupName: !Ref Logs}
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - {Name: SOURCE_SNAPSHOT, Value: !Ref SourceSnapshot}
+          - {Name: BASE_REVISION, Value: !Ref BaseRevision}
+          - {Name: IMAGE_REPOSITORY, Value: !GetAtt Repository.RepositoryUri}
+      Source:
+        Type: S3
+        Location: !Sub '${SourceBucket}/${SourceKey}'
+        BuildSpec: |
+          version: 0.2
+          env:
+            shell: bash
+          phases:
+            pre_build:
+              commands:
+                - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${IMAGE_REPOSITORY%%/*}"
+                - export IMAGE_TAG="stage-$(printf '%.12s' "$SOURCE_SNAPSHOT")"
+            build:
+              commands:
+                - docker build --platform linux/amd64 --build-arg SOURCE_REVISION="workspace-sha256-${SOURCE_SNAPSHOT}" --build-arg SOURCE_REPOSITORY=local-reviewed-staging-snapshot --label "org.squadhunt.base-revision=${BASE_REVISION}" --label "org.squadhunt.source-archive-sha256=${SOURCE_SNAPSHOT}" -t "${IMAGE_REPOSITORY}:${IMAGE_TAG}" .
+            post_build:
+              commands:
+                - test "$CODEBUILD_BUILD_SUCCEEDING" = 1
+                - docker push "${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+                - aws ecr describe-images --repository-name squadhunt-video-staging --image-ids "imageTag=${IMAGE_TAG}" --query 'imageDetails[0].imageDigest' --output text
+Outputs:
+  ProjectName: {Value: !Ref Project}
+  RepositoryUri: {Value: !GetAtt Repository.RepositoryUri}

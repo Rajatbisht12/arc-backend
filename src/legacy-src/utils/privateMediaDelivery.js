@@ -1,6 +1,6 @@
 const path = require('path');
 const { rewritePublicMediaUrl } = require('./mediaDelivery');
-const { normalizedPlaybackKey, resolvePlaybackKey } = require('./postVideoDelivery');
+const { normalizedPlaybackKey, resolvePlaybackKey, playbackAuthorization } = require('./postVideoDelivery');
 
 // These prefixes contain content whose visibility is decided by an
 // authenticated API query. They must never be converted to an unsigned CDN
@@ -71,6 +71,7 @@ const resolveClientMediaPayload = async (
   signer = loadSigner()
 ) => {
   const signedByKey = new Map();
+  const grantNow = Date.now();
   const seen = new WeakSet();
   const sign = async (key) => {
     if (!signedByKey.has(key)) signedByKey.set(key, Promise.resolve(signer(key)));
@@ -78,7 +79,7 @@ const resolveClientMediaPayload = async (
   };
 
   const visit = async (node, inheritedViewer = '') => {
-    if (typeof node === 'string') return normalizedPlaybackKey(node) ? resolvePlaybackKey(node, environment, inheritedViewer) : rewritePublicMediaUrl(node, environment);
+    if (typeof node === 'string') return normalizedPlaybackKey(node) ? resolvePlaybackKey(node, environment, inheritedViewer, grantNow) : rewritePublicMediaUrl(node, environment);
     if (!node || typeof node !== 'object' || node instanceof Date || Buffer.isBuffer(node)) return node;
     if (seen.has(node)) return node;
     seen.add(node);
@@ -88,6 +89,11 @@ const resolveClientMediaPayload = async (
       for (let index = 0; index < node.length; index += 1) node[index] = await visit(node[index], playbackViewer);
       return node;
     }
+
+    // Response-only metadata: never persisted to Post or applied to legacy keys.
+    const playbackKey = node.type === 'video' && node.playback?.status === 'ready'
+      && normalizedPlaybackKey(node.playback.hlsUrl || node.url);
+    if (playbackKey) node.playback.authorization = playbackAuthorization(playbackKey, grantNow);
 
     // Prefer the storage key carried beside the URL, then support legacy rows
     // that persisted only the full S3 URL.

@@ -1,26 +1,25 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Additive IAM policy for private post-video ingestion and processing. Review before attaching.
+Description: Additive IAM policy for the existing API role's private post-video ingestion, manifests and cleanup. The dedicated worker has a separate role template.
 Parameters:
   BucketArn:
     Type: String
   ApiRoleName:
-    Type: String
-  WorkerRoleName:
     Type: String
 Resources:
   VideoPolicy:
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: SquadHuntPrivatePostVideo
-      Roles: [!Ref ApiRoleName, !Ref WorkerRoleName]
+      Roles: [!Ref ApiRoleName]
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject', 's3:AbortMultipartUpload', 's3:ListMultipartUploadParts']
-            Resource:
-              - !Sub '${BucketArn}/post-video-sources/*'
-              - !Sub '${BucketArn}/post-video-playback/*'
+            Resource: !Sub '${BucketArn}/post-video-sources/*'
+          - Effect: Allow
+            Action: ['s3:GetObject', 's3:DeleteObject']
+            Resource: !Sub '${BucketArn}/post-video-playback/*'
           - Effect: Allow
             Action: ['s3:ListBucket']
             Resource: !Ref BucketArn

@@ -11,6 +11,7 @@ import { registerModules } from "./modules";
 import { registerLegacyErrorHandlers } from "./modules/legacy/legacy.middleware";
 import { createCloudflareOriginAuthMiddleware } from "./infrastructure/security/cloudflareOrigin";
 import { logger } from "./config/logger";
+import { safeAccessLog } from "./infrastructure/security/accessLog";
 import { publicMediaJsonReplacer } from "./legacy-src/utils/mediaDelivery";
 
 export const createApp = () => {
@@ -59,7 +60,7 @@ export const createApp = () => {
     }
   }));
   app.use(express.urlencoded({ extended: true, limit: "2mb" }));
-  app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+  app.use(morgan(safeAccessLog));
   app.use(passport.initialize());
 
   app.use((req, res, next) => {

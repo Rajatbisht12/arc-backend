@@ -2,6 +2,10 @@ const { createHmac, createSign, timingSafeEqual } = require('crypto');
 const path = require('path');
 const { uploadError } = require('./postVideoPolicy');
 const PREFIX = /^post-video-playback\/[a-f0-9]{24}\/[a-f0-9]{24}\/[a-zA-Z0-9_-]+\//;
+// Approved policy for the NEW pipeline only. Legacy media delivery is separate.
+const GRANT_TTL_SECONDS = 300;
+const GRANT_RENEW_EARLY_SECONDS = 60;
+const grantExpiry = (now = Date.now()) => Math.floor(now / 30_000) * 30 + GRANT_TTL_SECONDS;
 const safeUrl = value => {
   try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' ? url.origin : ''; }
   catch { return ''; }
@@ -25,7 +29,7 @@ const normalizedPlaybackKey = value => {
   return key;
 };
 const tokenForPrefix = (prefix, expiresAt, environment, viewerId = '') => {
-  const payload = Buffer.from(JSON.stringify({ prefix, exp: expiresAt, viewerId: /^[a-f0-9]{24}$/.test(String(viewerId)) ? String(viewerId) : '' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ prefix, iat: expiresAt - GRANT_TTL_SECONDS, exp: expiresAt, viewerId: /^[a-f0-9]{24}$/.test(String(viewerId)) ? String(viewerId) : '' })).toString('base64url');
   const signature = createHmac('sha256', config(environment).tokenSecret).update(payload).digest('base64url');
   return `${payload}.${signature}`;
 };
@@ -37,12 +41,15 @@ const verifyPlaybackToken = (token, environment = process.env, now = Date.now())
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw uploadError('PLAYBACK_EXPIRED', 'Playback authorization has expired.', 403);
   let data;
   try { data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { throw uploadError('PLAYBACK_EXPIRED', 'Playback authorization has expired.', 403); }
-  if (!Number.isSafeInteger(data.exp) || data.exp <= now / 1000 || !PREFIX.test(data.prefix) || data.prefix.match(PREFIX)?.[0] !== data.prefix) throw uploadError('PLAYBACK_EXPIRED', 'Playback authorization has expired.', 403);
+  if (!Number.isSafeInteger(data.iat) || !Number.isSafeInteger(data.exp) || data.exp <= now / 1000
+    || data.exp <= data.iat || data.exp - data.iat > GRANT_TTL_SECONDS || data.iat > now / 1000 + 5
+    || !PREFIX.test(data.prefix) || data.prefix.match(PREFIX)?.[0] !== data.prefix) throw uploadError('PLAYBACK_EXPIRED', 'Playback authorization has expired.', 403);
   return data;
 };
 const cfBase64 = buffer => buffer.toString('base64').replace(/\+/g, '-').replace(/=/g, '_').replace(/\//g, '~');
 const signPlaybackAsset = (key, expiresAt, environment = process.env) => {
   if (!normalizedPlaybackKey(key)) throw uploadError('INVALID_PLAYBACK_PATH', 'Invalid playback asset.', 403);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt > Math.floor(Date.now() / 1000) + GRANT_TTL_SECONDS) throw uploadError('INVALID_PLAYBACK_EXPIRY', 'Invalid playback authorization.', 403);
   const cfg = config(environment);
   const url = `${cfg.cdn}/${key}`;
   const policy = JSON.stringify({ Statement: [{ Resource: url, Condition: { DateLessThan: { 'AWS:EpochTime': expiresAt } } }] });
@@ -51,13 +58,23 @@ const signPlaybackAsset = (key, expiresAt, environment = process.env) => {
 };
 const manifestUrl = (key, token, environment) => `${config(environment).api}/api/posts/video-playback/${key.split('/').slice(1).map(encodeURIComponent).join('/')}?token=${encodeURIComponent(token)}`;
 // Called only after the surrounding API has authorized the post/session viewer.
-const resolvePlaybackKey = (key, environment = process.env, viewerId = '') => {
+const resolvePlaybackKey = (key, environment = process.env, viewerId = '', now = Date.now()) => {
   if (!normalizedPlaybackKey(key)) return key;
   if (!privateDeliveryReady(environment)) throw uploadError('VIDEO_DELIVERY_NOT_CONFIGURED', 'Video playback is temporarily unavailable.', 503);
-  // Stable within a 15-minute window so feed refreshes do not reset a player.
-  const expiresAt = Math.floor(Date.now() / 900000) * 900 + 3600;
+  // Stable for 30 seconds, with an absolute maximum five-minute lifetime.
+  const expiresAt = grantExpiry(now);
   const prefix = key.match(PREFIX)[0];
   return key.endsWith('.m3u8') ? manifestUrl(key, tokenForPrefix(prefix, expiresAt, environment, viewerId), environment) : signPlaybackAsset(key, expiresAt, environment);
+};
+const playbackAuthorization = (key, now = Date.now()) => {
+  if (!normalizedPlaybackKey(key)) return undefined;
+  const expiresAt = grantExpiry(now);
+  return {
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+    expiresInSeconds: Math.max(1, expiresAt - Math.floor(now / 1000)),
+    refreshAfterSeconds: Math.max(1, expiresAt - Math.floor(now / 1000) - GRANT_RENEW_EARLY_SECONDS),
+    renewalPath: `/api/posts/video-playback-grants/${key.split('/')[2]}`,
+  };
 };
 const rewriteManifest = (text, key, token, environment = process.env) => {
   const grant = verifyPlaybackToken(token, environment);
@@ -70,4 +87,4 @@ const rewriteManifest = (text, key, token, environment = process.env) => {
   };
   return String(text).split('\n').map(line => line.startsWith('#') ? line.replace(/URI="([^"]+)"/g, (_, uri) => `URI="${rewrite(uri)}"`) : line.trim() ? rewrite(line.trim()) : line).join('\n');
 };
-module.exports = { privateDeliveryReady, assertDeliveryReady, normalizedPlaybackKey, resolvePlaybackKey, verifyPlaybackToken, rewriteManifest, signPlaybackAsset, tokenForPrefix };
+module.exports = { privateDeliveryReady, assertDeliveryReady, normalizedPlaybackKey, resolvePlaybackKey, verifyPlaybackToken, rewriteManifest, signPlaybackAsset, tokenForPrefix, playbackAuthorization, GRANT_TTL_SECONDS };

@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: NEW isolated staging bucket and private CloudFront only; never merge into a production bucket/distribution.
+Parameters:
+  BucketName:
+    Type: String
+    AllowedPattern: '^squadhunt-video-staging-[a-z0-9-]+$'
+  SigningPublicKeyPem:
+    Type: String
+    Description: Staging-only RSA public key; private key belongs only in the staging backend secret.
+  LocalWebOrigin:
+    Type: String
+    Default: http://localhost:3000
+    AllowedValues: ['http://localhost:3000', 'http://localhost:3001']
+Resources:
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: [!Ref LocalWebOrigin]
+            AllowedMethods: [PUT, GET, HEAD]
+            AllowedHeaders: ['content-type', 'content-length', 'range', 'x-amz-*']
+            ExposedHeaders: [ETag, Accept-Ranges, Content-Range, Content-Length]
+            MaxAge: 600
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortAbandonedStagingMultipartOnly
+            Status: Enabled
+            Prefix: post-video-sources/
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 2}
+      Tags:
+        - {Key: Project, Value: SquadHunt}
+        - {Key: Environment, Value: staging}
+        - {Key: Purpose, Value: post-video-validation}
+  PublicKey:
+    Type: AWS::CloudFront::PublicKey
+    Properties:
+      PublicKeyConfig:
+        CallerReference: !Sub '${AWS::StackName}-staging-key-v1'
+        Name: !Sub '${AWS::StackName}-key'
+        EncodedKey: !Ref SigningPublicKeyPem
+  KeyGroup:
+    Type: AWS::CloudFront::KeyGroup
+    Properties:
+      KeyGroupConfig:
+        Name: !Sub '${AWS::StackName}-key-group'
+        Items: [!Ref PublicKey]
+  OriginAccess:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+  Headers:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub '${AWS::StackName}-cors'
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders: {Items: ['Range', 'Content-Type']}
+          AccessControlAllowMethods: {Items: [GET, HEAD, OPTIONS]}
+          AccessControlAllowOrigins: {Items: [!Ref LocalWebOrigin]}
+          AccessControlExposeHeaders: {Items: [ETag, Accept-Ranges, Content-Range, Content-Length]}
+          AccessControlMaxAgeSec: 600
+          OriginOverride: true
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub '${AWS::StackName} isolated staging video delivery'
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        ViewerCertificate: {CloudFrontDefaultCertificate: true}
+        Origins:
+          - Id: staging-private-s3
+            DomainName: !GetAtt Bucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccess.Id
+            S3OriginConfig: {OriginAccessIdentity: ''}
+        # Restricted default prevents source URLs falling through to an
+        # unrestricted cache behavior. OAC may read ONLY the playback prefix.
+        DefaultCacheBehavior:
+          TargetOriginId: staging-private-s3
+          ViewerProtocolPolicy: https-only
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: false
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !Ref Headers
+          TrustedKeyGroups: [!Ref KeyGroup]
+      Tags:
+        - {Key: Environment, Value: staging}
+        - {Key: Project, Value: SquadHunt}
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyPlainHttp
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource: [!GetAtt Bucket.Arn, !Sub '${Bucket.Arn}/*']
+            Condition: {Bool: {'aws:SecureTransport': false}}
+          - Sid: StagingCloudFrontPlaybackOnly
+            Effect: Allow
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: s3:GetObject
+            Resource: !Sub '${Bucket.Arn}/post-video-playback/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+          - Sid: NeverDeliverSourcesThroughCloudFront
+            Effect: Deny
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: s3:GetObject
+            Resource: !Sub '${Bucket.Arn}/post-video-sources/*'
+Outputs:
+  BucketName:
+    Value: !Ref Bucket
+  MediaOrigin:
+    Value: !Sub 'https://${Distribution.DomainName}'
+  DistributionId:
+    Value: !Ref Distribution
+  SigningPublicKeyId:
+    Value: !Ref PublicKey
+  TrustedKeyGroupId:
+    Value: !Ref KeyGroup

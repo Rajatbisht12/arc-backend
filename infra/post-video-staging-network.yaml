@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: New isolated SquadHunt video staging VPC; no production peering/routes/security groups.
+Parameters:
+  CloudFrontPrefixListId:
+    Type: String
+    AllowedPattern: '^pl-[a-f0-9]+$'
+    Description: Read-only lookup of com.amazonaws.global.cloudfront.origin-facing in the target region
+  CloudFrontVpcOriginSecurityGroupId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^sg-[a-f0-9]+$'
+    Description: After bootstrap, the AWS-created VPC-origin service group in THIS staging VPC
+Conditions:
+  HasVpcOriginSecurityGroup: !Not [!Equals [!Ref CloudFrontVpcOriginSecurityGroupId, '']]
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.248.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{Key: Name, Value: squadhunt-video-staging}, {Key: Environment, Value: staging}]
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  Attachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: {VpcId: !Ref Vpc, InternetGatewayId: !Ref InternetGateway}
+  PublicA:
+    Type: AWS::EC2::Subnet
+    Properties: {VpcId: !Ref Vpc, CidrBlock: 10.248.0.0/24, AvailabilityZone: !Select [0, !GetAZs '']}
+  PublicB:
+    Type: AWS::EC2::Subnet
+    Properties: {VpcId: !Ref Vpc, CidrBlock: 10.248.1.0/24, AvailabilityZone: !Select [1, !GetAZs '']}
+  PrivateA:
+    Type: AWS::EC2::Subnet
+    Properties: {VpcId: !Ref Vpc, CidrBlock: 10.248.10.0/24, AvailabilityZone: !Select [0, !GetAZs '']}
+  PrivateB:
+    Type: AWS::EC2::Subnet
+    Properties: {VpcId: !Ref Vpc, CidrBlock: 10.248.11.0/24, AvailabilityZone: !Select [1, !GetAZs '']}
+  PublicRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref Vpc}
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: Attachment
+    Properties: {RouteTableId: !Ref PublicRoutes, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref InternetGateway}
+  PublicAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicA, RouteTableId: !Ref PublicRoutes}
+  PublicAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicB, RouteTableId: !Ref PublicRoutes}
+  NatAddress:
+    Type: AWS::EC2::EIP
+    DependsOn: Attachment
+    Properties: {Domain: vpc}
+  Nat:
+    Type: AWS::EC2::NatGateway
+    Properties: {AllocationId: !GetAtt NatAddress.AllocationId, SubnetId: !Ref PublicA}
+  PrivateRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref Vpc}
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties: {RouteTableId: !Ref PrivateRoutes, DestinationCidrBlock: 0.0.0.0/0, NatGatewayId: !Ref Nat}
+  PrivateAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PrivateA, RouteTableId: !Ref PrivateRoutes}
+  PrivateAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PrivateB, RouteTableId: !Ref PrivateRoutes}
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref PrivateRoutes]
+  ApiSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: {VpcId: !Ref Vpc, GroupDescription: Staging API only; inbound from staging ALB}
+  WorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: {VpcId: !Ref Vpc, GroupDescription: Staging worker; no inbound}
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: Staging internal ALB; CloudFront VPC origin ingress only
+      SecurityGroupIngress:
+        - !If
+          - HasVpcOriginSecurityGroup
+          - {IpProtocol: tcp, FromPort: 80, ToPort: 80, SourceSecurityGroupId: !Ref CloudFrontVpcOriginSecurityGroupId}
+          - {IpProtocol: tcp, FromPort: 80, ToPort: 80, SourcePrefixListId: !Ref CloudFrontPrefixListId}
+  ApiIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: {GroupId: !Ref ApiSecurityGroup, IpProtocol: tcp, FromPort: 5001, ToPort: 5001, SourceSecurityGroupId: !Ref AlbSecurityGroup}
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: Staging DocumentDB; staging task groups only
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 27017, ToPort: 27017, SourceSecurityGroupId: !Ref ApiSecurityGroup}
+        - {IpProtocol: tcp, FromPort: 27017, ToPort: 27017, SourceSecurityGroupId: !Ref WorkerSecurityGroup}
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      GroupDescription: Staging Redis TLS; staging task groups only
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 6379, ToPort: 6379, SourceSecurityGroupId: !Ref ApiSecurityGroup}
+        - {IpProtocol: tcp, FromPort: 6379, ToPort: 6379, SourceSecurityGroupId: !Ref WorkerSecurityGroup}
+Outputs:
+  VpcId: {Value: !Ref Vpc}
+  PrivateSubnets: {Value: !Join [',', [!Ref PrivateA, !Ref PrivateB]]}
+  ApiSecurityGroup: {Value: !Ref ApiSecurityGroup}
+  WorkerSecurityGroup: {Value: !Ref WorkerSecurityGroup}
+  AlbSecurityGroup: {Value: !Ref AlbSecurityGroup}
+  DatabaseSecurityGroup: {Value: !Ref DatabaseSecurityGroup}
+  CacheSecurityGroup: {Value: !Ref CacheSecurityGroup}

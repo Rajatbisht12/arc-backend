@@ -79,6 +79,23 @@ test('staging cannot obtain bootstrap identities from a copied/mislabelled secre
   secret = { STAGING_REDIS_HOST: staged.STAGING_REDIS_HOST };
   await assert.rejects(loadSecretsManagerEnv(), /startup refused/);
 });
+test('generated CloudFront origins require independent task bindings and exact origin matches', async () => {
+  const api = 'https://dstagingapi123.cloudfront.net';
+  const media = 'https://dstagingmedia456.cloudfront.net';
+  const candidate = { ...staged, STAGING_API_ORIGIN: api, STAGING_MEDIA_ORIGIN: media,
+    POST_VIDEO_API_ORIGIN: api, POST_VIDEO_CLOUDFRONT_URL: media, AWS_S3_CDN_URL: media };
+  assert.doesNotThrow(() => assertRuntimeIsolation(candidate));
+  assert.throws(() => assertRuntimeIsolation({ ...candidate, STAGING_MEDIA_ORIGIN: undefined }), /Staging isolation/);
+  for (const bad of ['https://dother123.cloudfront.net', api, 'https://media.squadhunt.com', `${media}/path`, `${media}?secret=x`, `https://user:password@dstagingmedia456.cloudfront.net`]) {
+    assert.throws(() => assertRuntimeIsolation({ ...candidate, POST_VIDEO_CLOUDFRONT_URL: bad }), /Staging isolation/, bad);
+  }
+  for (const bad of ['http://dstagingmedia456.cloudfront.net', 'https://media.squadhunt.com', `${media}:444`, `${media}/path`, `${media}#fragment`]) {
+    assert.throws(() => assertRuntimeIsolation({ ...candidate, STAGING_MEDIA_ORIGIN: bad }), /Staging isolation/);
+  }
+  Object.assign(process.env, staged);
+  secret = { STAGING_MEDIA_ORIGIN: media };
+  await assert.rejects(loadSecretsManagerEnv(), /startup refused/, 'secret cannot invent a trusted origin binding');
+});
 test('copied production resource values or static AWS credentials fail before application startup', async () => {
   Object.assign(process.env, staged);
   delete process.env.MONGODB_URI;
@@ -104,4 +121,12 @@ test('compatibility mode refuses conflicting shared worker/upload topology inste
     secret = { [name]: value };
     await assert.rejects(loadSecretsManagerEnv(), /startup refused/);
   }
+});
+test('runtime secret cannot choose or expand the upload canary', async () => {
+  process.env.POST_VIDEO_ROLLOUT_MODE = 'canary';
+  process.env.POST_VIDEO_CANARY_USER_IDS = 'a'.repeat(24);
+  secret = { POST_VIDEO_ROLLOUT_MODE: 'all' };
+  await assert.rejects(loadSecretsManagerEnv(), /startup refused/);
+  secret = { POST_VIDEO_CANARY_USER_IDS: 'b'.repeat(24) };
+  await assert.rejects(loadSecretsManagerEnv(), /startup refused/);
 });
