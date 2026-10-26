@@ -1,0 +1,1571 @@
+{
+  "checkedAt": "2026-10-26T07:21:37.122Z",
+  "account": "906446637180",
+  "region": "us-east-1",
+  "profile": "default/root",
+  "before": {
+    "account": "906446637180",
+    "region": "us-east-1",
+    "caller": {
+      "UserId": "906446637180",
+      "Account": "906446637180",
+      "Arn": "arn:aws:iam::906446637180:root"
+    },
+    "observedAtMs": 1792999269905,
+    "state": {
+      "services": [
+        {
+          "name": "arc-backend",
+          "task": "arn:aws:ecs:us-east-1:906446637180:task-definition/arc-backend:214",
+          "desired": 1,
+          "running": 1,
+          "pending": 0,
+          "rollout": "COMPLETED",
+          "health": "HEALTHY",
+          "imageDigest": "sha256:a29b5385cb74a688d4ca15eb6f32f58d7bda0f7f3c2bd4610ddc57107aaed8de",
+          "cpu": "512",
+          "memory": "1024",
+          "flags": [
+            {
+              "name": "CLIP_HLS_ENABLED",
+              "value": "true"
+            },
+            {
+              "name": "CLIP_HLS_WORKER_ENABLED",
+              "value": "false"
+            },
+            {
+              "name": "POST_VIDEO_PRIVATE_DELIVERY_ENABLED",
+              "value": "true"
+            },
+            {
+              "name": "POST_VIDEO_ROLLOUT_MODE",
+              "value": "canary"
+            },
+            {
+              "name": "POST_VIDEO_SOURCE_RETENTION_DAYS",
+              "value": "0"
+            },
+            {
+              "name": "POST_VIDEO_UPLOADS_ENABLED",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "name": "squadhunt-prod-video-worker-Service-5bK8EbU7Uwmj",
+          "task": "arn:aws:ecs:us-east-1:906446637180:task-definition/squadhunt-prod-video-worker-worker:3",
+          "desired": 1,
+          "running": 1,
+          "pending": 0,
+          "rollout": "COMPLETED",
+          "health": "HEALTHY",
+          "imageDigest": "sha256:a29b5385cb74a688d4ca15eb6f32f58d7bda0f7f3c2bd4610ddc57107aaed8de",
+          "cpu": "2048",
+          "memory": "4096",
+          "flags": [
+            {
+              "name": "CLIP_HLS_ENABLED",
+              "value": "true"
+            },
+            {
+              "name": "CLIP_HLS_WORKER_ENABLED",
+              "value": "false"
+            },
+            {
+              "name": "POST_VIDEO_UPLOADS_ENABLED",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    "albHealthy": true,
+    "healthHttp": 200
+  },
+  "after": {
+    "account": "906446637180",
+    "region": "us-east-1",
+    "caller": {
+      "UserId": "906446637180",
+      "Account": "906446637180",
+      "Arn": "arn:aws:iam::906446637180:root"
+    },
+    "observedAtMs": 1792999297122,
+    "state": {
+      "services": [
+        {
+          "name": "arc-backend",
+          "task": "arn:aws:ecs:us-east-1:906446637180:task-definition/arc-backend:214",
+          "desired": 1,
+          "running": 1,
+          "pending": 0,
+          "rollout": "COMPLETED",
+          "health": "HEALTHY",
+          "imageDigest": "sha256:a29b5385cb74a688d4ca15eb6f32f58d7bda0f7f3c2bd4610ddc57107aaed8de",
+          "cpu": "512",
+          "memory": "1024",
+          "flags": [
+            {
+              "name": "CLIP_HLS_ENABLED",
+              "value": "true"
+            },
+            {
+              "name": "CLIP_HLS_WORKER_ENABLED",
+              "value": "false"
+            },
+            {
+              "name": "POST_VIDEO_PRIVATE_DELIVERY_ENABLED",
+              "value": "true"
+            },
+            {
+              "name": "POST_VIDEO_ROLLOUT_MODE",
+              "value": "canary"
+            },
+            {
+              "name": "POST_VIDEO_SOURCE_RETENTION_DAYS",
+              "value": "0"
+            },
+            {
+              "name": "POST_VIDEO_UPLOADS_ENABLED",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "name": "squadhunt-prod-video-worker-Service-5bK8EbU7Uwmj",
+          "task": "arn:aws:ecs:us-east-1:906446637180:task-definition/squadhunt-prod-video-worker-worker:3",
+          "desired": 1,
+          "running": 1,
+          "pending": 0,
+          "rollout": "COMPLETED",
+          "health": "HEALTHY",
+          "imageDigest": "sha256:a29b5385cb74a688d4ca15eb6f32f58d7bda0f7f3c2bd4610ddc57107aaed8de",
+          "cpu": "2048",
+          "memory": "4096",
+          "flags": [
+            {
+              "name": "CLIP_HLS_ENABLED",
+              "value": "true"
+            },
+            {
+              "name": "CLIP_HLS_WORKER_ENABLED",
+              "value": "false"
+            },
+            {
+              "name": "POST_VIDEO_UPLOADS_ENABLED",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    "albHealthy": true,
+    "healthHttp": 200
+  },
+  "tasks": [
+    {
+      "service": "arc-backend",
+      "taskDefinition": "arn:aws:ecs:us-east-1:906446637180:task-definition/arc-backend:214",
+      "desired": 1,
+      "running": 1,
+      "pending": 0,
+      "deploymentConfiguration": {
+        "deploymentCircuitBreaker": {
+          "enable": false,
+          "rollback": false,
+          "resetOnHealthyTask": true,
+          "thresholdConfiguration": {
+            "type": "BOUNDED_PERCENT",
+            "value": 50
+          }
+        },
+        "maximumPercent": 200,
+        "minimumHealthyPercent": 100,
+        "strategy": "ROLLING",
+        "bakeTimeInMinutes": 0
+      },
+      "enableExecuteCommand": true,
+      "network": {
+        "awsvpcConfiguration": {
+          "subnets": [
+            "subnet-057a5622e4ba1a11d",
+            "subnet-0cbc135aa12fe862e"
+          ],
+          "securityGroups": [
+            "sg-08094c692a658ebb9"
+          ],
+          "assignPublicIp": "ENABLED"
+        }
+      },
+      "definition": {
+        "family": "arc-backend",
+        "revision": 214,
+        "taskRoleArn": "arn:aws:iam::906446637180:role/arc-ecs-task-role",
+        "executionRoleArn": "arn:aws:iam::906446637180:role/arc-ecs-exec-role",
+        "cpu": "512",
+        "memory": "1024",
+        "volumes": [],
+        "requiresCompatibilities": [
+          "FARGATE"
+        ],
+        "containers": [
+          {
+            "name": "arc-backend",
+            "image": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend@sha256:a29b5385cb74a688d4ca15eb6f32f58d7bda0f7f3c2bd4610ddc57107aaed8de",
+            "essential": true,
+            "environment": [
+              {
+                "name": "CLIP_HLS_WORKER_ENABLED",
+                "value": "false"
+              },
+              {
+                "name": "POST_VIDEO_UPLOADS_ENABLED",
+                "value": "true"
+              },
+              {
+                "name": "POST_VIDEO_CANARY_USER_IDS",
+                "value": "6a43644a23ce4d367a0e6d15"
+              },
+              {
+                "name": "POST_VIDEO_ROLLOUT_MODE",
+                "value": "canary"
+              },
+              {
+                "name": "POST_VIDEO_PRIVATE_DELIVERY_ENABLED",
+                "value": "true"
+              },
+              {
+                "name": "CLIP_HLS_ENABLED",
+                "value": "true"
+              },
+              {
+                "name": "DISCOVERY_EXPOSURE_MIGRATION_VERSION",
+                "value": "2"
+              },
+              {
+                "name": "POST_VIDEO_SOURCE_RETENTION_DAYS",
+                "value": "0"
+              }
+            ],
+            "allEnvironmentNames": [
+              "ADMIN_PASSWORD_HASH",
+              "ADMIN_USERNAME",
+              "AWS_S3_CDN_URL",
+              "BANK_DETAILS_SCHEMA_VERSION",
+              "CLIP_HLS_ENABLED",
+              "CLIP_HLS_WORKER_ENABLED",
+              "DISCOVERY_EXPOSURE_MIGRATION_VERSION",
+              "MONETIZATION_ADMIN_SCHEMA_VERSION",
+              "POST_VIDEO_CANARY_USER_IDS",
+              "POST_VIDEO_PRIVATE_DELIVERY_ENABLED",
+              "POST_VIDEO_ROLLOUT_MODE",
+              "POST_VIDEO_SOURCE_RETENTION_DAYS",
+              "POST_VIDEO_UPLOADS_ENABLED"
+            ],
+            "secretReferences": [
+              {
+                "name": "AWS_REGION",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:AWS_REGION::"
+              },
+              {
+                "name": "AWS_S3_BUCKET",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:AWS_S3_BUCKET::"
+              },
+              {
+                "name": "CLIENT_URL",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:CLIENT_URL::"
+              },
+              {
+                "name": "CORS_ORIGIN",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:CORS_ORIGIN::"
+              },
+              {
+                "name": "GEMINI_API_KEY",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GEMINI_API_KEY::"
+              },
+              {
+                "name": "GOOGLE_CALLBACK_URL",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GOOGLE_CALLBACK_URL::"
+              },
+              {
+                "name": "GOOGLE_CLIENT_ID",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GOOGLE_CLIENT_ID::"
+              },
+              {
+                "name": "GOOGLE_CLIENT_SECRET",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GOOGLE_CLIENT_SECRET::"
+              },
+              {
+                "name": "GROQ_API_KEY",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:GROQ_API_KEY::"
+              },
+              {
+                "name": "JWT_REFRESH_SECRET",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:JWT_REFRESH_SECRET::"
+              },
+              {
+                "name": "JWT_SECRET",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:JWT_SECRET::"
+              },
+              {
+                "name": "MONGODB_TLS",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:MONGODB_TLS::"
+              },
+              {
+                "name": "MONGODB_TLS_CA_FILE",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:MONGODB_TLS_CA_FILE::"
+              },
+              {
+                "name": "MONGODB_URI",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:MONGODB_URI::"
+              },
+              {
+                "name": "NODE_ENV",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:NODE_ENV::"
+              },
+              {
+                "name": "PORT",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:PORT::"
+              },
+              {
+                "name": "RAZORPAY_KEY_ID",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:RAZORPAY_KEY_ID::"
+              },
+              {
+                "name": "RAZORPAY_KEY_SECRET",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:RAZORPAY_KEY_SECRET::"
+              },
+              {
+                "name": "REDIS_HOST",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:REDIS_HOST::"
+              },
+              {
+                "name": "REDIS_PORT",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:REDIS_PORT::"
+              },
+              {
+                "name": "REDIS_TLS",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:REDIS_TLS::"
+              },
+              {
+                "name": "SMTP_FROM",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_FROM::"
+              },
+              {
+                "name": "SMTP_HOST",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_HOST::"
+              },
+              {
+                "name": "SMTP_PASS",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_PASS::"
+              },
+              {
+                "name": "SMTP_PORT",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_PORT::"
+              },
+              {
+                "name": "SMTP_SECURE",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_SECURE::"
+              },
+              {
+                "name": "SMTP_USER",
+                "valueFrom": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk:SMTP_USER::"
+              }
+            ],
+            "healthCheck": {
+              "command": [
+                "CMD-SHELL",
+                "curl -f http://localhost:5001/health || exit 1"
+              ],
+              "interval": 30,
+              "timeout": 5,
+              "retries": 3,
+              "startPeriod": 60
+            },
+            "logConfiguration": {
+              "logDriver": "awslogs",
+              "options": {
+                "awslogs-group": "/ecs/arc-backend",
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "ecs"
+              },
+              "secretOptions": []
+            },
+            "portMappings": [
+              {
+                "containerPort": 5001,
+                "hostPort": 5001,
+                "protocol": "tcp",
+                "name": "arc-backend-5001-tcp"
+              }
+            ]
+          }
+        ]
+      },
+      "live": [
+        {
+          "arn": "arn:aws:ecs:us-east-1:906446637180:task/arc-cluster/e51220f8878e40e592d082c6de4a08a0",
+          "taskDefinitionArn": "arn:aws:ecs:us-east-1:906446637180:task-definition/arc-backend:214",
+          "lastStatus": "RUNNING",
+          "healthStatus": "HEALTHY",
+          "createdAt": "2026-10-22T02:30:31.841000+05:30",
+          "startedAt": "2026-10-22T02:31:02.462000+05:30",
+          "containers": [
+            {
+              "name": "arc-backend",
+              "lastStatus": "RUNNING",
+              "healthStatus": "HEALTHY",
+              "imageDigest": "sha256:a29b5385cb74a688d4ca15eb6f32f58d7bda0f7f3c2bd4610ddc57107aaed8de"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "service": "squadhunt-prod-video-worker-Service-5bK8EbU7Uwmj",
+      "taskDefinition": "arn:aws:ecs:us-east-1:906446637180:task-definition/squadhunt-prod-video-worker-worker:3",
+      "desired": 1,
+      "running": 1,
+      "pending": 0,
+      "deploymentConfiguration": {
+        "deploymentCircuitBreaker": {
+          "enable": true,
+          "rollback": true,
+          "resetOnHealthyTask": true,
+          "thresholdConfiguration": {
+            "type": "BOUNDED_PERCENT",
+            "value": 50
+          }
+        },
+        "maximumPercent": 200,
+        "minimumHealthyPercent": 100,
+        "strategy": "ROLLING",
+        "bakeTimeInMinutes": 0
+      },
+      "enableExecuteCommand": false,
+      "network": {
+        "awsvpcConfiguration": {
+          "subnets": [
+            "subnet-06fb84aa845192232",
+            "subnet-085740aa38ed2d5af"
+          ],
+          "securityGroups": [
+            "sg-027c63b048af774da"
+          ],
+          "assignPublicIp": "DISABLED"
+        }
+      },
+      "definition": {
+        "family": "squadhunt-prod-video-worker-worker",
+        "revision": 3,
+        "taskRoleArn": "arn:aws:iam::906446637180:role/squadhunt-prod-video-roles-WorkerTaskRole-pfneHq58I2ZC",
+        "executionRoleArn": "arn:aws:iam::906446637180:role/squadhunt-prod-video-roles-WorkerExecutionRole-v5s6vXZMKneB",
+        "cpu": "2048",
+        "memory": "4096",
+        "runtimePlatform": {
+          "cpuArchitecture": "X86_64",
+          "operatingSystemFamily": "LINUX"
+        },
+        "ephemeralStorage": {
+          "sizeInGiB": 40
+        },
+        "volumes": [],
+        "requiresCompatibilities": [
+          "FARGATE"
+        ],
+        "containers": [
+          {
+            "name": "video-worker",
+            "image": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend@sha256:a29b5385cb74a688d4ca15eb6f32f58d7bda0f7f3c2bd4610ddc57107aaed8de",
+            "command": [
+              "node",
+              "--max-old-space-size=1024",
+              "dist/video-worker-launcher.js"
+            ],
+            "entryPoint": [],
+            "essential": true,
+            "environment": [
+              {
+                "name": "CLIP_HLS_WORKER_ENABLED",
+                "value": "false"
+              },
+              {
+                "name": "POST_VIDEO_UPLOADS_ENABLED",
+                "value": "false"
+              },
+              {
+                "name": "VIDEO_WORKER_HEALTH_PORT",
+                "value": "5002"
+              },
+              {
+                "name": "CLIP_HLS_WORKER_CONCURRENCY",
+                "value": "1"
+              },
+              {
+                "name": "CLIP_HLS_ENABLED",
+                "value": "true"
+              },
+              {
+                "name": "NODE_ENV",
+                "value": "production"
+              },
+              {
+                "name": "CLIP_HLS_JOB_ATTEMPTS",
+                "value": "3"
+              },
+              {
+                "name": "VIDEO_WORKER_RESOURCE_METRICS_ENABLED",
+                "value": "true"
+              },
+              {
+                "name": "VIDEO_FFMPEG_THREADS",
+                "value": "2"
+              }
+            ],
+            "allEnvironmentNames": [
+              "BACKEND_SECRET_ID",
+              "CLIP_HLS_ENABLED",
+              "CLIP_HLS_JOB_ATTEMPTS",
+              "CLIP_HLS_WORKER_CONCURRENCY",
+              "CLIP_HLS_WORKER_ENABLED",
+              "DEPLOYMENT_ENVIRONMENT",
+              "NODE_ENV",
+              "POST_VIDEO_UPLOADS_ENABLED",
+              "STAGING_API_ORIGIN",
+              "STAGING_MEDIA_ORIGIN",
+              "STAGING_MONGODB_DATABASE",
+              "STAGING_MONGODB_HOST",
+              "STAGING_REDIS_HOST",
+              "STAGING_S3_BUCKET",
+              "VIDEO_FFMPEG_THREADS",
+              "VIDEO_WORKER_HEALTH_PORT",
+              "VIDEO_WORKER_RESOURCE_METRICS_ENABLED"
+            ],
+            "secretReferences": [],
+            "healthCheck": {
+              "command": [
+                "CMD-SHELL",
+                "curl -fsS --max-time 4 http://127.0.0.1:5002/ || exit 1"
+              ],
+              "interval": 30,
+              "timeout": 5,
+              "retries": 3,
+              "startPeriod": 90
+            },
+            "stopTimeout": 120,
+            "logConfiguration": {
+              "logDriver": "awslogs",
+              "options": {
+                "awslogs-group": "/squadhunt/video/squadhunt-prod-video-worker",
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "video"
+              },
+              "secretOptions": []
+            },
+            "portMappings": []
+          }
+        ]
+      },
+      "live": [
+        {
+          "arn": "arn:aws:ecs:us-east-1:906446637180:task/arc-cluster/de81490ed23a4130ba947d7160b69907",
+          "taskDefinitionArn": "arn:aws:ecs:us-east-1:906446637180:task-definition/squadhunt-prod-video-worker-worker:3",
+          "lastStatus": "RUNNING",
+          "healthStatus": "HEALTHY",
+          "createdAt": "2026-10-22T01:56:25.255000+05:30",
+          "startedAt": "2026-10-22T01:56:47.291000+05:30",
+          "containers": [
+            {
+              "name": "video-worker",
+              "lastStatus": "RUNNING",
+              "healthStatus": "HEALTHY",
+              "imageDigest": "sha256:a29b5385cb74a688d4ca15eb6f32f58d7bda0f7f3c2bd4610ddc57107aaed8de"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "db": [
+    {
+      "id": "arc-db",
+      "version": "5.0.0",
+      "status": "available",
+      "encrypted": true,
+      "backupRetentionDays": 1,
+      "latestRestorableTime": "2026-10-26T07:18:53.801000+00:00",
+      "members": [
+        "arc-db-1"
+      ]
+    }
+  ],
+  "recentImages": [
+    {
+      "digest": "sha256:d8c5f87f79150b1413ac27ceaf0c76a221885836a0a196b2ec768f76695d70db",
+      "tags": [
+        "efb549992ca1-20261021085216"
+      ],
+      "pushedAt": "2026-10-21T14:22:54.503000+05:30",
+      "bytes": 144947045
+    },
+    {
+      "digest": "sha256:2f0361a234e53f0b93b9c2f80f3f123f88d0c134c15895825e2b98001414b3f5",
+      "tags": [
+        "73396dd31e93-20261021060809"
+      ],
+      "pushedAt": "2026-10-21T11:42:22.218000+05:30",
+      "bytes": 144949074
+    },
+    {
+      "digest": "sha256:cbd57c9f550b8143f9d05046d878d56e9b9f0ca68c9b6799e0250dc40ac73d55",
+      "tags": [
+        "5fbb677a9e37-20261019213717"
+      ],
+      "pushedAt": "2026-10-20T03:10:59.801000+05:30",
+      "bytes": 144917255
+    },
+    {
+      "digest": "sha256:85bb1a51490b7b7d5abee7bacf8a8dd7470568d862cc7c5b2868432e853ba679",
+      "tags": [
+        "f4660ee"
+      ],
+      "pushedAt": "2026-10-19T18:29:13.486000+05:30",
+      "bytes": 144886888
+    },
+    {
+      "digest": "sha256:1863a1f3bf87da1101bc14fcffe5f511cadf830fead145363171cf6487cd2340",
+      "tags": [
+        "29ff51d"
+      ],
+      "pushedAt": "2026-10-19T17:18:18.632000+05:30",
+      "bytes": 144883157
+    },
+    {
+      "digest": "sha256:f5435d433eab56c57f5f1f8b7b23babb16e01f6d2fdf34fee84cb52f83eb0499",
+      "tags": [
+        "6094190"
+      ],
+      "pushedAt": "2026-10-19T12:43:05.741000+05:30",
+      "bytes": 144834147
+    },
+    {
+      "digest": "sha256:fca148875f586784f9cb6584be1a3fa3172f00e81a9a8bbe5c5c3de238eab586",
+      "tags": [
+        "9a46cf6"
+      ],
+      "pushedAt": "2026-10-19T12:01:10.290000+05:30",
+      "bytes": 144831282
+    },
+    {
+      "digest": "sha256:c5d5feab38fc4baf46880bffd977adfb85c9304393aba1ed90f05dac28d87b2e",
+      "tags": [
+        "67421c1"
+      ],
+      "pushedAt": "2026-10-18T04:18:26.700000+05:30",
+      "bytes": 144828610
+    },
+    {
+      "digest": "sha256:614f3b4876744463d0b64a01ecd4de5ddf02ee31c27af60c8010bd25b9748e81",
+      "tags": [
+        "a075c7d"
+      ],
+      "pushedAt": "2026-10-17T12:43:29.368000+05:30",
+      "bytes": 144822576
+    },
+    {
+      "digest": "sha256:0602fdf3845fcb782fb84c836700781ced4147222b9f8d89150b5a79b18ccc63",
+      "tags": [
+        "6eead1b"
+      ],
+      "pushedAt": "2026-10-17T04:25:41.665000+05:30",
+      "bytes": 144809027
+    },
+    {
+      "digest": "sha256:cac0e7503125920832cc535c033dc7c62186046954dd2d31b35a89afe244618a",
+      "tags": [
+        "2aee196"
+      ],
+      "pushedAt": "2026-10-17T02:26:59.324000+05:30",
+      "bytes": 144797029
+    },
+    {
+      "digest": "sha256:f35435ec36b4ba9b5dd5002ba6e628268dc2beab4e5a854d0c182b52d8181298",
+      "tags": [
+        "59bc593"
+      ],
+      "pushedAt": "2026-10-16T03:21:24.287000+05:30",
+      "bytes": 144764058
+    }
+  ],
+  "ecrPaginationPresent": true,
+  "existingBuildProjectNames": [],
+  "logFindings": [
+    {
+      "service": "arc-backend",
+      "group": "/ecs/arc-backend",
+      "limited": true,
+      "events": [
+        {
+          "timestamp": 1792996599146,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996599158,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996599490,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996658903,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996658928,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996659245,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996718865,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996718869,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996719176,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996778895,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996778907,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996779200,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996839490,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996839498,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996840200,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996898699,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996898701,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996899155,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996958899,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996958900,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792996959214,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792997018947,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792997018950,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792997019238,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792997078719,
+          "level": "error",
+          "message": "Auth error"
+        },
+        {
+          "timestamp": 1792997078720,
+          "level": "error",
+          "message": "Auth error"
+        }
+      ]
+    },
+    {
+      "service": "squadhunt-prod-video-worker-Service-5bK8EbU7Uwmj",
+      "group": "/squadhunt/video/squadhunt-prod-video-worker",
+      "limited": true,
+      "events": [
+        {
+          "timestamp": 1792996609410,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996639411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996669411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996699411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996729411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996759411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996789411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996819411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996849411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996879411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996909410,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996939410,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996969410,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792996999411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997029411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997059410,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997089411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997119410,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997149411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997179411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997209411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997239410,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997269411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997299411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997329410,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997359410,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997389411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997419411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997449411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997479411,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997509412,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997539412,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997569412,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997599413,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997629414,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997659413,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997689414,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997719414,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997749413,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997779413,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997809414,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997839415,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997869414,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997899414,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997929415,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997959415,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792997989416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998019416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998049416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998079416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998109415,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998139416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998169415,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998199416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998229415,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998259416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998289416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998319415,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998349416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998379416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998409415,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998439416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998469415,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998499416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998529416,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998559417,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998589417,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998619417,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998649417,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998679417,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998709418,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998739419,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998769418,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998799419,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998829419,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998859419,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998889419,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998919419,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998949420,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792998979420,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999009421,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999039421,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999069421,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999099422,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999129421,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999159422,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999189422,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999219422,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999249422,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        },
+        {
+          "timestamp": 1792999279421,
+          "event": "video_queue",
+          "waiting": 0,
+          "active": 0,
+          "delayed": 0,
+          "failed": 352
+        }
+      ]
+    }
+  ],
+  "awsMutations": 0,
+  "approvalNeededBeforeWrites": true
+}

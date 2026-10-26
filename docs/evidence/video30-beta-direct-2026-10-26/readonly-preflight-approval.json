@@ -1,0 +1,79 @@
+{
+  "kind": "SINGLE_EXISTING_IMAGE_READ_ONLY_PREFLIGHT_APPROVAL_NOT_DEPLOYMENT",
+  "account": "906446637180",
+  "region": "us-east-1",
+  "profile": "default/root",
+  "taskDefinition": "arn:aws:ecs:us-east-1:906446637180:task-definition/arc-backend:214",
+  "image": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend@sha256:a29b5385cb74a688d4ca15eb6f32f58d7bda0f7f3c2bd4610ddc57107aaed8de",
+  "scriptSha256": "925ff0d84b9b364890b58af6850791c5f74f0dc26ebb7e6b4f3089bd63091aec",
+  "request": {
+    "cluster": "arc-cluster",
+    "taskDefinition": "arn:aws:ecs:us-east-1:906446637180:task-definition/arc-backend:214",
+    "launchType": "FARGATE",
+    "count": 1,
+    "networkConfiguration": {
+      "awsvpcConfiguration": {
+        "subnets": [
+          "subnet-057a5622e4ba1a11d",
+          "subnet-0cbc135aa12fe862e"
+        ],
+        "securityGroups": [
+          "sg-08094c692a658ebb9"
+        ],
+        "assignPublicIp": "ENABLED"
+      }
+    },
+    "startedBy": "video30-beta-readonly-20261026",
+    "group": "video30-beta-readonly-20261026",
+    "overrides": {
+      "containerOverrides": [
+        {
+          "name": "arc-backend",
+          "command": [
+            "node",
+            "-e",
+            "'use strict';\n// Read-only preflight for the existing API task. Never imports app/server,\n// workers or models; never creates collections/indexes/jobs or prints secrets.\nconst fs = require('node:fs');\nconst { createHash } = require('node:crypto');\nconst main = async () => {\n  await require('/app/dist/config/secrets.js').loadSecretsManagerEnv();\n  const { MongoClient } = require('/app/node_modules/mongodb');\n  const { Queue } = require('/app/node_modules/bullmq');\n  if (!process.env.MONGODB_URI || !process.env.REDIS_HOST) throw Error('RUNTIME_CONFIGURATION_MISSING');\n  const client = new MongoClient(process.env.MONGODB_URI, {\n    retryWrites: false, serverSelectionTimeoutMS: 15000, connectTimeoutMS: 15000,\n    ...(process.env.MONGODB_TLS === 'true' ? { tls: true,\n      ...(process.env.MONGODB_TLS_CA_FILE && fs.existsSync(process.env.MONGODB_TLS_CA_FILE)\n        ? { tlsCAFile: process.env.MONGODB_TLS_CA_FILE } : {}) } : {}),\n  });\n  const queue = new Queue('clip-video', { connection: {\n    host: process.env.REDIS_HOST, port: Number(process.env.REDIS_PORT || 6379),\n    username: process.env.REDIS_USERNAME, password: process.env.REDIS_PASSWORD,\n    connectTimeout: 10000, maxRetriesPerRequest: 1, retryStrategy: () => null,\n    ...(process.env.REDIS_TLS === 'true' ? { tls: {} } : {}),\n  } });\n  queue.on('error', () => {});\n  try {\n    await client.connect(); const db = client.db();\n    const collections = [];\n    for (const name of ['videouploadsessions', 'pendingvideoposts', 'videoprocessingtickets', 'posts']) {\n      let indexes;\n      try { indexes = await db.collection(name).listIndexes().toArray(); }\n      catch (e) { if (e.code !== 26) throw e; indexes = []; }\n      collections.push({ name, indexes: indexes.map(({ name, key, unique, partialFilterExpression }) =>\n        ({ name, key, unique: Boolean(unique), ...(partialFilterExpression ? { partialFilterExpression } : {}) })) });\n    }\n    const sessions = await db.collection('videouploadsessions').aggregate([\n      { $match: { status: { $in: ['CREATED', 'UPLOADING', 'UPLOADED', 'QUEUED', 'PROCESSING'] } } },\n      { $group: { _id: '$status', count: { $sum: 1 }, oldest: { $min: '$createdAt' } } },\n    ], { maxTimeMS: 15000 }).toArray();\n    const pending = await db.collection('pendingvideoposts').aggregate([\n      { $match: { status: { $in: ['PENDING', 'PUBLISHING', 'FAILED'] } } },\n      { $group: { _id: '$status', count: { $sum: 1 } } },\n    ], { maxTimeMS: 15000 }).toArray();\n    const counts = await queue.getJobCounts('wait', 'active', 'delayed', 'paused', 'prioritized', 'waiting-children', 'failed', 'completed');\n    const active = (await queue.getJobs(['active'], 0, 9)).map(j => ({\n      idSha256: createHash('sha256').update(String(j.id)).digest('hex'), name: j.name,\n      attemptsMade: j.attemptsMade, processedOn: j.processedOn,\n    }));\n    const flags = Object.fromEntries(Object.entries(process.env).filter(([k]) =>\n      /^(POST_VIDEO_UPLOADS_ENABLED|POST_VIDEO_ROLLOUT_MODE|POST_VIDEO_BACKGROUND_PUBLISH_ENABLED|POST_VIDEO_FAIR_SCHEDULING_ENABLED|POST_VIDEO_PRIVATE_DELIVERY_ENABLED|POST_VIDEO_SOURCE_RETENTION_DAYS|POST_VIDEO_MP4_REUSE_ENABLED|POST_VIDEO_INTERMEDIATE_ENABLED|POST_VIDEO_SOURCE_REUSE_ENABLED|CLIP_HLS_ENABLED|CLIP_HLS_WORKER_ENABLED|CLIP_HLS_WORKER_CONCURRENCY|VIDEO_FFMPEG_THREADS)$/.test(k)));\n    const hasStaticAwsCredentials = Boolean(process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SECRET_ACCESS_KEY || process.env.AWS_SESSION_TOKEN);\n    const privateDeliveryReady = require('/app/src/legacy-src/utils/postVideoDelivery.js').privateDeliveryReady();\n    console.log('BETA30_READ_ONLY_RESULT=' + JSON.stringify({ checkedAt: new Date().toISOString(),\n      databaseConnection: 'connected', redisConnection: 'connected', collections, sessionCounts: sessions,\n      pendingPublicationCounts: pending, queueCounts: counts, activeJobs: active, queuePaused: await queue.isPaused(),\n      flags, privateDeliveryReady, hasStaticAwsCredentials,\n      taskRoleCredentialsConfigured: Boolean(process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI || process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI),\n      writesPerformed: 0 }));\n  } finally { await queue.close(); await client.close(); }\n};\nmain().catch(e => { console.error('BETA30_READ_ONLY_FAILED=' + JSON.stringify({ code: String(e.code || e.name || 'READ_FAILED') })); process.exitCode = 1; });\n"
+          ]
+        }
+      ]
+    },
+    "tags": [
+      {
+        "key": "Purpose",
+        "value": "video30-beta-readonly"
+      },
+      {
+        "key": "OwnerApprovedScope",
+        "value": "preflight-only"
+      }
+    ],
+    "clientToken": "f852f0f1d83175a8b81ef68d6d52d9e2a4c65fe4ba36881db4d49e5e53b5287e"
+  },
+  "maximumTasks": 1,
+  "maximumRunningSeconds": 180,
+  "stopOnlyThisDiagnosticTaskIfHung": true,
+  "maximumWorkersAdded": 0,
+  "costEstimateUsd": 0.01,
+  "operationalAuthorizationUsd": 0.1,
+  "notGuaranteedBillingCap": true,
+  "allowedInfrastructureMutations": [
+    "one RunTask using existing exact API task definition/roles/network",
+    "StopTask only that exact diagnostic if it exceeds 180 seconds"
+  ],
+  "databaseWrites": 0,
+  "queueWrites": 0,
+  "serviceUpdates": 0,
+  "taskDefinitionRegistrations": 0,
+  "iamChanges": 0,
+  "secretChanges": 0,
+  "s3Changes": 0,
+  "cloudfrontChanges": 0,
+  "approvalRequired": true,
+  "approved": false,
+  "productionDeploymentApproved": false,
+  "reason": "Existing API ECS Exec returns TargetNotConnectedException; live accepted-session and index audit cannot be claimed complete.",
+  "lostResponsePolicy": "RunTask clientToken is fixed. Reconcile exact startedBy/task-definition/command hash before any retry; never duplicate a task after an ambiguous response.",
+  "expectedOutput": "Counts/index metadata and readiness booleans only, exported from the new exact CloudWatch stream. No media or credentials.",
+  "rollback": "No service change. Diagnostic exits; stopped-task record/log remains. No application state rollback needed.",
+  "planSha256": "2cd78f2e396dba84ec05bc7b0185424389f22c798f1f6bb856757c6e9583dbf0"
+}
