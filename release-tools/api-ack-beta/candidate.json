@@ -1,0 +1,40 @@
+{
+  "kind": "LOCAL_BUILD_ONLY_API_ACK_CANDIDATE",
+  "parentArchiveSha256": "12f8a59ae5928f6af1e79e83bf25cdbf959eacf25bfe7cf36835dfb3528c903f",
+  "parentContentSha256": "e63b6dede20753ea7a546e7db3b753ae9a3aad51a6808b558cc048708a4f2589",
+  "candidateArchiveSha256": "42b7180b971262fa154571fa975db4f9ecc8387fea2abb80d926b10a9ea8210a",
+  "candidateContentSha256": "4efd3a0e9cf690b5d600f15e718fe2eee4e2a2b33c0cc21cd0893b5099e19a4f",
+  "baseRevision": "e46632782682353798c1f8eecf2c07598d82b98d",
+  "filesVerified": 755,
+  "runtimeFiles": [
+    "src/modules/notifications/notifications.routes.ts"
+  ],
+  "delta": [
+    {
+      "file": "src/modules/notifications/notifications.routes.ts",
+      "kind": "runtime",
+      "beforeSha256": "ef26e0d46e8d01bf9b7e730553cc17d6230b44aa44b14b005746975e347f52d9",
+      "afterSha256": "affd6a5e89dc0f426e6f1a2cf5353ab1381e301eaba43168583ad2eedcb3d136",
+      "bytes": 56290
+    },
+    {
+      "file": "src/modules/notifications/notificationAcknowledgement.integration.test.cjs",
+      "kind": "local-test",
+      "beforeSha256": null,
+      "afterSha256": "64693b9ec3442fe6963ef90e642c0cac876e8133fbed50a63ee173fef599b5f7",
+      "bytes": 18084
+    },
+    {
+      "file": "src/legacy-src/utils/pushNotificationInfrastructure.test.js",
+      "kind": "local-test",
+      "beforeSha256": "d58352c6ba7ad1b9ea1fc8d3266a03f7a5a3a3d3e4d49701229feaee272d5d86",
+      "afterSha256": "ec06a5819f6d666c06e8972b47a3c12dee9cac02a550d552dcf51540425e2256",
+      "bytes": 22182
+    }
+  ],
+  "apiOnlyServiceDeploymentProposed": true,
+  "workerUnchanged": "squadhunt-prod-video-worker-worker:6",
+  "migrations": [],
+  "newImageDigest": null,
+  "awsMutations": 0
+}
