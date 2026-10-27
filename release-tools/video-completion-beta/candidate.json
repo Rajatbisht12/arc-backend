@@ -1,0 +1,114 @@
+{
+  "kind": "local-only reviewed candidate; no deployment authority",
+  "parentArchiveSha256": "145becc71228b4ea4eaeb391c2c0f5dad61afc19461d7729cc52fc1b80df63fa",
+  "candidateArchiveSha256": "90f74ca25cd8c050cb8c195461b56e50415a8852188e4602b246150a3751d989",
+  "candidateContentSha256": "42f27418cfdfc1df86eeabe733aef546d50cdcbec97ae16110b5e490902e4faa",
+  "baseRevision": "e46632782682353798c1f8eecf2c07598d82b98d",
+  "runtimeFiles": [
+    "src/clip-worker.ts",
+    "src/legacy-src/controllers/postController.js",
+    "src/legacy-src/services/videoUploadService.js",
+    "src/legacy-src/services/pendingVideoPostService.js",
+    "src/legacy-src/utils/notificationEmitter.js",
+    "src/legacy-src/utils/pushNotificationService.js",
+    "src/legacy-src/utils/videoCompletionTrace.js"
+  ],
+  "delta": [
+    {
+      "file": "src/clip-worker.ts",
+      "kind": "runtime",
+      "beforeSha256": "bee0d7f76b328c7085ee99be8d747c4009bd3ef8e649992b50273300237d9bc2",
+      "afterSha256": "484917d91fbfa304e58b30a817a26ce7d81fdce1280bd4845705c80c83de8c08",
+      "bytes": 7378
+    },
+    {
+      "file": "src/legacy-src/controllers/postController.js",
+      "kind": "runtime",
+      "beforeSha256": "c91bad14eb72766ca0e232d5af3b48820ff6e0e379980b2ca930d9bff4469749",
+      "afterSha256": "bb1bfaf9e4aa67adcb826a8cc7d7cabe708b8bd9ce307fd4817773bd67294409",
+      "bytes": 73043
+    },
+    {
+      "file": "src/legacy-src/services/videoUploadService.js",
+      "kind": "runtime",
+      "beforeSha256": "14b8e907e5f56fd8f708298210544825b77d25ffd43d26b9c4890a513ce60945",
+      "afterSha256": "4d42f93401e337712adf3ee0660137625d8347c705ecbc23214b2c96d6f7a150",
+      "bytes": 30951
+    },
+    {
+      "file": "src/legacy-src/services/pendingVideoPostService.js",
+      "kind": "runtime",
+      "beforeSha256": "964ab4fd0fa20e9bb5f2c0973c587ea26ef7dc30e0776dd720488b33d436bb0e",
+      "afterSha256": "f8bd50acc59c4fbbae9a41ba615f4c4c037cc4f0342eedb45faf2d62ab526496",
+      "bytes": 22102
+    },
+    {
+      "file": "src/legacy-src/utils/notificationEmitter.js",
+      "kind": "runtime",
+      "beforeSha256": "046f584b7ac158d4c027faf5c4f31cdd6af5bdec3662585132721d70bfc3a772",
+      "afterSha256": "bd629795b99e53fa4b18542cb6712f0970addb4bbb519b9fab3ac5db8471d90b",
+      "bytes": 16101
+    },
+    {
+      "file": "src/legacy-src/utils/pushNotificationService.js",
+      "kind": "runtime",
+      "beforeSha256": "95b22892a1b44212f1cd8283e5147c4fa8f5e84e0993eb39576aa51fd1c9ab07",
+      "afterSha256": "3df1f1a799717e96ad3341e189e8f901264f376503086341fbdd14d40f882d60",
+      "bytes": 115152
+    },
+    {
+      "file": "src/legacy-src/utils/videoCompletionTrace.js",
+      "kind": "runtime",
+      "beforeSha256": null,
+      "afterSha256": "289f750246a70e490165b38bac1c0eeee7b7dc6239b75d9a28c25cd7e2531698",
+      "bytes": 4637
+    },
+    {
+      "file": "src/legacy-src/utils/videoCompletionTrace.test.js",
+      "kind": "local-test",
+      "beforeSha256": null,
+      "afterSha256": "b17ed2faa958e73d28cdb4b2cccde2bd3a756488eb9cc7fa517ebbe37c89c54e",
+      "bytes": 3134
+    },
+    {
+      "file": "src/legacy-src/services/videoCompletion.integration.test.js",
+      "kind": "local-test",
+      "beforeSha256": null,
+      "afterSha256": "c62a96096643d09667db5d9bc8b6fe4f8f2e22406cf4627377d993263f2f0aa8",
+      "bytes": 14572
+    },
+    {
+      "file": "src/legacy-src/services/pendingVideoPostService.integration.test.js",
+      "kind": "local-test",
+      "beforeSha256": "87cfd53795caa6d4d797619405ea847b3580979c226ff64911d60bf1dbc31998",
+      "afterSha256": "14e97215a6da0b82e5830ae4a1e4d3a997df149d660ed86ad4c4a9459ef23e94",
+      "bytes": 21093
+    },
+    {
+      "file": "src/legacy-src/services/videoReliability.integration.test.js",
+      "kind": "local-test",
+      "beforeSha256": null,
+      "afterSha256": "d7cfb257de2c3f3f240cd64222d910a195c2f92af5cc113f65a143186e5905b2",
+      "bytes": 17298
+    },
+    {
+      "file": "src/legacy-src/services/fixtures/videoReliabilityWorker.cjs",
+      "kind": "local-test",
+      "beforeSha256": null,
+      "afterSha256": "e74ee91d67415d5d8052d3dc430a8433c62c5dc1bfb12834429e8504b1d01b43",
+      "bytes": 5063
+    },
+    {
+      "file": "package.json",
+      "kind": "two test scripts only; frozen dependency declarations preserved",
+      "beforeSha256": "495f5ed30adc92afb1b41ee7c46a7b088dfef0153201c866094c6da0ab19e694",
+      "afterSha256": "601e7b187700465b226736a4366e3231977b6282c87c3c00f48c87f66d8777ab",
+      "bytes": 24631
+    }
+  ],
+  "filesVerified": 751,
+  "registryDigest": null,
+  "awsMutations": 0,
+  "newImageBuilt": false,
+  "buildHelperSha256": "3de95ee01bfd41299a749f6f7c7068a76c31e1942c63b7f800902df729941fab"
+}
