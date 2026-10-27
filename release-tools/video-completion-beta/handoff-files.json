@@ -1,0 +1,10 @@
+{
+  "kind": "exact build-only handoff file hashes; no deployment permission",
+  "files": {
+    "README.md": "32cce155094e6a567c9919165e47e69be754bc814443f67786cd24ee55518f9d",
+    "backend.zip": "90f74ca25cd8c050cb8c195461b56e50415a8852188e4602b246150a3751d989",
+    "candidate.json": "e711319c32d2fa84f95c8dbe3f334cc7dba03ae2930063c7e8abf768a4a0feea",
+    "prepare-image.cjs": "3de95ee01bfd41299a749f6f7c7068a76c31e1942c63b7f800902df729941fab",
+    "prepare-image.test.cjs": "e3bb9bf68cfe48b5b2d53ce65a738fc584c34d705e33ef4533685e75fced4864"
+  }
+}
