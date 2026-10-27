@@ -1,0 +1,30 @@
+{
+  "kind": "build-only local handoff, no remote publication or deployment approval",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 1618,
+      "sha256": "5bd566f52dd5de5070690d9d3135187964446e8335ff505cf5b06c966b24ce6c"
+    },
+    {
+      "path": "backend.zip",
+      "bytes": 1889221,
+      "sha256": "12f8a59ae5928f6af1e79e83bf25cdbf959eacf25bfe7cf36835dfb3528c903f"
+    },
+    {
+      "path": "candidate.json",
+      "bytes": 3986,
+      "sha256": "149469b595bfe8ac26aadc9378df836f8bc2a4428fec0380313d89b44dfe8347"
+    },
+    {
+      "path": "prepare-image.cjs",
+      "bytes": 5538,
+      "sha256": "880f5597f5db33d7b03bd27e2f0f860c0e816274a5a02b82937ed511030c028c"
+    },
+    {
+      "path": "prepare-image.test.cjs",
+      "bytes": 1541,
+      "sha256": "e3bb9bf68cfe48b5b2d53ce65a738fc584c34d705e33ef4533685e75fced4864"
+    }
+  ]
+}

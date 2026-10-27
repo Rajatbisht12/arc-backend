@@ -1,0 +1,98 @@
+{
+  "kind": "local-only reviewed push candidate; no deployment authority",
+  "parentArchiveSha256": "90f74ca25cd8c050cb8c195461b56e50415a8852188e4602b246150a3751d989",
+  "candidateArchiveSha256": "12f8a59ae5928f6af1e79e83bf25cdbf959eacf25bfe7cf36835dfb3528c903f",
+  "candidateContentSha256": "e63b6dede20753ea7a546e7db3b753ae9a3aad51a6808b558cc048708a4f2589",
+  "baseRevision": "e46632782682353798c1f8eecf2c07598d82b98d",
+  "filesVerified": 754,
+  "runtimeFiles": [
+    "src/config/env.ts",
+    "src/legacy-src/models/Notification.js",
+    "src/legacy-src/utils/notificationEmitter.js",
+    "src/legacy-src/utils/notificationService.js",
+    "src/legacy-src/utils/pushDispatchPolicy.js",
+    "src/legacy-src/utils/pushNotificationService.js",
+    "src/infrastructure/jobs/queue.ts"
+  ],
+  "delta": [
+    {
+      "file": "src/config/env.ts",
+      "kind": "runtime",
+      "beforeSha256": "17f9db0aa5f84c3a615841ce38e2158c78aee81f7cda46f9948d2c95d30dcb6f",
+      "afterSha256": "781b0d6da3ba60cedc3c4abb6e6374b64ee29b4edf496be1f856236aa87e4bea",
+      "bytes": 11001
+    },
+    {
+      "file": "src/legacy-src/models/Notification.js",
+      "kind": "runtime",
+      "beforeSha256": "1c6e4aa46072ee489ffa1617d4e2f01bef94ec65046e434993b12b96490fe321",
+      "afterSha256": "0574039c94729dfbd3c4a6486bbaad51effa62f2357512fde9b65d02407d1b32",
+      "bytes": 10748
+    },
+    {
+      "file": "src/legacy-src/utils/notificationEmitter.js",
+      "kind": "runtime",
+      "beforeSha256": "bd629795b99e53fa4b18542cb6712f0970addb4bbb519b9fab3ac5db8471d90b",
+      "afterSha256": "ee8470fb6af1cf349c786f38f82f414c38c8d0aeaf48efd16bd70c17d81bb87a",
+      "bytes": 16447
+    },
+    {
+      "file": "src/legacy-src/utils/notificationService.js",
+      "kind": "runtime",
+      "beforeSha256": "21745cbe815f8df9a4105cf3cd9f6df44298b4545dc2e925bfeef26739b064db",
+      "afterSha256": "d08cd31f387255f1a3fe42ae10c1a9f171f1c1009491c008a1cd899fe3608cfb",
+      "bytes": 16853
+    },
+    {
+      "file": "src/legacy-src/utils/pushDispatchPolicy.js",
+      "kind": "runtime",
+      "beforeSha256": null,
+      "afterSha256": "ae4e671ad12f7d4e617a021d028e4d37a694ab7482dd2e5dd1f2aa18379f0e8b",
+      "bytes": 532
+    },
+    {
+      "file": "src/legacy-src/utils/pushNotificationService.js",
+      "kind": "runtime",
+      "beforeSha256": "3df1f1a799717e96ad3341e189e8f901264f376503086341fbdd14d40f882d60",
+      "afterSha256": "2aadedd3c028ebe856a57158d3d1d8424f426c8768cdd244418a093746017f90",
+      "bytes": 118415
+    },
+    {
+      "file": "src/infrastructure/jobs/queue.ts",
+      "kind": "runtime",
+      "beforeSha256": "bcc3aad0bbb0f653ac967ce1385764734392d8f4907a86a476b6963e0db4f878",
+      "afterSha256": "6241997acff75c54a5bb44b7add8fc354e4635cb93569ad6423e0c4316d3f146",
+      "bytes": 39839
+    },
+    {
+      "file": "src/legacy-src/utils/pushDeliveryReliability.integration.test.js",
+      "kind": "local-test",
+      "beforeSha256": null,
+      "afterSha256": "335d5020180681a49a249ae48b35c5f80a3724a48ec5dcf0b523eb84539040e3",
+      "bytes": 19369
+    },
+    {
+      "file": "src/legacy-src/utils/fixtures/pushRecoveryWorker.cjs",
+      "kind": "local-test",
+      "beforeSha256": null,
+      "afterSha256": "21927d0b3b883ed03f507cad0f6df4d78e197dd8a3241738c2c0211e85eaa5d4",
+      "bytes": 1468
+    },
+    {
+      "file": "src/legacy-src/utils/notificationProducerContracts.test.js",
+      "kind": "local-test",
+      "beforeSha256": "744bd523d04854ebcfadabde31137fe0eb4e77d96f5deabe81f6f78d6d69d651",
+      "afterSha256": "bc539f575af75540cd86c93e69d6070900c8a47d87c964e4fdc600b46cf631de",
+      "bytes": 13255
+    },
+    {
+      "file": "src/legacy-src/services/videoCompletion.integration.test.js",
+      "kind": "local-test",
+      "beforeSha256": "c62a96096643d09667db5d9bc8b6fe4f8f2e22406cf4627377d993263f2f0aa8",
+      "afterSha256": "859055339ba16f74c1bbcde670456f039f7125fac4e272fbf42348d1dabdd55c",
+      "bytes": 15834
+    }
+  ],
+  "awsMutations": 0,
+  "newImageDigest": null
+}
