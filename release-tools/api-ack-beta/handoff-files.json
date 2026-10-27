@@ -1,0 +1,24 @@
+{
+  "files": [
+    {
+      "path": "release-tools/api-ack-beta/README.md",
+      "sha256": "f5d0642ced1dc759abd735cbc38bc85d7bec38e07dbb9c44834aacaa98115b1b"
+    },
+    {
+      "path": "release-tools/api-ack-beta/backend.zip",
+      "sha256": "42b7180b971262fa154571fa975db4f9ecc8387fea2abb80d926b10a9ea8210a"
+    },
+    {
+      "path": "release-tools/api-ack-beta/candidate.json",
+      "sha256": "d2c1cd50f6dfc1c186ba91d6c7e970e01dc37b9e79e3024bb77c6e53b21d2629"
+    },
+    {
+      "path": "release-tools/api-ack-beta/prepare-image.cjs",
+      "sha256": "450640a2027415269d8eb911d3ae02167e65a9b8f65b02cefa12570820ecce6f"
+    },
+    {
+      "path": "release-tools/api-ack-beta/prepare-image.test.cjs",
+      "sha256": "7e7e22aaabef3836882b7060f41cb3bc3914c805950d5941829e1f6e97918cd1"
+    }
+  ]
+}
