@@ -33,13 +33,13 @@
     },
     {
       "path": "handoff.cjs",
-      "bytes": 3124,
-      "sha256": "bf5a8a08a9b3db41da62418b12036c83f37e58abf4ddf552b21d4f547269c89b"
+      "bytes": 8328,
+      "sha256": "fc7f11ad641b928609b9d9321e637afee4cc91bc5a7ff41c8edf6d51ed2c5d36"
     },
     {
       "path": "README.md",
-      "bytes": 2519,
-      "sha256": "0e5ab82c76154de075a2f911b96e88a143bdc2b54de2aef28b47b1f85de959bc"
+      "bytes": 3642,
+      "sha256": "a805107bd72d614c9fdb6a007ebee499ce8726092232aa1170bf2af796a4c9da"
     },
     {
       "path": "portrait-24-silent.mp4",

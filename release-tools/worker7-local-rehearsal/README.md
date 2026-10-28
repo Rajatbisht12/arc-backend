@@ -14,8 +14,16 @@ docker pull --platform linux/amd64 906446637180.dkr.ecr.us-east-1.amazonaws.com/
 node handoff.cjs --run-local
 ```
 
-Login/pull occur on the host only. Do not mount `.aws`, a Docker socket, app secrets or any additional environment file. The helper verifies the bundle and image, uses a unique local Compose project, and removes only that project's containers/network afterward. MongoDB/Redis data are disposable tmpfs, with no cloud data. Leave at least 6 GiB of Docker memory available.
+Login/pull occur on the host only. Do not mount `.aws`, a Docker socket, app secrets or any additional environment file. The helper verifies the bundle and image, starts a unique local Compose project in detached mode, binds the exact runner container, waits for its actual exit, and removes only that project’s containers/network afterward. Every subprocess status/signal/error code is saved in `results/orchestration.json`; zero runner exit, valid raw test evidence and positive cleanup absence are required. MongoDB/Redis data are disposable tmpfs, with no cloud data. Leave at least 6 GiB of Docker memory available.
 
 Keep `results/receipt.json` and `results/rehearsal.log`. A nonzero exit or incomplete receipt is a failure to investigate. Do not replace a failed result: extract a fresh bundle directory for another rehearsal. Share the final receipt; a successful receipt is still local Linux evidence only. Do not run deploy.sh, push another image, start an AWS helper or execute either live experiment from this bundle.
 
-The runner is capped at ten minutes, with a fifteen-minute host process limit. If Docker itself becomes unresponsive, inspect the exact `worker7-local-<random>` project printed in Docker output and stop only its containers; never use global Docker cleanup commands.
+The runner is capped at ten minutes. The host execution deadline is fifteen minutes, followed by at most three minutes of bounded cleanup/absence checks. If Docker itself becomes unresponsive, inspect the exact `worker7-local-<random>` project printed in Docker output and stop only its containers; never use global Docker cleanup commands.
+
+If an older launcher reported failure after printing 21 passing tests, preserve that worktree and its results. From a fresh corrected checkout, run:
+
+```sh
+node release-tools/worker7-local-rehearsal/handoff.cjs --verify-results ../arc-worker7-local-rehearsal-lf-20261028/release-tools/worker7-local-rehearsal/results
+```
+
+This mode reads the existing receipt and raw log only: no Docker invocation, container creation, encode, network request or AWS call. It verifies exact source/fixture identity, Linux/x64, all 21 TAP cases, the raw log SHA256 and the real encoder evidence. Its result proves the local tests; it does not retroactively declare the old launcher successful or establish cloud recovery. Preserve the original nonzero launcher outcome and any remaining orchestration uncertainty.
