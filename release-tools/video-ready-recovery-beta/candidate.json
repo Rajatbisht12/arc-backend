@@ -1,0 +1,28 @@
+{
+  "kind": "LOCAL_BUILD_ONLY_READY_ACK_RECOVERY_REPAIR",
+  "parentArchiveSha256": "42b7180b971262fa154571fa975db4f9ecc8387fea2abb80d926b10a9ea8210a",
+  "candidateArchiveSha256": "a4dcaf31918a18a2c606792088d297a9b1f53ffa8b4ba9545ea7749a23f8c7ce",
+  "candidateContentSha256": "e97f4a2f4a90620f7294855689df2313c56f5a59700c24b769efc844d8126b22",
+  "baseRevision": "e46632782682353798c1f8eecf2c07598d82b98d",
+  "filesVerified": 755,
+  "delta": [
+    {
+      "file": "src/legacy-src/services/videoUploadService.js",
+      "kind": "runtime",
+      "beforeSha256": "4d42f93401e337712adf3ee0660137625d8347c705ecbc23214b2c96d6f7a150",
+      "afterSha256": "11b0bb7223490ffef5dab1af51c4b7bd62e3fb18849efdd643bcf4ebd80477a7"
+    },
+    {
+      "file": "src/legacy-src/services/videoPostPublication.integration.test.js",
+      "kind": "test",
+      "beforeSha256": "abf1c2b9ec9092cb7542ed755a1ecdd09aeab8b491906a69f2ad55d9c8cf11d0",
+      "afterSha256": "031076690e2f5286d5d47f94869937d08b96832c1814a7372978b2e1604acd46"
+    }
+  ],
+  "deploymentProposed": "dedicated worker only after exact image/build/audit/drain/rollback approval; API219 can remain unchanged",
+  "newImageDigest": null,
+  "dockerBuildCompleted": false,
+  "awsMutations": 0,
+  "migrations": [],
+  "runtimeFilesChanged": 1
+}
