@@ -1,0 +1,47 @@
+name: squadhunt-worker7-local-rehearsal
+services:
+  runner:
+    image: 906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend@sha256:144b96e60256405280f77b29269595e04ff18ae5561310b87171d35bd7c04f1f
+    platform: linux/amd64
+    command: [node, /qa/run.cjs, --run-local]
+    init: true
+    healthcheck:
+      disable: true
+    environment:
+      AWS_EC2_METADATA_DISABLED: 'true'
+      NODE_PATH: /app/node_modules
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=2147483648
+      - /app/logs:mode=1777,size=16777216
+    volumes:
+      - ./:/qa:ro
+      - ./results:/results:rw
+    networks: [isolated]
+    mem_limit: 4g
+    cpus: 2
+  mongo:
+    image: docker.io/library/mongo@sha256:1d7a2d487c6465ea022474b90b65d6c91bb600b421b65880d8c6e141d6122200
+    platform: linux/amd64
+    network_mode: service:runner
+    depends_on: [runner]
+    command: [mongod, --bind_ip, '127.0.0.1', --port, '27018', --quiet]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: local_bootstrap_only
+      MONGO_INITDB_ROOT_PASSWORD: local-bootstrap-not-a-cloud-secret
+    volumes:
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/10-worker7.js:ro
+    tmpfs:
+      - /data/db:mode=1777,size=1073741824
+      - /data/configdb:mode=1777,size=16777216
+  redis:
+    image: docker.io/library/redis@sha256:f311ee1a60f8f35c40780ac6e771f156ef4de37998a515795de4ac47cc8fc8a9
+    platform: linux/amd64
+    network_mode: service:runner
+    depends_on: [runner]
+    command: [redis-server, --bind, '127.0.0.1', --port, '16379', --save, '', --appendonly, 'no', --requirepass, worker7-local-redis-not-a-cloud-secret]
+    tmpfs:
+      - /data:mode=1777,size=134217728
+networks:
+  isolated:
+    internal: true

@@ -1,0 +1,50 @@
+{
+  "scope": "LOCAL_ONLY_NO_AWS_MUTATIONS",
+  "files": [
+    {
+      "path": "local-guards.cjs",
+      "bytes": 2302,
+      "sha256": "ba03fe16c52cfa2f5b4a445ec849899668332164e041f1b7a212a1752ae75e73"
+    },
+    {
+      "path": "run.cjs",
+      "bytes": 4107,
+      "sha256": "b2c7147ee057a89deb761e1e3e2acc23c14a4fa6cad9d607f04876e9dbd992c5"
+    },
+    {
+      "path": "rehearsal.test.cjs",
+      "bytes": 29784,
+      "sha256": "d318ad25d4e19b207f41818ada5f9dc5b35b6f7251ac4a24f92ab93e1290ca75"
+    },
+    {
+      "path": "rehearsal-child.cjs",
+      "bytes": 6223,
+      "sha256": "a6c6b562c362c754e3ca2428be80d72352dcdfdaa3fb1a2293c63d183fe35861"
+    },
+    {
+      "path": "mongo-init.js",
+      "bytes": 251,
+      "sha256": "4d91d9ff7ddf30b4e7a7ff6c79abb2755988a0bf17044b8ae3b89f9883fa9861"
+    },
+    {
+      "path": "compose.yaml",
+      "bytes": 1684,
+      "sha256": "424c851c830b1826b5db1eddd4b062b15ed04a4e40730b93373b22221172560b"
+    },
+    {
+      "path": "handoff.cjs",
+      "bytes": 3124,
+      "sha256": "bf5a8a08a9b3db41da62418b12036c83f37e58abf4ddf552b21d4f547269c89b"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2519,
+      "sha256": "0e5ab82c76154de075a2f911b96e88a143bdc2b54de2aef28b47b1f85de959bc"
+    },
+    {
+      "path": "portrait-24-silent.mp4",
+      "bytes": 5939073,
+      "sha256": "0dc4f0364b721ee47361d11f885393117905475750c9bc30dfc429003bb556a3"
+    }
+  ]
+}
