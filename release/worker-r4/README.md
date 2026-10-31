@@ -74,6 +74,55 @@ external failed journal/context for review and makes zero ECS changes.
 
 ## Local tests
 
+### Windows deployment laptop portability fix
+
+The initial build helper was incompatible with Windows directory fsync and used
+an unsupported `buildx inspect --format` option. The fixed helper parses the
+bounded plain `docker buildx inspect <reviewed-name>` header, positively requiring
+the exact existing builder name and `docker` driver, without `--bootstrap`.
+
+Run the local-only capability check after pulling this fix:
+
+```bash
+node scripts/lib/worker-artifact.js check
+```
+
+It verifies frozen source pins, the selected local Docker endpoint/builder and
+a temporary journal probe. It performs no AWS, registry, build or push request.
+The probe creates/removes only its own temporary files. Successful output is
+`WORKER_ARTIFACT_LOCAL_CHECK`; it is not build approval or native ECS evidence.
+
+Every journal event now uses exclusive write-through file creation (`O_EXCL` plus
+`O_SYNC`), successful file fsync and exact byte readback before advancing. On
+POSIX the additional directory fsync is retained. Windows uses the explicitly
+reviewed file-sync path because the actual deployment laptop rejects directory
+sync with EPERM. File-sync
+or readback errors are fatal; they are never caught and relabeled as a pass.
+An existing journal directory still permanently rejects execution. If consumed
+record creation fails, no cloud command runs and the partial directory is retained.
+After a push-intent failure/unknown acknowledgement, never delete the journal or
+choose a new directory to retry. Reconcile separately.
+
+Use a new external journal under local non-synchronized storage (for example
+Windows LOCALAPPDATA), not OneDrive or a network share. File flush/readback is a
+bounded operating-system acknowledgement, not a guarantee against disk failure,
+deleted journals, cloud-sync interference or restoration of an old machine image.
+This changed control implementation requires a new exact build/push review; no
+previous approval or fresh timestamp may be reused or invented. Frozen worker
+source, dependency pins, deploy.sh/API safety gates and ECS authority are unchanged.
+
+```bash
+node --test scripts/worker-artifact.test.js scripts/worker-artifact-portability.test.js
+```
+
+Tests model the Windows filesystem branch and CRLF Buildx output locally. Actual
+Windows capability validation is still required on the deployment laptop; these
+models do not assert it already passed there.
+
+The [Node file-open documentation](https://nodejs.org/api/fs.html#file-open-constants)
+maps `O_SYNC` to Windows `FILE_FLAG_WRITE_THROUGH`. The plain builder inspection
+matches [Docker's documented inspect interface](https://docs.docker.com/reference/cli/docker/buildx/inspect/).
+
 `node --test scripts/worker-artifact.test.js` tests frozen extraction, readable
 runtime permissions, untouched API branch, approval and lost-push/restart guards,
 observed index/child binding and exact worker-only task preparation. It performs

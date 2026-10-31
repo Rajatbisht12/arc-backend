@@ -34,18 +34,45 @@ function digests(metadata,raw){
  check('sha256:'+hash(raw)===index||(raw.at(-1)===10&&'sha256:'+hash(raw.subarray(0,-1))===index),'REGISTRY_INDEX_DIGEST_MISMATCH');return{indexDigest:index,linuxAmd64ChildDigest:children[0].digest};
 }
 function command(exe,args,options={}){const r=spawnSync(exe,args,{encoding:'utf8',maxBuffer:2*1024**2,timeout:30000,...options});check(r.status===0&&!r.error,'ARTIFACT_COMMAND_FAILED_OR_UNKNOWN');return r.stdout;}
+function builderDriver(output,name){
+ check(typeof output==='string'&&output.length<=65536,'BOUNDED_BUILDER_INSPECTION_REQUIRED');
+ const lines=output.replace(/\r\n/g,'\n').split('\n'),nodes=lines.findIndex(x=>/^Nodes:\s*$/.test(x));check(nodes>0,'BUILDER_NODES_REQUIRED');
+ const header=lines.slice(0,nodes),names=header.filter(x=>/^Name:/.test(x)),drivers=header.filter(x=>/^Driver:/.test(x));
+ check(names.length===1&&names[0].slice(5).trim()===name&&drivers.length===1&&drivers[0].slice(7).trim()==='docker','EXISTING_LOCAL_DOCKER_DRIVER_REQUIRED');return 'docker';
+}
+function saveJournal(directory,name,value,{fsImpl=fs,platform=process.platform}={}){
+ check(/^[a-z][a-z-]*\.json$/.test(name),'FIXED_JOURNAL_NAME_REQUIRED');
+ const bytes=JSON.stringify(value,null,2)+'\n',file=path.join(directory,name),c=fs.constants;
+ check(Number.isInteger(c.O_SYNC)&&c.O_SYNC!==0,'WRITE_THROUGH_JOURNAL_REQUIRED');
+ const fd=fsImpl.openSync(file,c.O_WRONLY|c.O_CREAT|c.O_EXCL|c.O_SYNC,0o600);
+ try{fsImpl.writeFileSync(fd,bytes);fsImpl.fsyncSync(fd);}finally{fsImpl.closeSync(fd);}
+ // This Windows deployment host cannot fsync a directory through Node. Require exclusive
+ // write-through file creation + successful file fsync + exact readback instead.
+ // POSIX retains the additional directory fsync; never catch/ignore sync errors.
+ if(platform!=='win32'){const d=fsImpl.openSync(directory,'r');try{fsImpl.fsyncSync(d);}finally{fsImpl.closeSync(d);}}
+ check(fsImpl.readFileSync(file,'utf8')===bytes,'JOURNAL_READBACK_REQUIRED');
+}
+function localCheck(io=command){
+ source();const name=io('docker',['context','show']).trim();check(['default','desktop-linux'].includes(name),'REVIEWED_DOCKER_CONTEXT_REQUIRED');
+ const endpoint=JSON.parse(io('docker',['--context',name,'context','inspect',name,'--format','{{json .Endpoints.docker.Host}}']));
+ check(typeof endpoint==='string'&&(endpoint.startsWith('unix:///')||endpoint.startsWith('npipe:')),'LOCAL_DOCKER_ENDPOINT_REQUIRED');
+ builderDriver(io('docker',['--context',name,'buildx','inspect',name]),name);
+ const probe=fs.mkdtempSync(path.join(os.tmpdir(),'worker-artifact-journal-'));
+ try{saveJournal(probe,'local-probe.json',{kind:'LOCAL_JOURNAL_PROBE'});}finally{fs.rmSync(probe,{recursive:true,force:true});}
+ return{kind:'WORKER_ARTIFACT_LOCAL_CHECK',dockerContext:name,driver:'docker',journal:process.platform==='win32'?'EXCLUSIVE_WRITE_THROUGH_FILE_FSYNC_READBACK':'FILE_AND_DIRECTORY_FSYNC_READBACK',providerCalls:0,builds:0,pushes:0,ecsAuthority:0};
+}
 function build(a,journal,io=command){
  const revision=io('git',['rev-parse','HEAD']).trim();check(/^[a-f0-9]{40}$/.test(revision)&&!io('git',['status','--porcelain','--untracked-files=all']).trim(),'CLEAN_MERGED_SOURCE_REQUIRED');approval(a,revision);source();
  check(path.isAbsolute(journal)&&!fs.existsSync(journal)&&!journal.startsWith(ROOT+path.sep),'EXCLUSIVE_EXTERNAL_JOURNAL_REQUIRED');fs.mkdirSync(journal,{mode:0o700});
- const save=(n,v)=>{const f=fs.openSync(path.join(journal,n),'wx',0o600);fs.writeFileSync(f,JSON.stringify(v,null,2)+'\n');fs.fsyncSync(f);fs.closeSync(f);const d=fs.openSync(journal,'r');fs.fsyncSync(d);fs.closeSync(d);};
- save('consumed.json',{runId:a.runId,at:Date.now(),oneBuildPushMaximum:true});let pass=false;
+ const save=(n,v)=>saveJournal(journal,n,v);
+ save('consumed.json',{runId:a.runId,at:Date.now(),oneBuildPushMaximum:true,journalMode:process.platform==='win32'?'EXCLUSIVE_WRITE_THROUGH_FILE_FSYNC_READBACK':'FILE_AND_DIRECTORY_FSYNC_READBACK'});let pass=false;
  const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('AWS_')));Object.assign(env,{AWS_MAX_ATTEMPTS:'1',AWS_IGNORE_CONFIGURED_ENDPOINT_URLS:'true',AWS_PAGER:''});
  const docker=(args,options)=>io('docker',['--context',a.dockerContext,...args],options);
  const aws=(...args)=>io('aws',[...args,'--profile','default','--region','us-east-1'],{env});
  try{
   const who=JSON.parse(aws('sts','get-caller-identity'));check(who.Account==='906446637180'&&who.Arn==='arn:aws:iam::906446637180:root','ARTIFACT_CALLER_CHANGED');
   const endpoint=JSON.parse(docker(['context','inspect',a.dockerContext,'--format','{{json .Endpoints.docker.Host}}']));check(typeof endpoint==='string'&&(endpoint.startsWith('unix:///')||endpoint.startsWith('npipe:')),'LOCAL_DOCKER_ENDPOINT_REQUIRED');
-  check(docker(['buildx','inspect',a.dockerContext,'--format','{{.Driver}}']).trim()==='docker','EXISTING_LOCAL_DOCKER_DRIVER_REQUIRED');
+  builderDriver(docker(['buildx','inspect',a.dockerContext]),a.dockerContext);
   const context=extract(path.join(journal,'context'));const password=aws('ecr','get-login-password');docker(['login','--username','AWS','--password-stdin',REPO.split('/')[0]],{input:password,timeout:30000});
   approval(a,revision);save('build-push-intent.json',{at:Date.now(),sourceRevision:revision,contentSha256:CONTENT,tag:a.tag,attempts:1});
   const metadata=path.join(journal,'build-metadata.json'),image=REPO+':'+a.tag;
@@ -54,7 +81,7 @@ function build(a,journal,io=command){
   check(Date.now()<a.approvedAt+1800000,'ARTIFACT_FINAL_EXPIRED');save('artifact-receipt.json',{...observed,image,sourceRevision:revision,sourceContentSha256:CONTENT,at:Date.now(),ecsChanges:0,apiChanges:0,workerChanges:0});pass=true;return observed;
  }finally{save('authority-closed.json',{status:pass?'CLOSED_PASS':'CLOSED_HOLD',at:Date.now(),remainingBuilds:0,remainingPushes:0,ecsAuthority:0});}
 }
-function main(){process.chdir(ROOT);const mode=process.argv[2];if(mode==='plan'){source();console.log(JSON.stringify({kind:'WORKER_ARTIFACT_ONLY',contentSha256:CONTENT,archiveSha256:ARCHIVE,files:759,imageDigest:null,ecsAuthority:0,executionApproved:false}));return;}
+function main(){process.chdir(ROOT);const mode=process.argv[2];if(mode==='check'){console.log(JSON.stringify(localCheck()));return;}if(mode==='plan'){source();console.log(JSON.stringify({kind:'WORKER_ARTIFACT_ONLY',contentSha256:CONTENT,archiveSha256:ARCHIVE,files:759,imageDigest:null,ecsAuthority:0,executionApproved:false}));return;}
  check(mode==='build','WORKER_ARTIFACT_MODE_REQUIRED');const a=JSON.parse(fs.readFileSync(process.env.WORKER_ARTIFACT_APPROVAL||''));build(a,process.env.WORKER_ARTIFACT_JOURNAL);console.log('WORKER_ARTIFACT_BUILT_AND_CLOSED_NO_DEPLOYMENT');}
-module.exports={source,extract,approval,digests,build,CONTENT,ARCHIVE,REPO};
+module.exports={source,extract,approval,digests,builderDriver,saveJournal,localCheck,build,CONTENT,ARCHIVE,REPO};
 if(require.main===module){try{main();}catch{console.error('WORKER_ARTIFACT_HELD_NO_RETRY');process.exitCode=1;}}
