@@ -10,7 +10,7 @@
     "exact revision3 provider definition comparison",
     "owner/public signing key and private control transport",
     "owned queue pause and positive old-worker drain proof",
-    "fence-preserving rollback and approved capacity overlap",
+    "protection/claims-preserving rollback and approved capacity overlap",
     "native permission/acquire/renew/drain/fault readbacks"
   ],
   "providerCalls": 0,

@@ -45,9 +45,11 @@ and paused on uncertainty; never resume an unqualified old/new fleet automatical
 
 Old worker7 has no qualified signed drain/child-process observer binding. Stable
 queue/lease emptiness plus owner-reported inactivity is not a substitute for any
-missing native FFmpeg/claim proof. The retirement guard deliberately refuses such
-an incomplete receipt. A separately owned queue pause/natural drain/native proof
-must be qualified before service replacement. No new uploads or forced stop here.
+missing native accepted-work/claim proof. The retirement guard accepts either
+positive native process-zero evidence or a separately reviewed source/image-bound
+natural drain with complete native child-close/accepted-cohort receipts, stable
+accounting and zero unknown outcomes. It refuses a bare idle assertion. The exact
+owned pause/drain observation method remains unbound. No new upload or forced stop.
 
 GitHub review/merge -> clean pull on deployment laptop -> reviewed deploy.sh stays.
 Source parent142ec2298d01d318882ff7078bda96f9553a9740. No dependency, Dockerfile,
