@@ -1,0 +1,40 @@
+{
+  "workerFocusedPass": 29,
+  "diagnosticFocusedPass": 19,
+  "totalFocusedPass": 48,
+  "failures": 0,
+  "skips": 0,
+  "isolatedWorkerCompilation": true,
+  "officialOfflineInputModels": 14,
+  "noProviderClientConstructed": true,
+  "actualLocalIntegrations": [
+    "two synthetic local FFmpeg child processes using patched real spawn path",
+    "BullMQ pause/close with active/waiting preservation on disposable Redis",
+    "typed metrics/read-only ACL/lock-token TTL on disposable Redis",
+    "unchanged revised CAS algorithm stage faults on disposable MongoDB8.3.7"
+  ],
+  "notProven": [
+    "Fargate concurrency",
+    "ECS lease or service networking",
+    "real accepted-source bindings",
+    "native DocumentDB cause/state",
+    "production HLS outputs/privacy",
+    "production image/readiness",
+    "autoscaling or all-authenticated admission"
+  ],
+  "initialFailuresPreserved": [
+    "materialize missing deploy.sh in frozen source; assertion scope corrected",
+    "initial FFmpeg zero/absent frame counter; ignored until typed positive sample",
+    "diagnostic .cjs import fixture path corrected",
+    "unsealed embedded diagnostic D name shadowing found by exact-body evaluation and corrected",
+    "STS output-skeleton dummy Arn invalid; official INPUT shapes validated directly"
+  ],
+  "historicalSuitesRepeated": false,
+  "providerCalls": 0,
+  "productionDatabaseRedisCalls": 0,
+  "diagnosticActualClientOptionsMatchedHelper": true,
+  "additionalDiagnosticNegatives": [
+    "owned counter inconsistency/private-field exclusions",
+    "changing snapshots cannot claim completeness"
+  ]
+}
