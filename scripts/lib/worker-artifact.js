@@ -42,12 +42,15 @@ function builderDriver(output,name){
 }
 function saveJournal(directory,name,value,{fsImpl=fs,platform=process.platform}={}){
  check(/^[a-z][a-z-]*\.json$/.test(name),'FIXED_JOURNAL_NAME_REQUIRED');
- const bytes=JSON.stringify(value,null,2)+'\n',file=path.join(directory,name),c=fs.constants;
- check(Number.isInteger(c.O_SYNC)&&c.O_SYNC!==0,'WRITE_THROUGH_JOURNAL_REQUIRED');
- const fd=fsImpl.openSync(file,c.O_WRONLY|c.O_CREAT|c.O_EXCL|c.O_SYNC,0o600);
+ const bytes=JSON.stringify(value,null,2)+'\n',file=path.join(directory,name),c=fsImpl.constants;
+ let flags=c.O_WRONLY|c.O_CREAT|c.O_EXCL;
+ // Node on the actual Windows laptop does not expose O_SYNC. Use its supported
+ // exclusive file open and require successful fsync (libuv FlushFileBuffers).
+ if(platform!=='win32'){check(Number.isInteger(c.O_SYNC)&&c.O_SYNC!==0,'WRITE_THROUGH_JOURNAL_REQUIRED');flags|=c.O_SYNC;}
+ const fd=fsImpl.openSync(file,flags,0o600);
  try{fsImpl.writeFileSync(fd,bytes);fsImpl.fsyncSync(fd);}finally{fsImpl.closeSync(fd);}
- // This Windows deployment host cannot fsync a directory through Node. Require exclusive
- // write-through file creation + successful file fsync + exact readback instead.
+ // This Windows deployment host cannot fsync a directory through Node. Require
+ // exclusive file creation + successful file fsync + exact readback instead.
  // POSIX retains the additional directory fsync; never catch/ignore sync errors.
  if(platform!=='win32'){const d=fsImpl.openSync(directory,'r');try{fsImpl.fsyncSync(d);}finally{fsImpl.closeSync(d);}}
  check(fsImpl.readFileSync(file,'utf8')===bytes,'JOURNAL_READBACK_REQUIRED');
@@ -59,13 +62,19 @@ function localCheck(io=command){
  builderDriver(io('docker',['--context',name,'buildx','inspect',name]),name);
  const probe=fs.mkdtempSync(path.join(os.tmpdir(),'worker-artifact-journal-'));
  try{saveJournal(probe,'local-probe.json',{kind:'LOCAL_JOURNAL_PROBE'});}finally{fs.rmSync(probe,{recursive:true,force:true});}
- return{kind:'WORKER_ARTIFACT_LOCAL_CHECK',dockerContext:name,driver:'docker',journal:process.platform==='win32'?'EXCLUSIVE_WRITE_THROUGH_FILE_FSYNC_READBACK':'FILE_AND_DIRECTORY_FSYNC_READBACK',providerCalls:0,builds:0,pushes:0,ecsAuthority:0};
+ return{kind:'WORKER_ARTIFACT_LOCAL_CHECK',dockerContext:name,driver:'docker',journal:process.platform==='win32'?'EXCLUSIVE_FILE_FSYNC_READBACK':'FILE_AND_DIRECTORY_FSYNC_READBACK',providerCalls:0,builds:0,pushes:0,ecsAuthority:0};
+}
+function localFailure(error){
+ const guards=['BOUNDED_BUILDER_INSPECTION_REQUIRED','BUILDER_NODES_REQUIRED','EXISTING_LOCAL_DOCKER_DRIVER_REQUIRED','FIXED_JOURNAL_NAME_REQUIRED','WRITE_THROUGH_JOURNAL_REQUIRED','JOURNAL_READBACK_REQUIRED','REVIEWED_DOCKER_CONTEXT_REQUIRED','LOCAL_DOCKER_ENDPOINT_REQUIRED','ARTIFACT_COMMAND_FAILED_OR_UNKNOWN','FROZEN_SOURCE_CHANGED','ZIP_LAYOUT','ZIP_DIRECTORY','ZIP_ENTRY','ZIP_LOCAL_HEADER','ZIP_LOCAL_NAME','ZIP_EXTENT','ZIP_SIZE','ZIP_TOTAL','SOURCE_FILE_PIN','SOURCE_MANIFEST_PIN','SOURCE_COMPLETENESS'];
+ const errors=['EPERM','EACCES','EINVAL','ENOTSUP','ENOENT','EBADF','EEXIST','EIO','ENOSPC'];
+ const code=guards.includes(error?.message)?error.message:errors.includes(error?.code)?error.code:'UNKNOWN_LOCAL_FAILURE';
+ return{kind:'WORKER_ARTIFACT_LOCAL_CHECK_FAILED',code,providerCalls:0,builds:0,pushes:0,ecsAuthority:0};
 }
 function build(a,journal,io=command){
  const revision=io('git',['rev-parse','HEAD']).trim();check(/^[a-f0-9]{40}$/.test(revision)&&!io('git',['status','--porcelain','--untracked-files=all']).trim(),'CLEAN_MERGED_SOURCE_REQUIRED');approval(a,revision);source();
  check(path.isAbsolute(journal)&&!fs.existsSync(journal)&&!journal.startsWith(ROOT+path.sep),'EXCLUSIVE_EXTERNAL_JOURNAL_REQUIRED');fs.mkdirSync(journal,{mode:0o700});
  const save=(n,v)=>saveJournal(journal,n,v);
- save('consumed.json',{runId:a.runId,at:Date.now(),oneBuildPushMaximum:true,journalMode:process.platform==='win32'?'EXCLUSIVE_WRITE_THROUGH_FILE_FSYNC_READBACK':'FILE_AND_DIRECTORY_FSYNC_READBACK'});let pass=false;
+ save('consumed.json',{runId:a.runId,at:Date.now(),oneBuildPushMaximum:true,journalMode:process.platform==='win32'?'EXCLUSIVE_FILE_FSYNC_READBACK':'FILE_AND_DIRECTORY_FSYNC_READBACK'});let pass=false;
  const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('AWS_')));Object.assign(env,{AWS_MAX_ATTEMPTS:'1',AWS_IGNORE_CONFIGURED_ENDPOINT_URLS:'true',AWS_PAGER:''});
  const docker=(args,options)=>io('docker',['--context',a.dockerContext,...args],options);
  const aws=(...args)=>io('aws',[...args,'--profile','default','--region','us-east-1'],{env});
@@ -83,5 +92,5 @@ function build(a,journal,io=command){
 }
 function main(){process.chdir(ROOT);const mode=process.argv[2];if(mode==='check'){console.log(JSON.stringify(localCheck()));return;}if(mode==='plan'){source();console.log(JSON.stringify({kind:'WORKER_ARTIFACT_ONLY',contentSha256:CONTENT,archiveSha256:ARCHIVE,files:759,imageDigest:null,ecsAuthority:0,executionApproved:false}));return;}
  check(mode==='build','WORKER_ARTIFACT_MODE_REQUIRED');const a=JSON.parse(fs.readFileSync(process.env.WORKER_ARTIFACT_APPROVAL||''));build(a,process.env.WORKER_ARTIFACT_JOURNAL);console.log('WORKER_ARTIFACT_BUILT_AND_CLOSED_NO_DEPLOYMENT');}
-module.exports={source,extract,approval,digests,builderDriver,saveJournal,localCheck,build,CONTENT,ARCHIVE,REPO};
-if(require.main===module){try{main();}catch{console.error('WORKER_ARTIFACT_HELD_NO_RETRY');process.exitCode=1;}}
+module.exports={source,extract,approval,digests,builderDriver,saveJournal,localCheck,localFailure,build,CONTENT,ARCHIVE,REPO};
+if(require.main===module){try{main();}catch(error){console.error(process.argv[2]==='check'?JSON.stringify(localFailure(error)):'WORKER_ARTIFACT_HELD_NO_RETRY');process.exitCode=1;}}
