@@ -4,6 +4,15 @@
 
 set -euo pipefail
 
+# Explicit worker ARTIFACT preparation/build only; never rolls any ECS service.
+# The ordinary compatibility/API path and its safety guards remain unchanged.
+case "${SQUADHUNT_RELEASE_KIND:-compatibility}" in
+  compatibility) ;;
+  worker-artifact-plan) exec node scripts/lib/worker-artifact.js plan ;;
+  worker-artifact-build) exec node scripts/lib/worker-artifact.js build ;;
+  *) echo "Unknown/unqualified release kind; no deployment attempted." >&2; exit 1 ;;
+esac
+
 # Release only a traceable clean source tree. This script is deliberately a
 # compatibility release, not the later large-video activation/drain workflow.
 SOURCE_REVISION=$(git rev-parse --verify HEAD)

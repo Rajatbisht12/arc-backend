@@ -1,0 +1,251 @@
+{
+  "taskDefinitionArn": "arn:aws:ecs:us-east-1:906446637180:task-definition/squadhunt-prod-video-worker-worker:7",
+  "containerDefinitions": [
+    {
+      "name": "video-worker",
+      "image": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend@sha256:144b96e60256405280f77b29269595e04ff18ae5561310b87171d35bd7c04f1f",
+      "cpu": 0,
+      "links": [],
+      "portMappings": [],
+      "essential": true,
+      "entryPoint": [],
+      "command": [
+        "node",
+        "--max-old-space-size=1024",
+        "dist/video-worker-launcher.js"
+      ],
+      "environment": [
+        {
+          "name": "CLIP_HLS_WORKER_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "STAGING_MONGODB_HOST",
+          "value": ""
+        },
+        {
+          "name": "VIDEO_WORKER_HEALTH_PORT",
+          "value": "5002"
+        },
+        {
+          "name": "POST_VIDEO_CANARY_USER_IDS",
+          "value": "6a43644a23ce4d367a0e6d15"
+        },
+        {
+          "name": "STAGING_MONGODB_DATABASE",
+          "value": ""
+        },
+        {
+          "name": "DEPLOYMENT_ENVIRONMENT",
+          "value": "production"
+        },
+        {
+          "name": "POST_VIDEO_FAIR_SCHEDULING_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "VIDEO_TASK_SCALE_IN_PROTECTION_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "PUSH_NOTIFICATION_DISPATCH_MODE",
+          "value": "outbox_only"
+        },
+        {
+          "name": "BACKEND_SECRET_ID",
+          "value": "arn:aws:secretsmanager:us-east-1:906446637180:secret:arc/prod/backend-GscdDk"
+        },
+        {
+          "name": "POST_VIDEO_HLS_LADDER_PROFILE",
+          "value": "standard"
+        },
+        {
+          "name": "POST_VIDEO_DEFER_PUSH_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "STAGING_S3_BUCKET",
+          "value": ""
+        },
+        {
+          "name": "STAGING_REDIS_HOST",
+          "value": ""
+        },
+        {
+          "name": "POST_VIDEO_BACKGROUND_PUBLISH_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "CLIP_HLS_JOB_ATTEMPTS",
+          "value": "3"
+        },
+        {
+          "name": "POST_VIDEO_MP4_REUSE_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "POST_VIDEO_INTERMEDIATE_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "VIDEO_FFMPEG_THREADS",
+          "value": "2"
+        },
+        {
+          "name": "POST_VIDEO_SOURCE_REUSE_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "POST_VIDEO_UPLOADS_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "STAGING_MEDIA_ORIGIN",
+          "value": ""
+        },
+        {
+          "name": "POST_VIDEO_ROLLOUT_MODE",
+          "value": "canary"
+        },
+        {
+          "name": "CLIP_HLS_X264_PRESET",
+          "value": "veryfast"
+        },
+        {
+          "name": "POST_VIDEO_PRIVATE_DELIVERY_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "VIDEO_COMPLETION_TRACE_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "CLIP_HLS_WORKER_CONCURRENCY",
+          "value": "1"
+        },
+        {
+          "name": "CLIP_HLS_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "STAGING_API_ORIGIN",
+          "value": ""
+        },
+        {
+          "name": "POST_VIDEO_SOURCE_RETENTION_DAYS",
+          "value": "0"
+        },
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "VIDEO_WORKER_RESOURCE_METRICS_ENABLED",
+          "value": "true"
+        }
+      ],
+      "environmentFiles": [],
+      "mountPoints": [],
+      "volumesFrom": [],
+      "secrets": [],
+      "stopTimeout": 120,
+      "dnsServers": [],
+      "dnsSearchDomains": [],
+      "extraHosts": [],
+      "dockerSecurityOptions": [],
+      "dockerLabels": {},
+      "ulimits": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/squadhunt/video/squadhunt-prod-video-worker",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "video"
+        },
+        "secretOptions": []
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -fsS --max-time 4 http://127.0.0.1:5002/ || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 90
+      },
+      "systemControls": [],
+      "credentialSpecs": []
+    }
+  ],
+  "family": "squadhunt-prod-video-worker-worker",
+  "taskRoleArn": "arn:aws:iam::906446637180:role/squadhunt-prod-video-roles-WorkerTaskRole-pfneHq58I2ZC",
+  "executionRoleArn": "arn:aws:iam::906446637180:role/squadhunt-prod-video-roles-WorkerExecutionRole-v5s6vXZMKneB",
+  "networkMode": "awsvpc",
+  "revision": 7,
+  "volumes": [],
+  "status": "ACTIVE",
+  "requiresAttributes": [
+    {
+      "name": "ecs.capability.execution-role-awslogs"
+    },
+    {
+      "name": "com.amazonaws.ecs.capability.ecr-auth"
+    },
+    {
+      "name": "com.amazonaws.ecs.capability.docker-remote-api.1.17"
+    },
+    {
+      "name": "com.amazonaws.ecs.capability.docker-remote-api.1.21"
+    },
+    {
+      "name": "com.amazonaws.ecs.capability.task-iam-role"
+    },
+    {
+      "name": "ecs.capability.container-health-check"
+    },
+    {
+      "name": "ecs.capability.execution-role-ecr-pull"
+    },
+    {
+      "name": "com.amazonaws.ecs.capability.docker-remote-api.1.18"
+    },
+    {
+      "name": "ecs.capability.task-eni"
+    },
+    {
+      "name": "com.amazonaws.ecs.capability.docker-remote-api.1.29"
+    },
+    {
+      "name": "com.amazonaws.ecs.capability.logging-driver.awslogs"
+    },
+    {
+      "name": "com.amazonaws.ecs.capability.docker-remote-api.1.19"
+    },
+    {
+      "name": "ecs.capability.container-ordering"
+    },
+    {
+      "name": "ecs.capability.extensible-ephemeral-storage"
+    }
+  ],
+  "placementConstraints": [],
+  "compatibilities": [
+    "EC2",
+    "FARGATE"
+  ],
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "2048",
+  "memory": "4096",
+  "registeredAt": "2026-10-28T08:36:48.674000+05:30",
+  "registeredBy": "arn:aws:iam::906446637180:root",
+  "ephemeralStorage": {
+    "sizeInGiB": 40
+  }
+}
