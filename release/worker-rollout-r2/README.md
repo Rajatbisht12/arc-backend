@@ -39,6 +39,10 @@ created. Only ephemeral unit-test signers were generated locally and removed.
 
 The standalone `scripts/lib/worker-control-key-local-r2.js` supports provider-free
 `init` and `check` without running deploy.sh, Docker or any repository helper.
+It resolves whoami/icacls/PowerShell through absolute SystemRoot paths, never
+Git Bash's PATH. This avoids invoking Git's GNU whoami with Windows /user flags.
+Missing/invalid SystemRoot or any native failure holds with an allowlisted stage
+code; it never falls back to PATH or loosens the ACL checks.
 Use a NEW child directory under LocalAppData/SquadHuntRelease, never a synced
 checkout. It emits only the public key/receipt and ACL booleans. Existing key
 directories and partial failures are not overwritten or automatically retried.
