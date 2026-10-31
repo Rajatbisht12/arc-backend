@@ -29,11 +29,21 @@ SQUADHUNT_RELEASE_KIND=worker-rollout-key-init bash deploy.sh
 This command is documentation only and was not executed during preparation. If
 the parent directory is absent create that parent first; never reuse/overwrite a
 key directory. Windows calls whoami/icacls to remove inherited access and grant
-the current SID, and holds on failure. POSIX requires0700/0600. Native Windows
+the current SID, then independently checks Get-Acl on both directory/private file,
+ownership, allow/deny entries, reparse state and the actual public/private key pair.
+It holds without a success receipt on any mismatch. POSIX requires0700/0600. Native Windows
 ACL behavior still needs actual deployment-laptop qualification; local tests ran
 on macOS. Keep control-private.pem on that laptop outside sync/source/journal;
 share only control-public.json. No cloud secret, IAM credential or Google key is
 created. Only ephemeral unit-test signers were generated locally and removed.
+
+The standalone `scripts/lib/worker-control-key-local-r2.js` supports provider-free
+`init` and `check` without running deploy.sh, Docker or any repository helper.
+Use a NEW child directory under LocalAppData/SquadHuntRelease, never a synced
+checkout. It emits only the public key/receipt and ACL booleans. Existing key
+directories and partial failures are not overwritten or automatically retried.
+The private file must remain on the deployment laptop. The powershell script is
+fixed/encoded, uses LiteralPath, and never changes the host execution policy.
 
 Render the candidate from the exact native-matching worker-template-before.json
 and the real public receipt. All other template resources must stay unchanged.
