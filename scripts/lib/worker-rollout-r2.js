@@ -8,6 +8,7 @@ const OWNER='squadhunt-worker-rollout-r2',RUN='pi-worker-rollout-r2-20261101';
 const STACK='arn:aws:cloudformation:us-east-1:906446637180:stack/squadhunt-prod-video-worker/3b26e860-cd1c-11f1-be6d-0e95b6e35c2f';
 const ROLE_POLICY='2c7cbda9c393966d22815013ddde9b946e146a43bf950566ccbb60afcb4f4ded';
 function keyInit(directory,{platform=process.platform,commands=execFileSync}={}){
+ if(platform==='win32')return require('./worker-control-key-local-r2').create(directory,{platform,commands:(exe,args,options={})=>commands(exe,args,{encoding:'utf8',timeout:10000,maxBuffer:16384,stdio:['pipe','pipe','pipe'],...options})});
  check(path.isAbsolute(directory)&&!fs.existsSync(directory)&&!directory.startsWith(ROOT+path.sep)&&!/(?:onedrive|dropbox|icloud|google drive)/i.test(directory),'NEW_PRIVATE_NON_SYNCED_KEY_DIRECTORY_REQUIRED');
  fs.mkdirSync(directory,{mode:0o700});
  if(platform==='win32'){
