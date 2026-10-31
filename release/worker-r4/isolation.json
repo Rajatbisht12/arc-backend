@@ -1,0 +1,47 @@
+{
+  "parentArchiveSha256": "42b7180b971262fa154571fa975db4f9ecc8387fea2abb80d926b10a9ea8210a",
+  "files": 759,
+  "overlays": [
+    {
+      "path": "src/clip-worker.ts",
+      "beforeSha256": "484917d91fbfa304e58b30a817a26ce7d81fdce1280bd4845705c80c83de8c08",
+      "sha256": "fa76ef0c52e2d5e9b08fbd038db923515d17facbf243efc59d8cccf4784149a3"
+    },
+    {
+      "path": "src/infrastructure/jobs/videoTaskProtection.ts",
+      "beforeSha256": "7dad43b32d4dc0f47960a69f3f76d19e6b336f5ad57b57581bf102c26c3d6b13",
+      "sha256": "fe73d6342c57e068ceb950b3b500400aaa82df9ecc54c83c4ab47616824c88e3"
+    },
+    {
+      "path": "src/infrastructure/jobs/videoWorkerIntake.ts",
+      "beforeSha256": null,
+      "sha256": "0be7da39befc8afd7928d51fc7c97191cd3bbc146b0597a3e9a990914fc7d041"
+    },
+    {
+      "path": "src/legacy-src/utils/clipHlsProcessing.js",
+      "beforeSha256": "24e77b9a8dc718fbcdb9a5a63de3dd040c6e7cad89b0f840e1f712be55c65fad",
+      "sha256": "c1c93dcbd35d8827aab8b8c5729d73d5929e0c76f16751a5f8e9f953495c316c"
+    },
+    {
+      "path": "src/legacy-src/utils/videoWorkerClaim.js",
+      "beforeSha256": null,
+      "sha256": "d10caa115018cb1c3a4bfbf24e5345e986f58e4cd096bb751e99229adce2fbe1"
+    },
+    {
+      "path": "src/legacy-src/utils/videoWorkerControl.js",
+      "beforeSha256": null,
+      "sha256": "93b1700cfc1eb86cd302b06358f9952a142130d92347fc49dbd11972cf0a5991"
+    },
+    {
+      "path": "src/legacy-src/utils/videoWorkerWitness.js",
+      "beforeSha256": null,
+      "sha256": "651cd24c77d9648ce9efd77667ea436e1ddaef4ff7cd5ff806e163f187469082"
+    }
+  ],
+  "contentSha256": "2d26090dd563b8f7cc329f6b47638b0a515db8a569df6b9d3f535760afb44329",
+  "archiveSha256": "7d198bf776ea41073c9a596625616fa141bf76b16c8f960a48bc3e6a5873d599",
+  "newRuntimeDependencies": false,
+  "imageDigest": null,
+  "ociIndexDigest": null,
+  "linuxAmd64Digest": null
+}

@@ -1,0 +1,493 @@
+--- FROZEN/src/clip-worker.ts
++++ R4/src/clip-worker.ts
+@@ -7,7 +7,8 @@
+ import { connectMongo } from "./infrastructure/database/mongodb";
+ import { backendRootPath } from "./modules/legacy/legacy.paths";
+ import { startVideoWorkerObservation } from './infrastructure/jobs/videoWorkerResourceSample';
+-import { startVideoTaskProtection } from './infrastructure/jobs/videoTaskProtection';
++import { createVideoProtectionLease } from './infrastructure/jobs/videoTaskProtection';
++import { createVideoWorkerIntake, videoWorkerHealth, watchVideoWorkerErrors } from './infrastructure/jobs/videoWorkerIntake';
+ import { randomUUID } from 'crypto';
+ 
+ const connection = {
+@@ -27,30 +28,33 @@
+ let worker: Worker | null = null;
+ let protectionHealthy = true;
+ let activeJobs = 0;
++const intake = createVideoWorkerIntake();
++let taskProtection: Awaited<ReturnType<typeof createVideoProtectionLease>> | null = null;
+ // Load the same source module used by legacy services: one ALS context even in dist.
+ const completionTrace = require(path.join(backendRootPath, 'utils', 'videoCompletionTrace.js')) as {
+   withTrace: <T>(identity: Record<string, unknown>, fn: () => Promise<T>) => Promise<T>;
+   span: <T>(name: string, fn: () => Promise<T>, details?: Record<string, unknown>) => Promise<T>;
+   queueAcknowledged: (jobId: string) => void;
+ };
+-const processJob = async (job: Job, token?: string) => completionTrace.withTrace(
+-  { sessionId: job.data?.sessionId, jobId: job.id }, () => processJobInner(job, token));
++const witness = require(path.join(backendRootPath, 'utils', 'videoWorkerWitness.js'));
++const Control = require(path.join(backendRootPath, 'utils', 'videoWorkerControl.js'));
++let control: any = null;
++let currentClaim: {jobId:string;sessionId:string;token:string} | null = null;
++const claimReadback = require(path.join(backendRootPath,'utils','videoWorkerClaim.js')).create({getClaim:()=>currentClaim,consumer:()=>worker});
++const processJob = async (job: Job, token?: string) => witness.withJob({jobId: String(job.id || ''), sessionId: job.data?.sessionId}, () => completionTrace.withTrace(
++  { sessionId: job.data?.sessionId, jobId: job.id }, () => processJobInner(job, token)));
+ const processJobInner = async (job: Job, token?: string) => {
+-  let stopProtection: () => Promise<void>;
++  const localJobId = String(job.id || '');
+   try {
+-    stopProtection = await completionTrace.span('worker.protection_acquire', () => startVideoTaskProtection({ onRenewalFailure: async () => {
+-      protectionHealthy = false;
+-      await worker?.pause(true);
+-    } }));
++    if (taskProtection) taskProtection.assertClaimsAllowed();
++    intake.begin(localJobId);
+   } catch {
+-    // Do not spend encode attempts merely because ECS protection is unavailable.
+-    protectionHealthy = false;
+-    console.error(JSON.stringify({ event: 'video_task_protection_initial_failed' }));
+     await worker?.pause(true);
+     await job.moveToDelayed(Date.now() + 30000, token);
+     throw new DelayedError();
+   }
+   activeJobs++;
++  currentClaim=token?{jobId:localJobId,sessionId:String(job.data?.sessionId||''),token}:null;
+   const stopObservation = await completionTrace.span('worker.observation_start', () => startVideoWorkerObservation(
+     process.env.VIDEO_WORKER_RESOURCE_METRICS_ENABLED === 'true',
+     String(job.id || ''), job.name,
+@@ -67,28 +71,76 @@
+   } finally {
+     // Telemetry is optional: a logging failure must not fail a completed job.
+     await completionTrace.span('worker.observation_stop', stopObservation).catch(() => {});
+-    await completionTrace.span('worker.protection_release', stopProtection).catch(() => {
+-      protectionHealthy = false;
+-      console.error(JSON.stringify({ event: 'video_task_protection_release_failed' }));
+-      void worker?.pause(true);
+-    });
+-    activeJobs--;
++    // Retain task protection while the consumer can claim another job.
++    // Only the shutdown/drain fence may positively release it.
++    intake.finish(localJobId);
++    activeJobs--;currentClaim=null;
+   }
+ };
+ 
+ const bootstrap = async () => {
+   if (!env.CLIP_HLS_ENABLED) throw new Error("CLIP_HLS_ENABLED must be true for the Clip worker");
++  const r4 = process.env.VIDEO_WORKER_R4_CONTROL_ENABLED === 'true';
++  if (r4) {
++    if (process.env.POST_VIDEO_FAIR_SCHEDULING_ENABLED !== 'false' || process.env.POST_VIDEO_PRIVATE_DELIVERY_ENABLED !== 'true') throw Error('R4_REQUIRES_CURRENT_PRIVATE_NONFAIR_TOPOLOGY');
++    if (process.env.VIDEO_TASK_SCALE_IN_PROTECTION_ENABLED !== 'true') throw Error('R4_REQUIRES_PROTECTION');
++    Control.validateConfig({owner:process.env.VIDEO_WORKER_CONTROL_OWNER,runId:process.env.VIDEO_WORKER_CONTROL_RUN_ID,publicKeyPem:process.env.VIDEO_WORKER_CONTROL_PUBLIC_KEY_PEM});
++    if (!process.env.VIDEO_WORKER_EXPECTED_SERVICE || !process.env.VIDEO_WORKER_EXPECTED_FAMILY) throw Error('R4_SERVICE_BINDING_REQUIRED');
++  }
+   await connectMongo();
+-  if (process.env.VIDEO_TASK_SCALE_IN_PROTECTION_ENABLED === 'true' && env.CLIP_HLS_WORKER_CONCURRENCY !== 1) throw new Error('Protected video workers require one active job per task');
++  if (env.CLIP_HLS_WORKER_CONCURRENCY !== 1) throw new Error('Video workers require one active job per task');
++  if (process.env.VIDEO_TASK_SCALE_IN_PROTECTION_ENABLED === 'true') {
++    taskProtection = await createVideoProtectionLease({ onUnsafe: async code => {
++      protectionHealthy = false; intake.hold(code);
++      console.error(JSON.stringify({ event: 'video_task_protection_unsafe', code, taskArn: taskProtection?.taskArn }));
++      await worker?.pause(true);
++    } });
++  }
++  // autorun=false closes the claim-before-initial-protection race.
+   worker = new Worker("clip-video", processJob, {
++    autorun: false,
+     connection,
+     concurrency: env.CLIP_HLS_WORKER_CONCURRENCY,
+     lockDuration: 120000,
+     maxStalledCount: 2,
+   });
++  if (r4 && taskProtection) {
++    const containers = taskProtection.metadata.Containers.filter((c: any) => c.Name === 'video-worker');
++    const identity = witness.configure({taskArn:taskProtection.taskArn,containerName:'video-worker',containerId:containers[0].DockerId});
++    control = Control.create({owner:process.env.VIDEO_WORKER_CONTROL_OWNER,runId:process.env.VIDEO_WORKER_CONTROL_RUN_ID,publicKeyPem:process.env.VIDEO_WORKER_CONTROL_PUBLIC_KEY_PEM,identity,intake,consumer:worker,protection:taskProtection,witness,claims:claimReadback});
++  }
++  watchVideoWorkerErrors(worker, intake, () => logger.warn('Video consumer dependency unavailable; intake fenced'));
+   const queue = new Queue('clip-video', { connection });
+-  const presenceId = randomUUID();
++  const client = await worker.client;
++  client.on('close', () => { intake.redis(false); void worker?.pause(true).catch(() => {}); });
++  client.on('error', () => { intake.redis(false); void worker?.pause(true).catch(() => {}); });
++  await client.ping(); intake.redis(true); intake.start();
++  void worker.run().then(() => { if (!intake.snapshot().closing) intake.fatal(); }).catch(() => {
++    intake.fatal(); logger.error('Video consumer loop failed');
++  });
++  let probing = false;
++  const readinessTimer = setInterval(() => {
++    if (probing || intake.snapshot().closing) return; probing = true;
++    void (async () => {
++      let deadline: NodeJS.Timeout | undefined;
++      let redisVerified = false;
++      try {
++        await Promise.race([client.ping(), new Promise((_, reject) => { deadline = setTimeout(() => reject(Error('REDIS_INTAKE_DEADLINE')), 2000); })]);
++        intake.redis(true); redisVerified = true;
++        if (taskProtection) taskProtection.assertClaimsAllowed();
++        if (!intake.snapshot().held && worker?.isPaused()) await worker.resume();
++      } catch {
++        if (!redisVerified) intake.redis(false);
++        else intake.hold('INTAKE_OR_PROTECTION_NOT_CURRENT');
++        await worker?.pause(true);
++      }
++      finally { if (deadline) clearTimeout(deadline); probing = false; }
++    })().catch(() => intake.hold('INTAKE_PROBE_EXCEPTION'));
++  }, 3000);
++  readinessTimer.unref();
++  const presenceId = taskProtection?.taskArn || randomUUID();
+   const presence = async () => {
++    if (r4) return; // Fair scheduling remains off; no new scheduler-presence writes for this experiment.
+     if (process.env.VIDEO_TASK_SCALE_IN_PROTECTION_ENABLED !== 'true') return;
+     const client = await queue.client;
+     if (!protectionHealthy && activeJobs === 0) {
+@@ -107,17 +159,18 @@
+   }, 30000);
+   metricsTimer.unref();
+   worker.on('stalled', jobId => logger.warn('Video processing job stalled', { jobId }));
+-  // This liveness/readiness endpoint has no public load balancer. ECS probes
+-  // it locally; Redis disconnects make readiness fail until consumption resumes.
+-  const health = createServer(async (_req, res) => {
+-    try {
+-      const client = await worker!.client;
+-      await client.ping();
+-      // Keep a draining protected encode alive after a renewal failure. Once
+-      // it finishes, readiness fails and ECS can replace the paused task.
+-      res.statusCode = (worker!.isRunning() && protectionHealthy) || activeJobs > 0 ? 200 : 503;
+-      res.end(res.statusCode === 200 ? 'ready' : 'stopped');
+-    } catch { res.statusCode = 503; res.end('queue unavailable'); }
++  // ECS probes '/' (liveness); dependency and intake readiness are separate.
++  // A blocked event loop cannot serve this probe; failed/ended consumer loops
++  // explicitly mark fatal. Redis loss alone never kills an owned active encode.
++  const healthState = videoWorkerHealth(intake, () => taskProtection?.snapshot() || null);
++  const health = createServer((req, res) => {
++    if (req.url?.startsWith('/control')) {
++      if (!control) { res.statusCode=404;res.end();return; }
++      void control.http(req,res).catch(()=>{res.statusCode=503;res.end();});return;
++    }
++    if (!['/','/ready'].includes(req.url || '')) {res.statusCode=404;res.end();return;}
++    const result = healthState(req.url); res.statusCode = result.status;
++    res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(result.body));
+   });
+   health.listen(env.VIDEO_WORKER_HEALTH_PORT, '0.0.0.0');
+   worker.on("ready", () => logger.info("Clip HLS worker ready", { concurrency: env.CLIP_HLS_WORKER_CONCURRENCY }));
+@@ -133,12 +186,17 @@
+     error: String(error)
+   }));
+ 
++  let shutdownStarted = false;
+   const shutdown = async (signal: string) => {
++    if (shutdownStarted) return; shutdownStarted = true; intake.drain();
+     logger.info(`${signal} received, stopping Clip HLS worker`);
+     clearInterval(metricsTimer);
++    clearInterval(readinessTimer);
+     clearInterval(presenceTimer);
+     await worker!.close();
+-    if (process.env.VIDEO_TASK_SCALE_IN_PROTECTION_ENABLED === 'true') {
++    if (taskProtection && !taskProtection.snapshot().released) await taskProtection.release({ intakeFenced: true, activeJobs, consumerClosed: true });
++    intake.stopped();
++    if (!r4 && process.env.VIDEO_TASK_SCALE_IN_PROTECTION_ENABLED === 'true') {
+       const client = await queue.client;
+       await client.zrem('video-scheduler:worker-presence:v1', presenceId).catch(() => {});
+     }
+@@ -147,8 +205,8 @@
+     await mongoose.disconnect();
+     process.exit(0);
+   };
+-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+-  process.on("SIGINT", () => void shutdown("SIGINT"));
++  process.on("SIGTERM", () => void shutdown("SIGTERM").catch(() => { intake.hold('SHUTDOWN_PROTECTION_UNRESOLVED'); logger.error('Video shutdown held for operator review'); }));
++  process.on("SIGINT", () => void shutdown("SIGINT").catch(() => { intake.hold('SHUTDOWN_PROTECTION_UNRESOLVED'); logger.error('Video shutdown held for operator review'); }));
+ };
+ 
+ bootstrap().catch(error => {
+--- FROZEN/src/infrastructure/jobs/videoTaskProtection.ts
++++ R4/src/infrastructure/jobs/videoTaskProtection.ts
+@@ -1,35 +1,78 @@
+ type Fetch = typeof fetch;
+-type ProtectionOptions = { env?: NodeJS.ProcessEnv; request?: Fetch; onRenewalFailure?: () => Promise<unknown> };
+-
+-/** ECS agent endpoint protects a task before FFmpeg starts and renews while a
+- * job is active. A failed initial protection request prevents processing.
+- * Scale-in protection does not protect against crashes/force-stop/Spot loss;
+- * BullMQ locks and durable session leases provide recovery for those cases. */
+-export async function startVideoTaskProtection({ env = process.env, request = fetch, onRenewalFailure }: ProtectionOptions = {}) {
+-  if (env.VIDEO_TASK_SCALE_IN_PROTECTION_ENABLED !== 'true') return async () => {};
+-  if (!env.ECS_AGENT_URI) throw new Error('Scale-in protection requires ECS_AGENT_URI');
+-  const endpoint = `${env.ECS_AGENT_URI.replace(/\/$/, '')}/task-protection/v1/state`;
++type DrainProof = { intakeFenced: boolean; activeJobs: number; consumerClosed: boolean };
++type Options = { env?: NodeJS.ProcessEnv; request?: Fetch; now?: () => number; onUnsafe?: (code: string) => Promise<unknown>; automaticTimer?: boolean };
++function check(value: unknown, code: string): asserts value { if (!value) throw Error(code); }
++const localEndpoint = (value: string | undefined, suffix: string) => {
++  const url = new URL(value || '');
++  check(url.protocol === 'http:' && ['169.254.170.2', '127.0.0.1', '[::1]'].includes(url.hostname) && !url.username && !url.password && !url.search && !url.hash, 'ECS_LOCAL_ENDPOINT_REQUIRED');
++  return url.toString().replace(/\/$/, '') + suffix;
++};
++/** Acquire before the consumer starts, retain through active work and idle
++ * intake, and release only after a local claim fence and complete drain.
++ * Protection never substitutes for BullMQ locks or durable source leases. */
++export async function createVideoProtectionLease({ env = process.env, request = fetch, now = Date.now, onUnsafe, automaticTimer = true }: Options = {}) {
++  check(env.ECS_AGENT_URI, 'Scale-in protection requires ECS_AGENT_URI');
++  check(env.ECS_CONTAINER_METADATA_URI_V4, 'ECS_TASK_METADATA_REQUIRED');
++  const endpoint = localEndpoint(env.ECS_AGENT_URI, '/task-protection/v1/state');
++  const metadata = localEndpoint(env.ECS_CONTAINER_METADATA_URI_V4, '/task');
++  const read = async (url: string, options: RequestInit = {}) => {
++    const response = await request(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(5000) });
++    const body = await response.json() as any;
++    check(response.ok && !body.error && !body.failure, 'ECS_PROTECTION_RESPONSE_UNAVAILABLE'); return body;
++  };
++  const task = await read(metadata), arn = String(task.TaskARN || '');
++  check(new RegExp('^arn:aws:ecs:' + (env.AWS_REGION || 'us-east-1') + ':' + (env.VIDEO_WORKER_EXPECTED_ACCOUNT || '906446637180') + ':task/arc-cluster/[a-f0-9]{32}$').test(arn), 'EXACT_ECS_TASK_IDENTITY_REQUIRED');
++  if (env.VIDEO_WORKER_R4_CONTROL_ENABLED === 'true') {
++    check(task.ServiceName === env.VIDEO_WORKER_EXPECTED_SERVICE && task.Family === env.VIDEO_WORKER_EXPECTED_FAMILY, 'EXACT_SERVICE_MANAGED_TASK_REQUIRED');
++    check(Array.isArray(task.Containers) && task.Containers.filter((c: any) => c.Name === 'video-worker' && typeof c.DockerId === 'string').length === 1, 'EXACT_WORKER_CONTAINER_REQUIRED');
++  }
++  const minutes = Number(env.VIDEO_TASK_PROTECTION_MINUTES || 2880), reserve = 15 * 60000;
++  check(Number.isSafeInteger(minutes) && minutes >= 120 && minutes <= 2880, 'BOUNDED_PROTECTION_LEASE_REQUIRED');
++  const state = { taskArn: arn, protected: false, expiresAt: 0, checkedAt: 0, unsafe: true, code: 'INITIAL_PROTECTION_UNVERIFIED', released: false, releasing: false };
++  let busy: Promise<void> | null = null, timer: NodeJS.Timeout | undefined;
++  const observe = async (enabled: boolean) => {
++    const p = (await read(endpoint)).protection;
++    check(p?.TaskArn === arn && p.ProtectionEnabled === enabled, 'EXACT_PROTECTION_READBACK_REQUIRED');
++    const expires = enabled ? Date.parse(p.ExpirationDate) : 0;
++    check(!enabled || Number.isFinite(expires) && expires > now() + reserve && expires <= now() + minutes * 60000 + 60000, 'PROTECTION_EXPIRY_UNSAFE');
++    Object.assign(state, { protected: enabled, expiresAt: expires, checkedAt: now(), unsafe: false, code: 'VERIFIED' });
++  };
+   const update = async (enabled: boolean) => {
+-    const response = await request(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+-      body: JSON.stringify({ ProtectionEnabled: enabled, ...(enabled ? { ExpiresInMinutes: 120 } : {}) }), signal: AbortSignal.timeout(5000) });
+-    const result = await response.json() as { protection?: { ProtectionEnabled?: boolean }; error?: unknown; failure?: unknown };
+-    if (!response.ok || result.error || result.failure || result.protection?.ProtectionEnabled !== enabled) throw new Error('ECS task protection was not acknowledged');
++    // A lost PUT acknowledgement permits one exact GET, never a second PUT.
++    try { await read(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ProtectionEnabled: enabled, ...(enabled ? { ExpiresInMinutes: minutes } : {}) }) }); } catch { /* exact positive GET decides */ }
++    await observe(enabled);
+   };
+   await update(true);
+-  let closed = false, refreshing: Promise<unknown> | null = null;
+-  const timer = setInterval(() => {
+-    if (closed || refreshing) return;
+-    refreshing = update(true).catch(async () => {
+-      console.error(JSON.stringify({ event: 'video_task_protection_renewal_failed' }));
+-      // Stop taking further jobs; an existing lease lasts 120 minutes and the
+-      // current job keeps running. Operations must investigate this alarm.
+-      await onRenewalFailure?.();
+-    }).finally(() => { refreshing = null; });
+-  }, 60000);
+-  timer.unref();
+-  return async () => {
+-    closed = true; clearInterval(timer);
+-    await refreshing;
+-    await update(false);
++  async function renew() {
++    check(!state.released && !state.releasing, 'PROTECTION_LEASE_RELEASED');
++    if (busy) return busy;
++    busy = (async () => {
++      try { await update(true); }
++      catch {
++        state.unsafe = true; state.code = state.expiresAt - now() <= reserve ? 'PROTECTION_NEAR_EXPIRY_HOLD_SCALE_IN' : 'PROTECTION_RENEWAL_UNKNOWN_HOLD_SCALE_IN';
++        await onUnsafe?.(state.code);
++      }
++    })().finally(() => { busy = null; });
++    return busy;
++  }
++  const snapshot = () => ({ ...state, unsafe: state.unsafe || state.releasing || now() - state.checkedAt > 65000 || state.expiresAt - now() <= reserve });
++  if (automaticTimer) { timer = setInterval(() => { void renew().catch(async () => { state.unsafe = true; state.code = 'PROTECTION_RENEWAL_EXCEPTION'; await onUnsafe?.(state.code); }).catch(() => { /* state remains unsafe even if the local pause callback also fails */ }); }, 60000); timer.unref(); }
++  return { taskArn: arn, metadata: task, snapshot, renew,
++    assertClaimsAllowed: () => check(!snapshot().unsafe && !state.released && state.protected, 'PROTECTION_NOT_CURRENT_NO_NEW_CLAIMS'),
++    release: async (proof?: DrainProof) => {
++      check(proof?.intakeFenced && proof.activeJobs === 0 && proof.consumerClosed, 'DRAINED_CLAIM_FENCE_BEFORE_UNPROTECT');
++      check(!state.releasing && !state.released, 'PROTECTION_RELEASE_ALREADY_CONSUMED');
++      state.releasing = true; if (timer) clearInterval(timer); await busy;
++      try { await update(false); state.released = true; } catch { state.unsafe = true; state.code = 'PROTECTION_RELEASE_UNRESOLVED'; await onUnsafe?.(state.code); throw Error(state.code); }
++    },
++    stopTimer: () => { if (timer) clearInterval(timer); },
+   };
+ }
++// Compatibility helper for the old injected call surface; the actual worker
++// now holds a single lease outside individual job handlers.
++export async function startVideoTaskProtection(options: { env?: NodeJS.ProcessEnv; request?: Fetch; onRenewalFailure?: () => Promise<unknown> } = {}) {
++  if ((options.env || process.env).VIDEO_TASK_SCALE_IN_PROTECTION_ENABLED !== 'true') return async (_proof?: DrainProof) => {};
++  const lease = await createVideoProtectionLease({ ...options, onUnsafe: options.onRenewalFailure });
++  // No compatibility caller may manufacture a drained proof implicitly.
++  return (proof?: DrainProof) => lease.release(proof);
++}
+--- FROZEN/src/infrastructure/jobs/videoWorkerIntake.ts
++++ R4/src/infrastructure/jobs/videoWorkerIntake.ts
+@@ -0,0 +1,44 @@
++/** Local, synchronous claim fence. Redis/endpoint failure closes intake; it
++ * cannot make a still-running encode fail a process-liveness probe. */
++export function createVideoWorkerIntake() {
++  let started = false, running = true, closing = false, redisReady = false, fatal = false, held = false, reason = 'BOOTSTRAPPING';
++  const jobs = new Set<string>();
++  return {
++    start: () => { started = true; },
++    redis: (ready: boolean) => { redisReady = ready; if (!ready) reason = 'REDIS_UNAVAILABLE'; },
++    hold: (code: string) => { held = true; reason = code; },
++    fatal: () => { fatal = true; reason = 'WORKER_PROCESS_FAILED'; },
++    begin: (id: string) => { if (!started || !running || closing || fatal || held || !redisReady || jobs.size || jobs.has(id)) throw Error('INTAKE_FENCED_NO_ENCODE'); jobs.add(id); },
++    finish: (id: string) => { if (!jobs.delete(id)) throw Error('UNKNOWN_LOCAL_JOB_COMPLETION'); },
++    drain: () => { closing = true; reason = 'DRAINING'; },
++    stopped: () => { running = false; },
++    snapshot: () => ({ started, running, closing, fatal, held, redisReady, reason, activeJobs: jobs.size,
++      live: started && !fatal && running, ready: started && running && !closing && !fatal && !held && redisReady }),
++  };
++}
++
++// BullMQ emits recoverable Redis errors on the Worker as well as its client.
++// Install before awaiting a connection so these errors positively fence intake.
++// The pinned BullMQ QueueBase catches/logs unhandled error events; that logging
++// alone is not a readiness fence. Standard EventEmitter callers also need this
++// listener to avoid its unhandled-error behaviour.
++export function watchVideoWorkerErrors(
++  consumer: { on: (event: 'error', handler: (error: Error) => void) => unknown; pause: (doNotWaitActive?: boolean) => Promise<void> },
++  intake: ReturnType<typeof createVideoWorkerIntake>,
++  report: () => void = () => {},
++) {
++  consumer.on('error', () => {
++    intake.redis(false);
++    void consumer.pause(true).catch(() => {});
++    report();
++  });
++}
++
++export function videoWorkerHealth(intake: ReturnType<typeof createVideoWorkerIntake>, protection: () => { unsafe: boolean } | null) {
++  return (url: string | undefined) => {
++    const state = intake.snapshot(), lease = protection();
++    const ready = state.ready && !lease?.unsafe;
++    return { status: (url === '/ready' ? ready : state.live) ? 200 : 503,
++      body: { live: state.live, ready, activeJobs: state.activeJobs, intakeFenced: !ready, reason: state.reason } };
++  };
++}
+--- FROZEN/src/legacy-src/utils/clipHlsProcessing.js
++++ R4/src/legacy-src/utils/clipHlsProcessing.js
+@@ -1,3 +1,4 @@
++const workerWitness = require('./videoWorkerWitness');
+ const { spawn } = require('child_process');
+ const fs = require('fs/promises');
+ const path = require('path');
+@@ -103,8 +104,9 @@
+ 
+ const runProcess = (command, args, { timeoutMs = TRANSCODE_TIMEOUT_MS, signal, onProgress } = {}) => new Promise((resolve, reject) => {
+   if (signal?.aborted) { reject(signal.reason || new Error('Video processing cancelled')); return; }
+-  const progressEnabled = command === 'ffmpeg' && typeof onProgress === 'function';
++  const progressEnabled = command === 'ffmpeg' && (typeof onProgress === 'function' || workerWitness.enabled());
+   const child = spawn(command, ['-protocol_whitelist', 'file', ...(progressEnabled ? ['-progress', 'pipe:1', '-nostats'] : []), ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
++  const processWitness = command === 'ffmpeg' ? workerWitness.begin(child) : null;
+   let stdout = '';
+   let stderr = '';
+   let progressBuffer = '';
+@@ -146,6 +148,7 @@
+         const outTimeUs = Number(progressFields.out_time_us ?? progressFields.out_time_ms);
+         const frame = Number(progressFields.frame);
+         if (Number.isFinite(outTimeUs) && outTimeUs >= 0) {
++          if (Number.isSafeInteger(frame) && frame >= 0) workerWitness.progress(processWitness,{encodedSeconds:outTimeUs/1_000_000,frame});
+           try { onProgress({ encodedSeconds: outTimeUs / 1_000_000,
+             ...(Number.isFinite(frame) && frame >= 0 ? { frame } : {}),
+             speed: String(progressFields.speed || '').slice(0, 24) }); } catch { /* Progress is observational. */ }
+--- FROZEN/src/legacy-src/utils/videoWorkerClaim.js
++++ R4/src/legacy-src/utils/videoWorkerClaim.js
+@@ -0,0 +1,17 @@
++'use strict';
++const {createHash}=require('node:crypto');
++function create({getClaim,consumer,timeoutMs=2000}){
++ let pending=false;
++ return async()=>{
++  const claim=getClaim(),worker=consumer();if(!claim||!worker||pending||!/^[a-f0-9]{24}$/.test(claim.sessionId))return{owned:false};
++  pending=true;let timer;
++  const work=(async()=>{
++   const client=await worker.client;if(client.status!=='ready')throw Error('CLAIM_REDIS_UNAVAILABLE');
++   const rows=await client.multi().get('bull:clip-video:'+claim.jobId+':lock').pttl('bull:clip-video:'+claim.jobId+':lock').exec();
++   if(getClaim()!==claim||!rows||rows.length!==2||rows.some(x=>x[0])||rows[0][1]!==claim.token||Number(rows[1][1])<5000)return{owned:false};
++   const hash=x=>createHash('sha256').update(x).digest('hex');return{owned:true,observedAt:Date.now(),jobReference:hash(claim.jobId),sourceReference:hash(claim.sessionId),lockTtlMs:Number(rows[1][1])};
++  })().finally(()=>{pending=false;});
++  try{return await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('CLAIM_READ_DEADLINE')),timeoutMs);})]);}catch{return{owned:false};}finally{clearTimeout(timer);}
++ };
++}
++module.exports={create};
+--- FROZEN/src/legacy-src/utils/videoWorkerControl.js
++++ R4/src/legacy-src/utils/videoWorkerControl.js
+@@ -0,0 +1,48 @@
++'use strict';
++const {createPublicKey,verify,randomUUID}=require('node:crypto');
++const check=(v,c)=>{if(!v)throw Error(c);};
++const FIELDS=['version','owner','runId','taskArn','containerId','instanceId','action','issuedAt','expiresAt','nonce'];
++const canonical=x=>JSON.stringify(Object.fromEntries(FIELDS.map(k=>[k,x[k]])));
++function validateConfig({owner,runId,publicKeyPem}){check(/^[a-z0-9-]{8,80}$/.test(owner||'')&&/^[a-z0-9-]{8,80}$/.test(runId||''),'CONTROL_OWNER_BINDING');const key=createPublicKey(publicKeyPem);check(key.asymmetricKeyType==='ed25519','CONTROL_PUBLIC_KEY_REQUIRED');return key;}
++function create({owner,runId,publicKeyPem,identity,intake,consumer,protection,witness,claims=async()=>({owned:false}),now=Date.now}){
++ check(/^[a-z0-9-]{8,80}$/.test(owner||'')&&/^[a-z0-9-]{8,80}$/.test(runId||''),'CONTROL_OWNER_BINDING');
++ const key=validateConfig({owner,runId,publicKeyPem});
++ check(identity.taskArn===protection.taskArn&&identity.instanceId&&identity.containerId,'CONTROL_TASK_BINDING');
++ let state='OPEN',busy=null,pauseStarted=false,consumerClosed=false,closeStarted=false,releaseStarted=false;
++ const nonces=new Set();
++ function authenticate(x){
++  check(x&&Object.keys(x).sort().join()===([...FIELDS,'signature'].sort().join()),'CONTROL_FIELDS');
++  check(x.version===1&&x.owner===owner&&x.runId===runId&&x.taskArn===identity.taskArn&&x.containerId===identity.containerId&&x.instanceId===identity.instanceId&&['OBSERVE','DRAIN'].includes(x.action),'CONTROL_SCOPE');
++  const t=now();check(Number.isSafeInteger(x.issuedAt)&&Number.isSafeInteger(x.expiresAt)&&x.issuedAt<=t&&x.expiresAt>t&&x.expiresAt-x.issuedAt<=60000,'CONTROL_CLOCK');
++  check(/^[a-f0-9]{32}$/.test(x.nonce)&&!nonces.has(x.nonce)&&nonces.size<4096,'CONTROL_REPLAY_OR_BUDGET');
++  check(typeof x.signature==='string'&&/^[A-Za-z0-9+/]{86}==$/.test(x.signature)&&verify(null,Buffer.from(canonical(x)),key,Buffer.from(x.signature,'base64')),'CONTROL_SIGNATURE');
++  nonces.add(x.nonce);
++ }
++ async function bounded(fn){let timer;try{return await Promise.race([fn(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('DRAIN_DEADLINE')),3000);})]);}finally{clearTimeout(timer);}}
++ function reconcile(){
++  if(busy||state!=='DRAINING')return busy;
++  busy=(async()=>{
++   try{
++    if(!pauseStarted){pauseStarted=true;await bounded(()=>consumer.pause(true));}
++    const w=witness.snapshot(),i=intake.snapshot();check(w.qualified===true&&w.taskArn===identity.taskArn,'WITNESS_UNQUALIFIED');
++    if(i.activeJobs!==0||w.activeFfmpeg!==0)return;
++    if(!closeStarted){closeStarted=true;await bounded(()=>consumer.close());check(consumer.closed===true,'CONSUMER_CLOSED_READBACK_REQUIRED');consumerClosed=true;}
++    check(consumerClosed&&intake.snapshot().closing&&intake.snapshot().activeJobs===0&&witness.snapshot().activeFfmpeg===0,'DRAIN_CHANGED');
++    check(!releaseStarted,'RELEASE_ALREADY_ATTEMPTED');releaseStarted=true;
++    await protection.release({intakeFenced:true,activeJobs:0,consumerClosed:true});
++    const p=protection.snapshot();check(p.taskArn===identity.taskArn&&p.released===true&&p.protected===false,'PROTECTION_CLEAR_UNKNOWN');state='DRAINED';
++   }catch{state='HOLD';intake.hold('OWNED_DRAIN_UNRESOLVED');}
++  })().finally(()=>{busy=null;});return busy;
++ }
++ function readback(){return{...identity,owner,runId,state,intake:intake.snapshot(),consumerClosed,releaseAttempted:releaseStarted,protection:protection.snapshot(),witness:witness.snapshot()};}
++ async function command(x){authenticate(x);if(x.action==='DRAIN'&&state==='OPEN'){intake.drain();state='DRAINING';}await reconcile();return{...readback(),claim:await claims()};}
++ return{command,readback,challenge:()=>({...identity,owner,runId,protocol:1}),
++  http:async(req,res)=>{
++   const send=(code,x)=>{res.statusCode=code;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(x));};
++   if(req.method==='GET'&&req.url==='/control/challenge'){send(200,{...identity,owner,runId,protocol:1});return;}
++   if(req.method!=='POST'||req.url!=='/control'){send(404,{code:'NOT_FOUND'});return;}
++   let size=0;const chunks=[];req.setTimeout(2000,()=>req.destroy());
++   try{for await(const b of req){size+=b.length;check(size<=2048,'CONTROL_BODY_BOUND');chunks.push(b);}const out=await command(JSON.parse(Buffer.concat(chunks).toString()));send(out.state==='HOLD'?503:200,out);}catch{send(403,{code:'CONTROL_REJECTED'});}
++  }};
++}
++module.exports={create,canonical,validateConfig};
+--- FROZEN/src/legacy-src/utils/videoWorkerWitness.js
++++ R4/src/legacy-src/utils/videoWorkerWitness.js
+@@ -0,0 +1,35 @@
++'use strict';
++const {AsyncLocalStorage}=require('node:async_hooks');
++const {createHash,randomUUID}=require('node:crypto');
++const {performance}=require('node:perf_hooks');
++const context=new AsyncLocalStorage(), records=new Map();
++let identity=null, qualified=true;
++const digest=x=>createHash('sha256').update(String(x)).digest('hex');
++function configure(task){
++ if(identity||!/^arn:aws:ecs:us-east-1:906446637180:task\/arc-cluster\/[a-f0-9]{32}$/.test(task?.taskArn)||!task.containerId||task.containerName!=='video-worker')throw Error('WITNESS_TASK_BINDING');
++ identity={taskArn:task.taskArn,containerName:task.containerName,containerId:task.containerId,instanceId:randomUUID()};return{...identity};
++}
++function withJob(job,fn){
++ if(!identity||!job.jobId)return fn();
++ return context.run({sourceReference:/^[a-f0-9]{24}$/.test(String(job.sessionId||''))?digest(job.sessionId):null,jobReference:digest(job.jobId)},fn);
++}
++function begin(child){
++ if(!identity||!context.getStore())return null;
++ try{
++  for(const[key,r]of records)if(r.ended&&performance.now()-r.lastMono>30000)records.delete(key);
++  if(records.size>=16){const old=[...records].find(([,r])=>r.ended);if(!old)throw Error();records.delete(old[0]);}
++  if([...records.values()].some(x=>!x.ended))throw Error();
++  const key=randomUUID(),r={...context.getStore(),processReference:key,pid:child.pid||null,startedAt:Date.now(),startedMono:performance.now(),lastMono:performance.now(),ended:false,points:[]};records.set(key,r);
++  child.once('close',()=>{r.ended=true;r.lastMono=performance.now();});
++  return key;
++ }catch{qualified=false;return null;}
++}
++function progress(key,p){
++ if(!key)return;
++ try{const r=records.get(key);if(!r||r.ended||!Number.isSafeInteger(p.frame)||p.frame<0||!Number.isFinite(p.encodedSeconds)||p.encodedSeconds<0)throw Error();
++  const prior=r.points.at(-1);if(prior&&(p.frame<prior.frame||p.encodedSeconds<prior.encodedSeconds))throw Error();
++  const mono=performance.now();r.points.push({sequence:(prior?.sequence||0)+1,at:Date.now(),mono,frame:p.frame,encodedSeconds:p.encodedSeconds});if(r.points.length>16)r.points.shift();r.lastMono=mono;
++ }catch{qualified=false;}
++}
++function snapshot(){return{...identity,qualified,observedAt:Date.now(),monotonicMs:performance.now(),activeFfmpeg:[...records.values()].filter(x=>!x.ended).length,processes:[...records.values()].map(r=>({...r,points:r.points.map(x=>({...x}))}))};}
++module.exports={configure,withJob,begin,progress,snapshot,enabled:()=>Boolean(identity&&context.getStore())};
