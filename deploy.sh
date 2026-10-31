@@ -10,6 +10,8 @@ case "${SQUADHUNT_RELEASE_KIND:-compatibility}" in
   compatibility) ;;
   worker-artifact-plan) exec node scripts/lib/worker-artifact.js plan ;;
   worker-artifact-build) exec node scripts/lib/worker-artifact.js build ;;
+  worker-permission-plan) exec node scripts/lib/protected-worker-release.js iam-plan ;;
+  worker-release-plan) exec node scripts/lib/protected-worker-release.js worker-plan ;;
   *) echo "Unknown/unqualified release kind; no deployment attempted." >&2; exit 1 ;;
 esac
 

@@ -1,0 +1,25 @@
+{
+  "status": "PROPOSAL_ONLY_UNAPPROVED_NATIVE_TEMPLATE_BINDINGS_MISSING",
+  "request": {
+    "StackName": "squadhunt-prod-video-roles",
+    "ChangeSetName": "pi-worker-protection-cs-r1-20261101",
+    "ChangeSetType": "UPDATE",
+    "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Description\":\"Separate production task identities for the dedicated post-video worker. Review as a change set before activation.\",\"Parameters\":{\"MediaBucketArn\":{\"Type\":\"String\",\"AllowedPattern\":\"^arn:aws:s3:::[a-z0-9.-]+$\"},\"BackendSecretArn\":{\"Type\":\"String\",\"AllowedPattern\":\"^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:arc/prod/backend-[A-Za-z0-9]+$\"}},\"Resources\":{\"WorkerExecutionRole\":{\"Type\":\"AWS::IAM::Role\",\"Properties\":{\"AssumeRolePolicyDocument\":{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ecs-tasks.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]},\"ManagedPolicyArns\":[{\"Fn::Sub\":\"arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy\"}]}},\"WorkerTaskRole\":{\"Type\":\"AWS::IAM::Role\",\"Properties\":{\"AssumeRolePolicyDocument\":{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ecs-tasks.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]},\"Policies\":[{\"PolicyName\":\"ProductionVideoWorker\",\"PolicyDocument\":{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"ReadLegacyAndNewInputs\",\"Effect\":\"Allow\",\"Action\":\"s3:GetObject\",\"Resource\":{\"Fn::Sub\":\"${MediaBucketArn}/*\"}},{\"Sid\":\"WriteVersionedOutputs\",\"Effect\":\"Allow\",\"Action\":[\"s3:PutObject\",\"s3:DeleteObject\"],\"Resource\":[{\"Fn::Sub\":\"${MediaBucketArn}/gaming-social/clips/*\"},{\"Fn::Sub\":\"${MediaBucketArn}/post-video-playback/*\"}]},{\"Sid\":\"ListOutputPrefixesForCleanup\",\"Effect\":\"Allow\",\"Action\":\"s3:ListBucket\",\"Resource\":{\"Ref\":\"MediaBucketArn\"},\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"gaming-social/clips/*\",\"post-video-playback/*\"]}}},{\"Sid\":\"ReadRuntimeConfiguration\",\"Effect\":\"Allow\",\"Action\":[\"secretsmanager:GetSecretValue\",\"secretsmanager:DescribeSecret\"],\"Resource\":{\"Ref\":\"BackendSecretArn\"}},{\"Sid\":\"ProtectDedicatedWorkerTasksInArcCluster\",\"Effect\":\"Allow\",\"Action\":[\"ecs:GetTaskProtection\",\"ecs:UpdateTaskProtection\"],\"Resource\":\"arn:aws:ecs:us-east-1:906446637180:task/arc-cluster/*\",\"Condition\":{\"ArnEquals\":{\"ecs:cluster\":\"arn:aws:ecs:us-east-1:906446637180:cluster/arc-cluster\"}}}]}}]}}},\"Outputs\":{\"ExecutionRoleArn\":{\"Value\":{\"Fn::GetAtt\":[\"WorkerExecutionRole\",\"Arn\"]}},\"TaskRoleArn\":{\"Value\":{\"Fn::GetAtt\":[\"WorkerTaskRole\",\"Arn\"]}}}}",
+    "Parameters": [
+      {
+        "ParameterKey": "MediaBucketArn",
+        "UsePreviousValue": true
+      },
+      {
+        "ParameterKey": "BackendSecretArn",
+        "UsePreviousValue": true
+      }
+    ],
+    "Capabilities": [
+      "CAPABILITY_IAM"
+    ],
+    "ClientToken": "pi-worker-protection-cs-r1-20261101"
+  },
+  "requestSha256": "3673df433c6c4202ded15c8c0a08f2c3194700052550af8eadf1dc39d4bb3667",
+  "executeRequest": null
+}
