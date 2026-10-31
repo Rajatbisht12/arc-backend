@@ -92,12 +92,15 @@ a temporary journal probe. It performs no AWS, registry, build or push request.
 The probe creates/removes only its own temporary files. Successful output is
 `WORKER_ARTIFACT_LOCAL_CHECK`; it is not build approval or native ECS evidence.
 
-Every journal event now uses exclusive write-through file creation (`O_EXCL` plus
-`O_SYNC`), successful file fsync and exact byte readback before advancing. On
-POSIX the additional directory fsync is retained. Windows uses the explicitly
-reviewed file-sync path because the actual deployment laptop rejects directory
-sync with EPERM. File-sync
-or readback errors are fatal; they are never caught and relabeled as a pass.
+Every journal event requires exclusive file creation (`O_EXCL`), successful file
+fsync and exact byte readback before advancing. POSIX additionally retains `O_SYNC`
+and directory fsync. The actual Windows Node24 laptop exposes no `O_SYNC` constant
+and rejects directory sync with EPERM. Its explicitly reviewed mode is therefore
+`EXCLUSIVE_FILE_FSYNC_READBACK`: use supported exclusive creation followed by a
+successful file fsync, without guessing private numeric flags or silently ignoring
+an unsupported operation. This is a correction to the first portability patch,
+which incorrectly required `O_SYNC` on Windows. File-sync or readback errors are
+fatal; they are never caught and relabeled as a pass.
 An existing journal directory still permanently rejects execution. If consumed
 record creation fails, no cloud command runs and the partial directory is retained.
 After a push-intent failure/unknown acknowledgement, never delete the journal or
@@ -119,8 +122,11 @@ Tests model the Windows filesystem branch and CRLF Buildx output locally. Actual
 Windows capability validation is still required on the deployment laptop; these
 models do not assert it already passed there.
 
-The [Node file-open documentation](https://nodejs.org/api/fs.html#file-open-constants)
-maps `O_SYNC` to Windows `FILE_FLAG_WRITE_THROUGH`. The plain builder inspection
+The [Node fsync documentation](https://nodejs.org/api/fs.html#fsfsyncsyncfd)
+specifies a flush request; [libuv's Windows implementation](https://github.com/libuv/libuv/blob/v1.x/src/win/fs.c)
+uses `FlushFileBuffers` for fsync. Success must still be observed on this actual
+laptop before build approval. The local `check` mode now prints only allowlisted
+failure codes, with no paths/configuration/error messages. The plain builder inspection
 matches [Docker's documented inspect interface](https://docs.docker.com/reference/cli/docker/buildx/inspect/).
 
 `node --test scripts/worker-artifact.test.js` tests frozen extraction, readable
