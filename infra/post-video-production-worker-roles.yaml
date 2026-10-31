@@ -52,6 +52,13 @@ Resources:
                 Effect: Allow
                 Action: ['secretsmanager:GetSecretValue', 'secretsmanager:DescribeSecret']
                 Resource: !Ref BackendSecretArn
+              - Sid: ProtectDedicatedWorkerTasksInArcCluster
+                Effect: Allow
+                Action: ['ecs:GetTaskProtection', 'ecs:UpdateTaskProtection']
+                Resource: arn:aws:ecs:us-east-1:906446637180:task/arc-cluster/*
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: arn:aws:ecs:us-east-1:906446637180:cluster/arc-cluster
 Outputs:
   ExecutionRoleArn:
     Value: !GetAtt WorkerExecutionRole.Arn

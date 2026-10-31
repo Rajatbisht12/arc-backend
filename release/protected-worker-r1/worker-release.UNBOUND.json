@@ -1,0 +1,19 @@
+{
+  "status": "PREPARATION_ONLY_NOT_DEPLOYABLE",
+  "iamDocumentReady": true,
+  "iamMutationApproved": false,
+  "image": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend@sha256:ffff210127eb3512a0a7f5967a6a28e08dbd5a10e3c0d8745a234ee5bece2e8a",
+  "expectedChild": "sha256:0e0c1b9a1cc850a2d9100b6a7245e324d95b93ec879388d4e27315b7952821da",
+  "missing": [
+    "current owning templates/parameters qualification",
+    "reviewed IAM change-set response and separate execution approval",
+    "exact revision3 provider definition comparison",
+    "owner/public signing key and private control transport",
+    "owned queue pause and positive old-worker drain proof",
+    "protection/claims-preserving rollback and approved capacity overlap",
+    "native permission/acquire/renew/drain/fault readbacks"
+  ],
+  "providerCalls": 0,
+  "buildAuthority": 0,
+  "serviceAuthority": 0
+}
