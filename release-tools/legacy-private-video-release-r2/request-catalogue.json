@@ -1,0 +1,88 @@
+{
+  "kind": "R2_EXACT_REQUEST_CATALOGUE",
+  "localCommandsBeforeConsumption": [
+    [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    [
+      "git",
+      "branch",
+      "--show-current"
+    ],
+    [
+      "git",
+      "rev-parse",
+      "origin/main"
+    ],
+    [
+      "git",
+      "status",
+      "--porcelain",
+      "--untracked-files=all"
+    ],
+    [
+      "git",
+      "remote",
+      "get-url",
+      "origin"
+    ],
+    [
+      "docker",
+      "--context",
+      "desktop-linux",
+      "context",
+      "inspect",
+      "desktop-linux",
+      "--format",
+      "{{json .Endpoints.docker.Host}}"
+    ],
+    [
+      "docker",
+      "--context",
+      "desktop-linux",
+      "buildx",
+      "inspect",
+      "desktop-linux"
+    ]
+  ],
+  "awsRequests": [
+    [
+      "sts",
+      "get-caller-identity"
+    ],
+    [
+      "ecr",
+      "describe-images",
+      "--repository-name",
+      "arc-backend",
+      "--image-ids",
+      "imageTag=pi-worker-format-legacy-r1-20261101",
+      "--no-paginate",
+      "--output",
+      "json"
+    ],
+    [
+      "ecr",
+      "get-login-password"
+    ]
+  ],
+  "awsCommon": [
+    "--profile",
+    "default",
+    "--region",
+    "us-east-1"
+  ],
+  "registryRead": "docker --context desktop-linux buildx imagetools inspect --raw 906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend@<single acknowledged OCI index digest>",
+  "buildCommandSource": "build-once.cjs; exact original tag and archive; only metadata path/context directory and clean merged HEAD provenance label resolve locally",
+  "resolver": "CLEAN_MERGED_CARRIER_HEAD_LABEL_ONLY_V1",
+  "mutations": {
+    "buildPush": 1,
+    "dockerLogin": 1,
+    "newBuilder": 0,
+    "deploy": 0
+  },
+  "noRetries": true,
+  "noPagination": true
+}
