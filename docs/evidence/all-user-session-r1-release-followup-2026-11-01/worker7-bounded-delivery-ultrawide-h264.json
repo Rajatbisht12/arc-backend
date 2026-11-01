@@ -1,0 +1,52 @@
+{
+  "kind": "LOCAL_ACTUAL_FFMPEG_SYNTHETIC_NOT_FARGATE_CAMERA",
+  "source": {
+    "codec": "h264",
+    "width": 3840,
+    "height": 1080
+  },
+  "workerUnchanged": true,
+  "unusedOversizedRenditionsRemainPrivate": [
+    {
+      "name": "720p",
+      "width": 2560,
+      "height": 720
+    },
+    {
+      "name": "1080p",
+      "width": 3840,
+      "height": 1080
+    }
+  ],
+  "hlsSelected": true,
+  "measured": [
+    {
+      "name": "360p",
+      "codec": "h264",
+      "width": 1280,
+      "height": 360,
+      "pixelFormat": "yuv420p",
+      "audio": "aac",
+      "fullDecode": true
+    },
+    {
+      "name": "540p",
+      "codec": "h264",
+      "width": 1920,
+      "height": 540,
+      "pixelFormat": "yuv420p",
+      "audio": "aac",
+      "fullDecode": true
+    },
+    {
+      "name": "fallback",
+      "codec": "h264",
+      "width": 1280,
+      "height": 360,
+      "pixelFormat": "yuv420p",
+      "audio": "aac",
+      "fullDecode": true
+    }
+  ],
+  "nativePrivateDeliveryQualified": false
+}

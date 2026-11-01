@@ -1,7 +1,7 @@
 {
   "kind": "API219_SESSION_ONLY_SOURCE_NOT_BUILT",
   "parentArchiveSha256": "42b7180b971262fa154571fa975db4f9ecc8387fea2abb80d926b10a9ea8210a",
-  "sourceContentSha256": "4b4889ee48b8aa650b48cb44edda18ad0512d8acd061cc8c84693fd82e375d96",
+  "sourceContentSha256": "974adec2225d0d2f7ec75f6a7f75c2dd8221e1929ecdc0a483dddec810149300",
   "files": [
     {
       "path": ".dockerignore",
@@ -1220,8 +1220,8 @@
     },
     {
       "path": "src/legacy-src/controllers/videoUploadController.js",
-      "bytes": 6847,
-      "sha256": "8f9e5d8428b6b03196858149313d1cd91e922895cd81983fb5b27b3a50f7365e"
+      "bytes": 7094,
+      "sha256": "34678da2b5cfcf67988bfa153f55dbecb61be31f4d06e13afc3d720078ae530d"
     },
     {
       "path": "src/legacy-src/data/quota.json",
@@ -2470,8 +2470,8 @@
     },
     {
       "path": "src/legacy-src/services/videoPostPublicationService.js",
-      "bytes": 7397,
-      "sha256": "065e184e2b3e286293d3143a577e99cf23d8c6322487dc579dd3813882b0b070"
+      "bytes": 7552,
+      "sha256": "b5f8dccd74f05020ea2b37deeac383baca72e6dc59895cb664d863ec8f06803d"
     },
     {
       "path": "src/legacy-src/services/videoReliability.integration.test.js",
@@ -2500,8 +2500,8 @@
     },
     {
       "path": "src/legacy-src/services/videoUploadService.js",
-      "bytes": 31540,
-      "sha256": "dd248bb9f8c4fa5d99519d81aea475d7da310873f7f1600414da5c34bdbc24e5"
+      "bytes": 31564,
+      "sha256": "a4559ee5fefb64c764d1429693745098554f74cb31accd2960a2e847f8b0700b"
     },
     {
       "path": "src/legacy-src/services/videoUploadService.test.js",
@@ -2932,6 +2932,11 @@
       "path": "src/legacy-src/utils/postVideoDelivery.js",
       "bytes": 7150,
       "sha256": "2b26f50d49d9c47b943b47eef8df901cfb107b183f4cad98c667d05a62ca20ac"
+    },
+    {
+      "path": "src/legacy-src/utils/postVideoFormatGate.js",
+      "bytes": 3842,
+      "sha256": "5c547cdfef156545e8ba7060e18fee9f44632d9384e83fe9fd61d632150f365f"
     },
     {
       "path": "src/legacy-src/utils/postVideoPolicy.js",

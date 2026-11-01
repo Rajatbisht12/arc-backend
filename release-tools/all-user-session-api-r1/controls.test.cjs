@@ -49,7 +49,7 @@ function transport(f, mode = '') {
 }
 const approval = () => ({ decision: 'APPROVE_EXACT_SESSION_API_IMAGE_BUILD_PUSH_ONLY', scopeSha256: L.hash(plan), existingLocalDriverAllowlistAccepted: true, exclusiveNewApiTagAccepted: true, cleanMergedHeadLabelOnlyAccepted: true, exclusiveTagAndJournalOwner: true, approvedAt: time });
 const options = (f, t) => ({ ...f, ...t, now: () => time, platform: 'win32' });
-test('exact unchanged source archive and all controller pins verify', () => { const r = L.loadPlan(); assert.equal(r.archive.sourceFiles, 756); assert.equal(r.archive.records.size, 757); assert.equal(plan.tag, 'pi-all-user-session-api-r1-20261101'); assert.equal(plan.runId, plan.tag); });
+test('exact unchanged source archive and all controller pins verify', () => { const r = L.loadPlan(); assert.equal(r.archive.sourceFiles, 757); assert.equal(r.archive.records.size, 758); assert.equal(plan.tag, 'pi-all-user-session-api-r1-20261101'); assert.equal(plan.runId, plan.tag); });
 test('supported plain inspect parses root separately from node, including CRLF', () => { assert.equal(L.parseBuilder(builder.replace(/\n/g, '\r\n')).driver, 'docker-container'); assert.equal(L.parseBuilder(builder).nodeName, 'desktop-linux'); });
 test('duplicate/missing fields and multi-node or incomplete output reject', () => {
   for (const raw of [builder.replace('Driver:', 'Driver: docker\nDriver:'), builder.replace('Nodes:', 'Missing:'), builder + 'Name: foreign\nEndpoint: foreign\n', builder.replace('Platforms:', 'MissingPlatforms:')]) assert.throws(() => L.parseBuilder(raw));

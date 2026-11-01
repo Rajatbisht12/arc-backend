@@ -1,0 +1,29 @@
+{
+  "kind": "LOCAL_ACTUAL_FFMPEG_SYNTHETIC_NOT_FARGATE_CAMERA",
+  "source": {
+    "codec": "h264",
+    "width": 7680,
+    "height": 360
+  },
+  "workerUnchanged": true,
+  "unusedOversizedRenditionsRemainPrivate": [
+    {
+      "name": "360p",
+      "width": 7680,
+      "height": 360
+    }
+  ],
+  "hlsSelected": false,
+  "measured": [
+    {
+      "name": "fallback",
+      "codec": "h264",
+      "width": 1280,
+      "height": 60,
+      "pixelFormat": "yuv420p",
+      "audio": "aac",
+      "fullDecode": true
+    }
+  ],
+  "nativePrivateDeliveryQualified": false
+}

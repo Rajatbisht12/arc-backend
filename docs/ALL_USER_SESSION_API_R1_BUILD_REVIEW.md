@@ -12,24 +12,27 @@ The source ZIP for that image is the exact sealed API219 archive, SHA256
 Both API/worker services were stable desired/running1,pending0. That read authority
 is permanently closed. No metadata receipt authorizes this image publication.
 
-## Exact five-file source delta; private legacy and index deferred
+## Exact eight-file source delta; retain worker7 for session-only delivery
 
 | File | Sole intended change |
 |---|---|
 | src/legacy-src/services/androidVideoAdmission.js | Add existing reviewed request-bound Google verdict validation |
 | src/legacy-src/utils/postVideoPolicy.js | Export the existing50MiB Web ceiling alongside500MiB Android ceiling |
-| src/legacy-src/services/videoUploadService.js | Advertise correct limits/proof capability; require proof before new larger admission; compare filename on exact session reuse |
+| src/legacy-src/services/videoUploadService.js | Advertise correct limits/proof capability; require proof before new larger admission; compare filename on exact session reuse; retain exact accepted-session recovery with new intake closed |
 | src/legacy-src/config/postVideoRolloutPolicy.js | Invalid/missing owner identity is never eligible |
 | src/legacy-src/controllers/postController.js | After existing committed-Post recovery, reject all new legacy video files with VIDEO_UPLOAD_PATH_REQUIRED |
+| src/legacy-src/utils/postVideoFormatGate.js | Select only bounded trusted HLS rungs; match full master; deny direct oversized children and foreign segment paths; fallback-only if none |
+| src/legacy-src/controllers/videoUploadController.js | Apply the guard after current viewer authorization and before manifest object reads/signing; renew fallback-only grants safely |
+| src/legacy-src/services/videoPostPublicationService.js | Publish only selected HLS rendition metadata or the existing private verified fallback; preserve READY ownership/claims |
 
-The last guard is unconditional in this session-only candidate: toggling a legacy
+The legacy-file guard is unconditional in this session-only candidate: toggling a legacy
 flag cannot turn an old public/remux path into the new private pipeline. Images,
 existing committed owner/client Posts, source/session recovery and normal video
 session publication remain in their old paths. No new private-legacy storage/
 schema/index feature is included. No early original HEVC/4K publication is opened.
 
 Original API219 admission hook/queue producer, owner quota, claims/leases, database
-setup, migrations, private session delivery and pending-intent code are unchanged.
+setup, migrations, private signing/authorization implementation and pending-intent code are unchanged. Private manifest selection and published rendition metadata change only through the new bounded-delivery guard.
 No new CAS/ledger policy is silently introduced; existing native admission/cost/
 capacity behavior still needs qualification before widening intake. The old fair-
 scheduling hook is conditional; this source preservation is not proof global
@@ -42,23 +45,20 @@ policy as part of accepted-work preservation; do not strand saved sources.
 
 | Binding | SHA256 |
 |---|---|
-| Build-only plan | `87966d7e22db25de7d9a18f29384720b5c67d6c8f81fd6086704c02f0d852078` |
-| 756-file source content | `4b4889ee48b8aa650b48cb44edda18ad0512d8acd061cc8c84693fd82e375d96` |
-| Source ZIP | `fcc9124ca33abe28b6153d72ea5375816ad99f71fcfdd78bde7af8284d1d1a82` |
+| Build-only plan | `71f8d48f435708a77d01bcdbf5194505ba6b405f70ae0611d542a020a2f8a097` |
+| 757-file source content | `974adec2225d0d2f7ec75f6a7f75c2dd8221e1929ecdc0a483dddec810149300` |
+| Source ZIP | `5ceeba08a499e88730c62ac3550c41556fb50b1064bf61e9810f889c908fda4a` |
 
-[Five-file patch](../release-tools/all-user-session-api-r1/release/session-only-api.patch),
+[Eight-file patch](../release-tools/all-user-session-api-r1/release/session-only-api.patch),
 [candidate](../release-tools/all-user-session-api-r1/release/candidate.json),
 [plan](../release-tools/all-user-session-api-r1/build-plan.json),
 [controller](../release-tools/all-user-session-api-r1/build-once.cjs),
 [archive verifier](../release-tools/all-user-session-api-r1/verify.cjs).
-Twelve control pins bind the controller/local parser/verifier/tests, artifact,
-manifest/archive, patch and deterministic preparation/model source. Every756file
+Fifteen control pins bind the controller/local parser/verifier/tests, artifact,
+manifest/archive, patch and deterministic preparation/model source. Every757file
 and internal manifest is independently hashed on extraction; no dirty checkout
 supplies image bytes. Dependencies and Dockerfile are the native-matched parent.
-Full source compilation and runtime-import verification pass locally. Five exact
-candidate tests cover early proof rejection, non-canary acceptance through the
-unchanged admission hook, raw legacy rejection and existing Post acknowledgement.
-Fourteen intercepted build-controller tests pass; three input models pass offline.
+Full source compilation and runtime-import verification pass locally. Seven exact candidate source tests cover proof rejection, non-canary acceptance, retained larger-session recovery, legacy rejection and existing Post acknowledgement. Eleven delivery tests cover full-master/rendition binding, unauthorized viewers, direct oversized-child denial before object reads, segment path isolation, real private signing, fallback-only selection and READY publication. Five actual frozen-worker7 FFmpeg integration tests measure H264/yuv420p/AAC, dimensions/aspect, no upscaling and full decode. Fourteen intercepted build-controller tests and three offline input models pass.
 These establish no production/Play Integrity/Fargate/API rollout permission.
 
 ## Normal carrier integration, then separate exact build-only approval
@@ -71,7 +71,7 @@ pins must match. Before requesting approval, run:
 node release-tools/all-user-session-api-r1/local.cjs
 ```
 
-This uses built-in Node only, verifies the exact756file ZIP, Git identity/clean main
+This uses built-in Node only, verifies the exact757file ZIP, Git identity/clean main
 and existing local desktop-linux builder; no AWS/build/journal/login request.
 Accept CLEAN_MERGED_CARRIER_HEAD_LABEL_ONLY_V1: merged HEAD is a provenance label,
 not the build context. Accept EXISTING_SINGLE_LOCAL_DOCKER_DRIVER_ALLOWLIST_V1:
@@ -116,9 +116,9 @@ build-once.cjs until normal carrier integration/local check and fresh approval.
 ## Separate owner wording — no approval inferred
 
 > Approve only session-only API image publication pi-all-user-session-api-r1-20261101,
-> plan87966d7e22db25de7d9a18f29384720b5c67d6c8f81fd6086704c02f0d852078,
-> source4b4889ee48b8aa650b48cb44edda18ad0512d8acd061cc8c84693fd82e375d96,
-> ZIPfcc9124ca33abe28b6153d72ea5375816ad99f71fcfdd78bde7af8284d1d1a82.
+> plan71f8d48f435708a77d01bcdbf5194505ba6b405f70ae0611d542a020a2f8a097,
+> source974adec2225d0d2f7ec75f6a7f75c2dd8221e1929ecdc0a483dddec810149300,
+> ZIP5ceeba08a499e88730c62ac3550c41556fb50b1064bf61e9810f889c908fda4a.
 > Accept the exact clean-merged-HEAD label and existing single-local-driver rules,
 > exclusive new API tag/journal/builder ownership. AWS906446637180/us-east-1/default/
 > root: only3exact AWS attempts,1Windows amd64 build/push to the exact new API tag,
@@ -131,7 +131,11 @@ build-once.cjs until normal carrier integration/local check and fresh approval.
 
 **Current gate: source review/merge and Windows local check, then exact API image
 publication approval. This image alone cannot enable all users.** Fresh accepted-
-work and actual Task/Service configuration, compatible worker format/protection,
+work and actual Task/Service configuration, native bounded private playback using the retained worker7,
 native Integrity/private-HLS/client tests and separate eligibility approval remain.
 The archived API task proposal does not match the fresh opaque configuration hash;
 no old environment/role settings are authorized to overwrite the current task.
+
+The merged five-delta PR163 candidate is superseded before any build approval. This revised unapproved package adds API delivery selection instead of requiring worker7 retirement. Existing worker7 still creates some oversized private rungs; they are neither advertised nor signed through this API. Current worker H264 bitrate pruning and lossy encoding are unchanged; no perceptual-quality equivalence is claimed. Q0/protection/signed-drain are later worker-replacement gates, not prerequisites added to this initial session-only route. No source, Post or historical rendition is deleted or reclassified. Unknown/malformed retained output fails closed and needs separate review. An older API image without the delivery guard is not a safe rollback while new-cohort media relies on filtering; rollback must close new admission while retaining the guard and access to accepted work.
+
+Admission rollback keeps rollout mode/all-user Post visibility and the bounded-delivery guard intact, sets POST_VIDEO_UPLOADS_ENABLED=false and keeps background publishing disabled. Only NEW sessions are denied; exact previously accepted owner/session recovery, parts/complete/status/retry and READY foreground publication remain available. The new source regression proves disabled intake denies new acceptance but preserves an exact retained100MiB session without a new proof/reservation. Any production rollback still needs its own exact approval and native accepted-work readback.

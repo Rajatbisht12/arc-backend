@@ -1,0 +1,40 @@
+✔ exact unchanged source archive and all controller pins verify (29.524583ms)
+✔ supported plain inspect parses root separately from node, including CRLF (0.590916ms)
+✔ duplicate/missing fields and multi-node or incomplete output reject (0.189333ms)
+✔ invalid approval performs no command and creates no journal (28.356ms)
+✔ local Docker failure, foreign endpoint and dirty Git precede ALL provider calls and consumption (437.052209ms)
+✔ local-only entry makes no provider request or journal (26.687459ms)
+✔ bounded one-use result: published (465.343584ms)
+✔ bounded one-use result: docker-driver (327.289333ms)
+✔ bounded one-use result: nested-name (337.196958ms)
+✔ bounded one-use result: collision (333.699542ms)
+✔ bounded one-use result: unknown-tag (330.50825ms)
+✔ bounded one-use result: wrong-caller (320.135958ms)
+✔ bounded one-use result: build-unknown (337.023833ms)
+✔ bounded one-use result: bad-index (338.413459ms)
+✔ complete master is matched, safe landscape/portrait variants retained and oversized pairs removed (1.487834ms)
+✔ oversized direct child URI and unknown children are denied independently of master filtering (0.944416ms)
+✔ no safe HLS rung selects only existing private fallback, never raw input (0.509833ms)
+✔ unknown or mismatched master metadata, omissions, duplicates and extra URI tags fail closed (0.146667ms)
+✔ malformed persisted rows/keys cannot be silently adopted (0.118042ms)
+✔ child manifests reject cross-rung, original, external/key and nested-playlist references (0.138459ms)
+✔ manifest byte/line ceilings and incomplete media fail closed (0.19275ms)
+✔ actual private-delivery signer emits only selected API child URLs and same-rung signed CMAF assets (113.361334ms)
+✔ candidate proxy authorizes viewer first and rejects unsafe child before object read/signing (460.271083ms)
+✔ actual READY publication retains ownership and fallback while persisting only bounded rungs (151.056375ms)
+✔ actual READY publication refuses malformed derivative ownership before claiming (36.9435ms)
+✔ exact candidate has eight source deltas and preserves dependencies, admission hook, model/index and session privacy code (0.697708ms)
+✔ larger unproved source rejects before owner lock, reservation, insert or S3 (3.720417ms)
+✔ non-canary owner small session retains the exact prior native admission hook before source acceptance (5.446ms)
+✔ an exact previously accepted larger session resumes without requiring a new proof or reservation (0.917875ms)
+✔ closed new intake rejects a new non-canary session before reservation or source write (0.88725ms)
+✔ actual candidate controller rejects new raw legacy video before lease/storage, including when a legacy flag is true (42.429417ms)
+✔ already committed owner/client Post is returned before the new legacy rejection (8.611042ms)
+ℹ tests 32
+ℹ suites 0
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3426.088792
