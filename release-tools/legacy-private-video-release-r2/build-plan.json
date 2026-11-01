@@ -8,15 +8,15 @@
   "controls": [
     {
       "path": "local.cjs",
-      "sha256": "9900d538a89a16e29038df873f0d2b676b2ab2490c1b01b4886b8a1dd29a9ecd"
+      "sha256": "1d5f7eddbd0a357a9d2a930161876b6b5f23763d9f675843d2e4705ec49b7280"
     },
     {
       "path": "build-once.cjs",
-      "sha256": "18ba243e330ee61c32eeb15a8888e356ef0b803150b5cc2bc789a6e727da2c48"
+      "sha256": "42c9bf24fdc06d360665e25657e4b8c2b718480dd7153355e010b5555ae2f8aa"
     },
     {
       "path": "controls.test.cjs",
-      "sha256": "f75cabf165c27266fa147164e66a50f0a47fbcece1e51971e3cfc7bcf495d789"
+      "sha256": "a8b506fa569b53402071cb59e30386972c55df63acb167f0d6adfa59ac49b2fe"
     },
     {
       "path": "request-catalogue.json",
@@ -61,11 +61,10 @@
   ],
   "headResolver": "CLEAN_MERGED_CARRIER_HEAD_LABEL_ONLY_V1",
   "priorClosureResolver": "EXACT_CLOSED_R1_ZERO_BUILD_UNUSED_TAG_V1",
-  "builderResolver": "EXISTING_SINGLE_LOCAL_DOCKER_CONTAINER_NODE_V1",
+  "builderResolver": "EXISTING_SINGLE_LOCAL_DOCKER_DRIVER_ALLOWLIST_V1",
   "operatorPlatform": "Windows",
   "platform": "linux/amd64",
   "dockerContext": "desktop-linux",
-  "driver": "docker-container",
   "nodeName": "desktop-linux",
   "nodeEndpoint": "desktop-linux",
   "maximumAwsReadAttempts": 3,
@@ -82,5 +81,9 @@
   "unapprovedCleanup": 0,
   "ordinaryRegistryStorageTransferAndScanningCosts": true,
   "existingBuildKitContainerLocalResourceUseAccepted": true,
-  "hardBillingCapClaimed": false
+  "hardBillingCapClaimed": false,
+  "allowedDrivers": [
+    "docker",
+    "docker-container"
+  ]
 }

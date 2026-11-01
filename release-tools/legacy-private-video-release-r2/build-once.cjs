@@ -10,7 +10,7 @@ function build(a, { directory, priorDirectory, command = spawnSync, now = Date.n
     if (!Number.isSafeInteger(a?.approvedAt) || now() < a.approvedAt || now() - a.approvedAt >= 1800000) throw Error('APPROVAL_CLOCK_INVALID');
   };
   if (a?.decision !== 'APPROVE_EXACT_R2_BUILD_PUSH_ONLY' || a.scopeSha256 !== L.hash(plan) ||
-      a.existingLocalDockerContainerDriverAccepted !== true || a.untouchedOriginalTagAccepted !== true ||
+      a.existingLocalDriverAllowlistAccepted !== true || a.untouchedOriginalTagAccepted !== true ||
       a.cleanMergedHeadLabelOnlyAccepted !== true || a.exclusiveTagAndJournalOwner !== true) throw Error('EXACT_R2_APPROVAL_REQUIRED');
   fresh();
   if (!directory || !path.isAbsolute(directory) || path.resolve(directory) === L.ROOT || path.resolve(directory).startsWith(L.ROOT + path.sep) || path.basename(directory) !== 'worker-format-legacy-r2-consumed') throw Error('EXTERNAL_R2_JOURNAL_REQUIRED');
