@@ -1,0 +1,162 @@
+--- a/src/legacy-src/config/postVideoRolloutPolicy.js
++++ b/src/legacy-src/config/postVideoRolloutPolicy.js
+@@ -26,6 +26,7 @@
+ };
+ 
+ const isPostVideoOwnerAllowed = (owner, environment = process.env) => {
++  if (!OBJECT_ID.test(String(owner || ''))) return false;
+   if (!isProduction(environment)) return true;
+   assertPostVideoRolloutConfiguration(environment);
+   if ((environment.POST_VIDEO_ROLLOUT_MODE || 'canary') === 'all') return true;
+--- a/src/legacy-src/controllers/postController.js
++++ b/src/legacy-src/controllers/postController.js
+@@ -116,6 +116,10 @@
+         await existing.populate('author', 'username profile.displayName profile.avatar profilePicture avatar userType');
+         return res.status(200).json({ success: true, message: 'Post already created', data: { post: await resolveClientMediaPayload(formatPostDTO(existing, false, true)) } });
+       }
++    }
++    // Session-only release: retain existing idempotent Posts above, never accept new raw legacy video.
++    if (mediaFiles.some(file => String(file.mimetype || '').startsWith('video/'))) {
++      return res.status(409).json({ success: false, code: 'VIDEO_UPLOAD_PATH_REQUIRED', message: 'Refresh the composer and upload this video through the reserved video upload flow.' });
+     }
+     if (reservedPostId) publicationLease = await acquirePublication(authorId, reservedPostId);
+     const rawTags = tags !== undefined ? tags : req.body['tags[]'];
+--- /dev/null
++++ b/src/legacy-src/services/androidVideoAdmission.js
+@@ -0,0 +1,81 @@
++'use strict';
++// Larger admission requires a Google-decoded, request-bound licensed app/device verdict.
++// User-Agent, Origin, platform labels, push registrations and ordinary access
++// tokens never establish Android provenance. No client-side shared secret.
++const crypto = require('node:crypto');
++const { WEB_VIDEO_BYTES, MAX_VIDEO_BYTES, uploadError } = require('../utils/postVideoPolicy');
++const PACKAGE = 'com.arcSquadHunt';
++const PROJECT = 'squadhunt-5707f';
++const PROJECT_NUMBER = '894006171630';
++const VERIFIER = `play-integrity-verifier@${PROJECT}.iam.gserviceaccount.com`;
++const requestHash = (owner, data) => crypto.createHash('sha256').update(JSON.stringify([
++  'squadhunt-video-source-v1', String(owner), data.clientUploadId, data.filename, data.mimeType, data.size,
++])).digest('hex');
++function configuration(env = process.env) {
++  if (env.POST_VIDEO_ANDROID_INTEGRITY_ENABLED !== 'true') return null;
++  try {
++    const account = JSON.parse(env.POST_VIDEO_ANDROID_GOOGLE_SERVICE_ACCOUNT || 'null');
++    const certificates = String(env.POST_VIDEO_ANDROID_CERTIFICATE_SHA256 || '').split(',').map(x => x.trim()).filter(Boolean);
++    const project = String(env.POST_VIDEO_ANDROID_CLOUD_PROJECT_NUMBER || '');
++    const minimumVersion = Number(env.POST_VIDEO_ANDROID_MIN_VERSION_CODE);
++    if (account?.type !== 'service_account' || account.project_id !== PROJECT || account.client_email !== VERIFIER || !account.private_key?.includes('PRIVATE KEY')
++      || project !== PROJECT_NUMBER || !Number.isSafeInteger(minimumVersion) || minimumVersion < 25
++      || !certificates.length || certificates.some(x => !/^[a-zA-Z0-9_-]{43}=?$/.test(x))) return null;
++    if (crypto.createPrivateKey(account.private_key).asymmetricKeyType !== 'rsa') return null;
++    return { account, certificates, project, minimumVersion };
++  } catch { return null; }
++}
++let cached;
++async function decode(token, config, request = fetch, now = Date.now()) {
++  const fingerprint = crypto.createHash('sha256').update(config.account.client_email + config.account.private_key).digest('hex');
++  const json = async (url, options) => {
++    const response = await request(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(10000) });
++    if (!response.ok) throw Error('INTEGRITY_PROVIDER_UNAVAILABLE');
++    return response.json();
++  };
++  if (!cached || cached.fingerprint !== fingerprint || cached.until <= now + 60000) {
++    const b64 = x => Buffer.from(JSON.stringify(x)).toString('base64url');
++    const issued = Math.floor(now / 1000), unsigned = b64({ alg: 'RS256', typ: 'JWT' }) + '.' + b64({
++      iss: config.account.client_email, scope: 'https://www.googleapis.com/auth/playintegrity', aud: 'https://oauth2.googleapis.com/token', iat: issued, exp: issued + 3600,
++    });
++    const assertion = unsigned + '.' + crypto.sign('RSA-SHA256', Buffer.from(unsigned), config.account.private_key).toString('base64url');
++    const oauth = await json('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
++      body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }).toString() });
++    if (typeof oauth.access_token !== 'string' || !Number.isFinite(oauth.expires_in)) throw Error('INTEGRITY_PROVIDER_UNAVAILABLE');
++    cached = { fingerprint, token: oauth.access_token, until: now + Math.min(oauth.expires_in, 3600) * 1000 };
++  }
++  const result = await json(`https://playintegrity.googleapis.com/v1/${PACKAGE}:decodeIntegrityToken`, { method: 'POST',
++    headers: { Authorization: `Bearer ${cached.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ integrity_token: token }) });
++  return result.tokenPayloadExternal;
++}
++function validateVerdict(payload, owner, data, config, now = Date.now()) {
++  const details = payload?.requestDetails, app = payload?.appIntegrity, timestamp = Number(details?.timestampMillis), version = Number(app?.versionCode);
++  if (details?.requestPackageName !== PACKAGE || details.requestHash !== requestHash(owner, data) || !Number.isSafeInteger(timestamp)
++    || timestamp > now + 5000 || now - timestamp > 120000 || app?.packageName !== PACKAGE || app.appRecognitionVerdict !== 'PLAY_RECOGNIZED'
++    || !Number.isSafeInteger(version) || version < config.minimumVersion || !Array.isArray(app.certificateSha256Digest) || !app.certificateSha256Digest.length
++    || !app.certificateSha256Digest.every(c => config.certificates.includes(c))
++    || payload?.accountDetails?.appLicensingVerdict !== 'LICENSED'
++    || !Array.isArray(payload?.deviceIntegrity?.deviceRecognitionVerdict)
++    || !payload.deviceIntegrity.deviceRecognitionVerdict.includes('MEETS_DEVICE_INTEGRITY')) {
++    throw uploadError('ANDROID_UPLOAD_PROOF_INVALID', 'The Android app could not be verified for this video. Update the app and try again.', 403);
++  }
++  return true;
++}
++async function assertAdmission(owner, data, token, { env = process.env, decodeToken = decode, now = Date.now } = {}) {
++  // Ordinary Web requests omit a token. An explicitly supplied proof is always
++  // verified, including after Android preparation shrinks the source <=50 MiB.
++  // This is the same source-create operation, not a reusable proof-validation
++  // ticket or a dry-run that consumes and later replays a Google standard token.
++  if (data.size <= WEB_VIDEO_BYTES && token === undefined) return;
++  if (data.size > MAX_VIDEO_BYTES) throw uploadError('VIDEO_SIZE_LIMIT', 'Each Android video must be no larger than 500 MB (500 MiB).');
++  if (typeof token !== 'string' || token.length < 20 || token.length > 32768) throw uploadError('ANDROID_UPLOAD_PROOF_REQUIRED', 'Videos larger than 50 MB (50 MiB) require the verified SquadHunt Android app.', 403);
++  const config = configuration(env);
++  if (!config) throw uploadError('ANDROID_UPLOAD_VERIFICATION_UNAVAILABLE', 'Web supports videos up to 50 MB (50 MiB). Larger uploads require a verified SquadHunt Android app; app verification is not available yet.', 503);
++  let payload;
++  try { payload = await decodeToken(token, config); }
++  catch { throw uploadError('ANDROID_UPLOAD_VERIFICATION_UNAVAILABLE', 'Android upload verification is unavailable. Please try again later.', 503); }
++  // Freshness is assessed after the provider round trip, never against a
++  // timestamp frozen before a slow decode. Numeric clocks are local fixtures.
++  validateVerdict(payload, owner, data, config, typeof now === 'function' ? now() : now);
++}
++module.exports = { requestHash, configuration, decode, validateVerdict, assertAdmission };
+--- a/src/legacy-src/services/videoUploadService.js
++++ b/src/legacy-src/services/videoUploadService.js
+@@ -9,6 +9,8 @@
+ const { privateDeliveryReady, assertDeliveryReady } = require('../utils/postVideoDelivery');
+ const { span } = require('../utils/videoCompletionTrace');
+ const { isPostVideoOwnerAllowed } = require('../config/postVideoRolloutPolicy');
++const androidAdmission = require('./androidVideoAdmission');
++const { WEB_VIDEO_BYTES } = require('../utils/postVideoPolicy');
+ 
+ const SESSION_SELECT = '+objectKey +multipartUploadId +leaseToken +completionLeaseToken';
+ const UPLOAD_STATES = ['CREATED', 'UPLOADING'];
+@@ -52,7 +54,10 @@
+ });
+ const policy = owner => ({ enabled: enabled() && isPostVideoOwnerAllowed(owner),
+   backgroundPublishEnabled: enabled() && isPostVideoOwnerAllowed(owner) && process.env.POST_VIDEO_BACKGROUND_PUBLISH_ENABLED === 'true',
+-  maxVideoBytes: MAX_VIDEO_BYTES, maxPostVideoBytes: MAX_POST_VIDEO_BYTES, maxVideos: MAX_VIDEOS, partSize: PART_SIZE });
++  maxVideoBytes: WEB_VIDEO_BYTES, maxAndroidVideoBytes: MAX_VIDEO_BYTES,
++  androidUploadProofEnabled: Boolean(androidAdmission.configuration()),
++  ...(androidAdmission.configuration() ? { androidCloudProjectNumber: androidAdmission.configuration().project } : {}),
++  maxPostVideoBytes: MAX_POST_VIDEO_BYTES, maxVideos: MAX_VIDEOS, partSize: PART_SIZE });
+ const owned = async (id, owner) => {
+   if (!mongoose.isValidObjectId(id)) throw uploadError('UPLOAD_NOT_FOUND', 'Video upload not found.', 404);
+   const session = await Session.findOne({ _id: id, owner }).select(SESSION_SELECT);
+@@ -71,6 +76,8 @@
+   const data = validateVideoInput(input);
+   let session = await Session.findOne({ owner, clientUploadId: data.clientUploadId }).select(SESSION_SELECT);
+   if (!session) {
++    // New larger admission needs a request-bound verified app; accepted exact sessions retain recovery.
++    await androidAdmission.assertAdmission(owner, data, input?.androidIntegrityToken);
+     const token = randomUUID();
+     let lock;
+     try { lock = await OwnerLock.findOneAndUpdate({ _id: owner, $or: [{ expiresAt: { $lte: new Date() } }, { expiresAt: { $exists: false } }] }, { $set: { token, expiresAt: new Date(Date.now() + 60_000) } }, { upsert: true, new: true }); }
+@@ -88,7 +95,7 @@
+       }
+     } finally { await OwnerLock.deleteOne({ _id: owner, token }); }
+   }
+-  if (session.size !== data.size || session.mimeType !== data.mimeType) throw uploadError('IDEMPOTENCY_CONFLICT', 'This upload identifier belongs to a different file.', 409);
++  if (session.size !== data.size || session.mimeType !== data.mimeType || session.filename !== data.filename) throw uploadError('IDEMPOTENCY_CONFLICT', 'This upload identifier belongs to a different file.', 409);
+   assertLive(session);
+   if (!session.multipartUploadId && UPLOAD_STATES.includes(session.status)) {
+     const token = randomUUID();
+--- a/src/legacy-src/utils/postVideoPolicy.js
++++ b/src/legacy-src/utils/postVideoPolicy.js
+@@ -1,4 +1,5 @@
+ const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
++const WEB_VIDEO_BYTES = 50 * 1024 * 1024;
+ const MAX_POST_VIDEO_BYTES = 1024 * 1024 * 1024;
+ const MAX_VIDEOS = 5;
+ const PART_SIZE = 8 * 1024 * 1024;
+@@ -24,4 +25,4 @@
+   }
+   return sorted;
+ };
+-module.exports = { MAX_VIDEO_BYTES, MAX_POST_VIDEO_BYTES, MAX_VIDEOS, PART_SIZE, VIDEO_TYPES, UUID, uploadError, validateVideoInput, expectedPartSize, verifyParts };
++module.exports = { WEB_VIDEO_BYTES, MAX_VIDEO_BYTES, MAX_POST_VIDEO_BYTES, MAX_VIDEOS, PART_SIZE, VIDEO_TYPES, UUID, uploadError, validateVideoInput, expectedPartSize, verifyParts };

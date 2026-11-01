@@ -1,0 +1,57 @@
+{
+  "kind": "SESSION_ONLY_API_SOURCE_PREPARED_NOT_BUILT",
+  "nativeBaselineDefinition": "arc-backend:219",
+  "nativeBaselineIndex": "sha256:c6e1708fdc0b05a4a56105759200f517cc906611b1692a0cf37691dcd4ecc9c1",
+  "sourceFiles": 756,
+  "sourceContentSha256": "4b4889ee48b8aa650b48cb44edda18ad0512d8acd061cc8c84693fd82e375d96",
+  "sourceArchiveSha256": "fcc9124ca33abe28b6153d72ea5375816ad99f71fcfdd78bde7af8284d1d1a82",
+  "changes": [
+    {
+      "path": "src/legacy-src/config/postVideoRolloutPolicy.js",
+      "beforeSha256": "bb4d97d37517e84560cc4fe640348bd8f3033ce0ab499806204633127a344367",
+      "sha256": "005d13858bf7775c7aa2092d5145c916da887ef7e65fc4e38c3549e0f233784d",
+      "bytes": 2543
+    },
+    {
+      "path": "src/legacy-src/controllers/postController.js",
+      "beforeSha256": "bb1bfaf9e4aa67adcb826a8cc7d7cabe708b8bd9ce307fd4817773bd67294409",
+      "sha256": "50264ffa5577a03055664cd0715c6763996d92ab0077d91a5ee238b14cd7e727",
+      "bytes": 73424
+    },
+    {
+      "path": "src/legacy-src/services/androidVideoAdmission.js",
+      "beforeSha256": null,
+      "sha256": "306af92d498cbf61bf22f3fe2e66040c91a17a479fd20377bd6a537ecefdbd60",
+      "bytes": 6554
+    },
+    {
+      "path": "src/legacy-src/services/videoUploadService.js",
+      "beforeSha256": "4d42f93401e337712adf3ee0660137625d8347c705ecbc23214b2c96d6f7a150",
+      "sha256": "dd248bb9f8c4fa5d99519d81aea475d7da310873f7f1600414da5c34bdbc24e5",
+      "bytes": 31540
+    },
+    {
+      "path": "src/legacy-src/utils/postVideoPolicy.js",
+      "beforeSha256": "35fcb52f34f0e05ac2f1b254f1045732853a8f8af5a6584bb434a7aa1c251acf",
+      "sha256": "4832963dbc0c6378d47f216075605e1723065c86d60631820890580f3ba4809d",
+      "bytes": 2336
+    }
+  ],
+  "privateLegacySupported": false,
+  "indexChanges": 0,
+  "ledgerOrAdmissionHookChanges": 0,
+  "runtimeControlChanges": 0,
+  "apiImageDigest": null,
+  "taskDefinitionInput": null,
+  "providerAuthority": 0,
+  "blockers": [
+    "normal source review/merge",
+    "clean Windows local source/builder check",
+    "fresh exact API image-publication approval",
+    "native accepted-work, capacity and existing-large-upload recovery qualification",
+    "full current Task/Service parent comparison; archived proposal hash differs",
+    "matching fixed worker runtime qualification",
+    "native app Integrity configuration for larger Android admission",
+    "non-canary gallery upload and private playback qualification"
+  ]
+}

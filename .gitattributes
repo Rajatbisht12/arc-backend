@@ -5,3 +5,7 @@ release-tools/legacy-private-video-release-r1/**/*.zip -text
 release-tools/private-video-release-handoff-r1/check-worker.cjs text eol=lf
 release-tools/legacy-private-video-release-r2/** text eol=lf
 docs/LEGACY_PRIVATE_WORKER_ARTIFACT_R2_BUILD_REVIEW.md text eol=lf
+release-tools/all-user-session-api-r1/** text eol=lf
+release-tools/all-user-session-api-r1/**/*.zip -text
+docs/ALL_USER_SESSION_API_R1_BUILD_REVIEW.md text eol=lf
+release-tools/all-user-session-api-r1/release/session-only-api.patch whitespace=-blank-at-eol
