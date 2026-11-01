@@ -1,0 +1,86 @@
+{
+  "kind": "WORKER_FORMAT_IMAGE_PUBLICATION_R2_UNAPPROVED",
+  "runId": "pi-worker-format-legacy-r2-20261101",
+  "repository": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend",
+  "tag": "pi-worker-format-legacy-r1-20261101",
+  "sourceContentSha256": "8987e09a78724bd6152464ed59a444e860aeb6cc0d8b6c30f09e7e76f171bae2",
+  "sourceArchiveSha256": "95b873a9e651c352ab56a7dc89e560625e1048b1e84e5274201e45ef4154f7ee",
+  "controls": [
+    {
+      "path": "local.cjs",
+      "sha256": "9900d538a89a16e29038df873f0d2b676b2ab2490c1b01b4886b8a1dd29a9ecd"
+    },
+    {
+      "path": "build-once.cjs",
+      "sha256": "18ba243e330ee61c32eeb15a8888e356ef0b803150b5cc2bc789a6e727da2c48"
+    },
+    {
+      "path": "controls.test.cjs",
+      "sha256": "f75cabf165c27266fa147164e66a50f0a47fbcece1e51971e3cfc7bcf495d789"
+    },
+    {
+      "path": "request-catalogue.json",
+      "sha256": "d1b6260d7cdac0ff043f53ca384ae34a234f33a6edabe1962240d630f279609e"
+    },
+    {
+      "path": "../legacy-private-video-release-r1/build-plan.json",
+      "sha256": "c9845b82e908ca68b3b24cd19e1b90966b97a6019578b71c9c50f70ab61b5414"
+    },
+    {
+      "path": "../legacy-private-video-release-r1/build-once.cjs",
+      "sha256": "002b5c763ed57bd2fd0ee1b59514bd5686b510aafca1c471336b9b8fe1148852"
+    },
+    {
+      "path": "../legacy-private-video-release-r1/verify.cjs",
+      "sha256": "aba5f30803d2faa68109264c96e6cd287fdf41ab263cd7c2ab3e354285fd09f8"
+    },
+    {
+      "path": "../legacy-private-video-release-r1/controls.test.cjs",
+      "sha256": "cc30420f35c7305fc83763b73ecae25c63ff00ccbd005d5eff05d071ee2dd946"
+    },
+    {
+      "path": "../legacy-private-video-release-r1/prepare.cjs",
+      "sha256": "062cb551266150ff539b59339f65ec0803b3087d20b78d1112e1033036def4aa"
+    },
+    {
+      "path": "../legacy-private-video-release-r1/worker-artifact.PROPOSED.json",
+      "sha256": "5466fe3f588166e28fec6d9c805aea8aa423999201863a1b4dbaf867e0ab2a60"
+    },
+    {
+      "path": "../legacy-private-video-release-r1/release/worker-format-r1/source-manifest.json",
+      "sha256": "be80fcc50862aff249003d2909b763f2576f7c2411a3345d59ef350a0f5dd563"
+    },
+    {
+      "path": "../legacy-private-video-release-r1/release/worker-format-r1/source.zip",
+      "sha256": "95b873a9e651c352ab56a7dc89e560625e1048b1e84e5274201e45ef4154f7ee"
+    },
+    {
+      "path": "offline-inputs.py",
+      "sha256": "f7d4085caffd4a9d3012ecf94f4a90b8682c5cf8e986117161b03a79666e72a9"
+    }
+  ],
+  "headResolver": "CLEAN_MERGED_CARRIER_HEAD_LABEL_ONLY_V1",
+  "priorClosureResolver": "EXACT_CLOSED_R1_ZERO_BUILD_UNUSED_TAG_V1",
+  "builderResolver": "EXISTING_SINGLE_LOCAL_DOCKER_CONTAINER_NODE_V1",
+  "operatorPlatform": "Windows",
+  "platform": "linux/amd64",
+  "dockerContext": "desktop-linux",
+  "driver": "docker-container",
+  "nodeName": "desktop-linux",
+  "nodeEndpoint": "desktop-linux",
+  "maximumAwsReadAttempts": 3,
+  "maximumBuildPushInvocations": 1,
+  "maximumRegistryIndexReads": 1,
+  "approvalMinutes": 30,
+  "buildCommandSeconds": 900,
+  "otherCommandSeconds": 30,
+  "responseBytes": 1048576,
+  "tagEvidenceFreshnessSeconds": 300,
+  "remainingDeploymentAuthority": 0,
+  "privateKeyAccess": 0,
+  "unknownAcknowledgement": "HOLD_NO_RETRY",
+  "unapprovedCleanup": 0,
+  "ordinaryRegistryStorageTransferAndScanningCosts": true,
+  "existingBuildKitContainerLocalResourceUseAccepted": true,
+  "hardBillingCapClaimed": false
+}
