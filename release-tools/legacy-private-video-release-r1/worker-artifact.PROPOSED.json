@@ -1,0 +1,56 @@
+{
+  "kind": "NEW_WORKER_IMAGE_CANDIDATE_NOT_BUILT",
+  "runId": "pi-worker-format-legacy-r1-20261101",
+  "repository": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend",
+  "tag": "pi-worker-format-legacy-r1-20261101",
+  "platform": "linux/amd64",
+  "sourceFiles": 760,
+  "sourceContentSha256": "8987e09a78724bd6152464ed59a444e860aeb6cc0d8b6c30f09e7e76f171bae2",
+  "sourceArchiveSha256": "95b873a9e651c352ab56a7dc89e560625e1048b1e84e5274201e45ef4154f7ee",
+  "overlay": [
+    {
+      "path": "src/legacy-src/utils/clipHlsProcessing.js",
+      "beforeSha256": "c1c93dcbd35d8827aab8b8c5729d73d5929e0c76f16751a5f8e9f953495c316c",
+      "sha256": "38616e86a550cd9d1bba5a72f2b89b22421a11e7fd69102a920925cbd042c06f",
+      "bytes": 31667
+    },
+    {
+      "path": "src/legacy-src/utils/videoProcessing.js",
+      "beforeSha256": "c183478fcd1390bd3a5e2989b44bb6c5ebc7c6fe47cd564ad85ed368d2c853c2",
+      "sha256": "a425d5377644cb707eb25cbb4d39e898610227f51051462a18d2035d6fd37bdd",
+      "bytes": 17444
+    },
+    {
+      "path": "src/legacy-src/utils/legacyVideoPlayback.js",
+      "beforeSha256": null,
+      "sha256": "ceb613a8ffae8bfd5601b6e705f2a5337246174fc682d75d8a8ffb4d38d55d8e",
+      "bytes": 2247
+    },
+    {
+      "path": "src/legacy-src/services/clipTranscodingService.js",
+      "beforeSha256": "983fdf571416010e8694593d84c96d5f5a8b8ca8ab7ccd4615c5d5f70bf81dbc",
+      "sha256": "b9c01711600d53eed421bf536a2fa05be672edea9cd9896730da1efb019870dc",
+      "bytes": 13800
+    },
+    {
+      "path": "src/legacy-src/models/Post.js",
+      "beforeSha256": "49c3442cf53f169ae688536ed71a0325ed0973a06df34c5d4a6531206bdeccc7",
+      "sha256": "f4ea9768b7b6729316ccf92ef39e7c6a909699c8abfc7a1e61d7605b91445ddd",
+      "bytes": 13705
+    }
+  ],
+  "dependenciesAndDockerfileUnchanged": true,
+  "indexDigest": null,
+  "amd64ChildDigest": null,
+  "buildPushApproved": false,
+  "providerAuthority": 0,
+  "previousProtectedArtifact": {
+    "index": "sha256:ffff210127eb3512a0a7f5967a6a28e08dbd5a10e3c0d8745a234ee5bece2e8a",
+    "child": "sha256:0e0c1b9a1cc850a2d9100b6a7245e324d95b93ec879388d4e27315b7952821da",
+    "automaticRollbackAllowed": false,
+    "canProcessNewPrivateLegacyJobs": false
+  },
+  "activation": "new worker first under Q0/work-preserving release; API legacy flag remains off until matching worker is native-qualified",
+  "workerOnly": true,
+  "apiDeploymentForbidden": true
+}

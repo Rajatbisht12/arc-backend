@@ -1,0 +1,37 @@
+'use strict';
+// Only a FUTURE exact image-publication approval enables this Windows entry.
+const fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:child_process'),V=require('./verify.cjs');
+const ROOT=path.resolve(__dirname,'../..'),RUN='pi-worker-format-legacy-r1-20261101';
+const jsonHash=x=>V.sha(JSON.stringify(x));
+function build(a,{directory,command=spawnSync,now=Date.now,platform=process.platform}={}){
+ const plan=JSON.parse(fs.readFileSync(path.join(__dirname,'build-plan.json')));
+ if(platform!=='win32'||a?.decision!=='APPROVE_EXACT_NEW_WORKER_FORMAT_BUILD_PUSH_ONLY'||a.scopeSha256!==jsonHash(plan)||a.cleanMergedHeadLabelResolverAccepted!==true||a.exclusiveTagAndJournalOwner!==true||!Number.isSafeInteger(a.approvedAt)||a.approvedAt>now()||now()-a.approvedAt>=1800000)throw Error('EXACT_NEW_BUILD_APPROVAL_REQUIRED');
+ for(const pin of plan.controls)if(V.sha(fs.readFileSync(path.join(__dirname,pin.path)))!==pin.sha256)throw Error('BUILD_CONTROLS_CHANGED');
+ const artifact=JSON.parse(fs.readFileSync(path.join(__dirname,'worker-artifact.PROPOSED.json')));V.verify(artifact);
+ if(!directory||!path.isAbsolute(directory)||path.resolve(directory).startsWith(ROOT+path.sep))throw Error('EXTERNAL_EXCLUSIVE_JOURNAL_REQUIRED');
+ const local=(exe,args,extra={})=>{if(now()-a.approvedAt>=1800000)throw Error('BUILD_APPROVAL_EXPIRED');const r=command(exe,args,{cwd:ROOT,encoding:'utf8',timeout:30000,maxBuffer:1048576,...extra});if(r.status!==0||r.error)throw Error('COMMAND_FAILED_OR_UNKNOWN');return r.stdout;};
+ const revision=local('git',['rev-parse','HEAD']).trim();if(!/^[a-f0-9]{40}$/.test(revision)||local('git',['status','--porcelain','--untracked-files=all']).trim())throw Error('CLEAN_MERGED_CARRIER_REQUIRED');
+ const origin=local('git',['remote','get-url','origin']).trim();if(!['https://github.com/Rajatbisht12/arc-backend','https://github.com/Rajatbisht12/arc-backend.git','git@github.com:Rajatbisht12/arc-backend.git'].includes(origin))throw Error('REVIEWED_CARRIER_REPOSITORY_REQUIRED');
+ fs.mkdirSync(directory,{mode:0o700});
+ const save=(name,value)=>{const filename=path.join(directory,name),b=Buffer.from(JSON.stringify(value,null,2)+'\n'),fd=fs.openSync(filename,'wx',0o600);try{fs.writeFileSync(fd,b);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}if(!fs.readFileSync(filename).equals(b))throw Error('DURABLE_READBACK_FAILED');};
+ save('consumed.json',{runId:RUN,at:now(),scopeSha256:jsonHash(plan),sourceRevisionLabel:revision,journalMode:'EXCLUSIVE_FILE_FSYNC_READBACK',windowsDirectoryPowerLossDurabilityNotClaimed:true});
+ let reads=0,builds=0,registryReads=0,status='CLOSED_HOLD';
+ const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('AWS_')));Object.assign(env,{AWS_MAX_ATTEMPTS:'1',AWS_IGNORE_CONFIGURED_ENDPOINT_URLS:'true',AWS_PAGER:'',AWS_CLI_AUTO_PROMPT:'off'});
+ const aws=(service,operation)=>{if(reads>=3||now()-a.approvedAt>=1800000)throw Error('BUILD_BOUND');save('aws-intent-'+reads+'.json',{at:now(),service,operation,attempts:1});reads++;return local('aws',[service,operation,'--profile','default','--region','us-east-1'],{env});};
+ const docker=(args,extra)=>local('docker',['--context','desktop-linux',...args],extra);
+ try{const who=JSON.parse(aws('sts','get-caller-identity'));if(who.Account!=='906446637180'||who.Arn!=='arn:aws:iam::906446637180:root')throw Error('CALLER_CHANGED');
+ if(now()-a.approvedAt>=1800000)throw Error('BUILD_APPROVAL_EXPIRED');save('aws-intent-'+reads+'.json',{at:now(),service:'ecr',operation:'describe-images',repositoryName:'arc-backend',imageTag:RUN,attempts:1});reads++;
+ const collision=command('aws',['ecr','describe-images','--repository-name','arc-backend','--image-ids','imageTag='+RUN,'--profile','default','--region','us-east-1','--no-paginate','--output','json'],{cwd:ROOT,env,encoding:'utf8',timeout:30000,maxBuffer:1048576});
+ if(collision.error||collision.status!==0&&!/\(ImageNotFoundException\)/.test(String(collision.stderr||''))||collision.status===0&&JSON.parse(collision.stdout).imageDetails?.length!==0)throw Error('TAG_NOT_POSITIVELY_ABSENT');save('new-tag-absence.json',{at:now(),tag:RUN,absenceVerified:true});
+ const endpoint=JSON.parse(docker(['context','inspect','desktop-linux','--format','{{json .Endpoints.docker.Host}}']));if(typeof endpoint!=='string'||!endpoint.startsWith('npipe:'))throw Error('WINDOWS_LOCAL_DOCKER_ONLY');if(docker(['buildx','inspect','desktop-linux','--format','{{.Driver}}']).trim()!=='docker')throw Error('EXISTING_LOCAL_DRIVER_REQUIRED');
+ const context=path.join(directory,'context');fs.mkdirSync(context);for(const[name,b]of V.verify(artifact).records){const target=path.join(context,name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,b,{flag:'wx'});}
+ const password=aws('ecr','get-login-password');docker(['login','--username','AWS','--password-stdin',artifact.repository.split('/')[0]],{input:password});
+ if(now()-a.approvedAt>=1800000)throw Error('BUILD_APPROVAL_EXPIRED');const metadata=path.join(directory,'metadata.json');save('build-push-intent.json',{at:now(),image:artifact.repository+':'+RUN,archiveSha256:artifact.sourceArchiveSha256,attempts:1});builds++;
+ docker(['buildx','build','--builder','desktop-linux','--platform','linux/amd64','--provenance=mode=min','--output=type=registry,oci-mediatypes=true','--metadata-file',metadata,'--build-arg','SOURCE_REVISION='+revision,'--build-arg','SOURCE_REPOSITORY=https://github.com/Rajatbisht12/arc-backend','--label','com.squadhunt.worker.source-content='+artifact.sourceContentSha256,'-t',artifact.repository+':'+RUN,context],{timeout:900000});
+ const native=JSON.parse(fs.readFileSync(metadata));if(!/^sha256:[a-f0-9]{64}$/.test(native['containerimage.digest']||''))throw Error('IMAGE_ACK_UNKNOWN');save('registry-intent.json',{at:now(),indexDigest:native['containerimage.digest'],attempts:1});registryReads++;
+ const raw=Buffer.from(docker(['buildx','imagetools','inspect','--raw',artifact.repository+'@'+native['containerimage.digest']]));const index=JSON.parse(raw),children=index.manifests?.filter(x=>x.platform?.os==='linux'&&x.platform?.architecture==='amd64');if(index.mediaType!=='application/vnd.oci.image.index.v1+json'||children?.length!==1||!/^sha256:[a-f0-9]{64}$/.test(children[0].digest)||!['sha256:'+V.sha(raw),'sha256:'+V.sha(raw.at(-1)===10?raw.subarray(0,-1):raw)].includes(native['containerimage.digest']))throw Error('NATIVE_REGISTRY_BINDING_REQUIRED');
+ if(now()-a.approvedAt>=1800000)throw Error('FINAL_BUILD_EVIDENCE_EXPIRED');save('artifact-receipt.json',{at:now(),indexDigest:native['containerimage.digest'],amd64ChildDigest:children[0].digest,sourceContentSha256:artifact.sourceContentSha256,sourceRevisionLabel:revision,workerOnly:true,ecsAuthority:0});status='CLOSED_IMAGE_PUBLISHED_NO_DEPLOYMENT';
+ }catch{save('hold.json',{at:now(),reason:'BUILD_OR_PUSH_UNKNOWN_NO_RETRY',reads,builds,registryReads});}
+ finally{save('authority-closed.json',{at:now(),status,reads,builds,registryReads,remainingReads:0,remainingBuilds:0,remainingPushes:0,ecsAuthority:0});}return{status,reads,builds,registryReads};
+}
+module.exports={build,jsonHash};if(require.main===module){try{const a=JSON.parse(fs.readFileSync(process.env.WORKER_FORMAT_BUILD_APPROVAL||''));console.log(JSON.stringify(build(a,{directory:process.env.WORKER_FORMAT_BUILD_JOURNAL})));}catch{console.error('EXACT_NEW_BUILD_APPROVAL_REQUIRED_OR_HELD');process.exitCode=1;}}

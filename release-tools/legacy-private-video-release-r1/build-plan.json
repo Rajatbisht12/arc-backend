@@ -1,0 +1,51 @@
+{
+  "kind": "WORKER_FORMAT_IMAGE_PUBLICATION_ONLY_UNAPPROVED",
+  "runId": "pi-worker-format-legacy-r1-20261101",
+  "repository": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend",
+  "tag": "pi-worker-format-legacy-r1-20261101",
+  "sourceContentSha256": "8987e09a78724bd6152464ed59a444e860aeb6cc0d8b6c30f09e7e76f171bae2",
+  "sourceArchiveSha256": "95b873a9e651c352ab56a7dc89e560625e1048b1e84e5274201e45ef4154f7ee",
+  "controls": [
+    {
+      "path": "build-once.cjs",
+      "sha256": "002b5c763ed57bd2fd0ee1b59514bd5686b510aafca1c471336b9b8fe1148852"
+    },
+    {
+      "path": "verify.cjs",
+      "sha256": "aba5f30803d2faa68109264c96e6cd287fdf41ab263cd7c2ab3e354285fd09f8"
+    },
+    {
+      "path": "controls.test.cjs",
+      "sha256": "cc30420f35c7305fc83763b73ecae25c63ff00ccbd005d5eff05d071ee2dd946"
+    },
+    {
+      "path": "prepare.cjs",
+      "sha256": "062cb551266150ff539b59339f65ec0803b3087d20b78d1112e1033036def4aa"
+    },
+    {
+      "path": "worker-artifact.PROPOSED.json",
+      "sha256": "5466fe3f588166e28fec6d9c805aea8aa423999201863a1b4dbaf867e0ab2a60"
+    },
+    {
+      "path": "release/worker-format-r1/source-manifest.json",
+      "sha256": "be80fcc50862aff249003d2909b763f2576f7c2411a3345d59ef350a0f5dd563"
+    }
+  ],
+  "headResolver": "CLEAN_MERGED_CARRIER_HEAD_LABEL_ONLY_V1; exact archive supplies all build bytes",
+  "platform": "linux/amd64",
+  "operatorPlatform": "Windows",
+  "dockerContext": "desktop-linux",
+  "driver": "docker",
+  "maximumAwsReadAttempts": 3,
+  "maximumBuildPushInvocations": 1,
+  "maximumRegistryIndexReads": 1,
+  "approvalMinutes": 30,
+  "buildCommandSeconds": 900,
+  "otherCommandSeconds": 30,
+  "remainingDeploymentAuthority": 0,
+  "privateKeyAccess": 0,
+  "unapprovedCleanup": 0,
+  "unknownAcknowledgement": "HOLD_NO_RETRY",
+  "ordinaryRegistryStorageTransferAndScanningCosts": true,
+  "hardBillingCapClaimed": false
+}
