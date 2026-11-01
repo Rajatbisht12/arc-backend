@@ -1,0 +1,5 @@
+# These sealed controls must have the same reviewed bytes on Windows and macOS.
+# Scope is only the private-video build carrier; application source is unaffected.
+release-tools/legacy-private-video-release-r1/** text eol=lf
+release-tools/legacy-private-video-release-r1/**/*.zip -text
+release-tools/private-video-release-handoff-r1/check-worker.cjs text eol=lf
