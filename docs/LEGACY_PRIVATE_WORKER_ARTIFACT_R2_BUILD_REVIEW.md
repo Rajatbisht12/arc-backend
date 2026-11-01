@@ -11,6 +11,14 @@ option (exit125). The original generic HOLD omitted the actual stderr. Supported
 plain inspection subsequently positively reported builder desktop-linux, driver
 docker-container, one node named desktop-linux, endpoint desktop-linux, running,
 linux/amd64 supported. The context independently reported a Windows named pipe.
+A later owner-supplied single-response parser check reported driver docker, with
+all other exact builder/node/endpoint/status/amd64 guards passing. Its cause of
+change from the earlier driver observation is not established. This unexecuted,
+unapproved R2 review now explicitly accepts either of those two existing local
+drivers; it does not change Docker configuration or select/create another builder.
+The actual observed driver is retained in consumed and build-intent receipts.
+The former R2 plan hash 3fd443a76d3da6de7f2cad2e1ce7c08d4aecd0cdddc53a7479291ce44b40bdfc
+is superseded before any R2 approval/provider request/journal consumption.
 These are local Docker observations, not successful build or registry evidence.
 [Docker's inspect command](https://docs.docker.com/reference/cli/docker/buildx/inspect/)
 documents plain output, including separate root and node sections; no --format.
@@ -24,7 +32,7 @@ Its earlier absence is historical; fresh exact tag absence is mandatory in R2.
 
 | Binding | SHA256 |
 |---|---|
-| R2 plan; JSON.stringify parsed-object convention | `3fd443a76d3da6de7f2cad2e1ce7c08d4aecd0cdddc53a7479291ce44b40bdfc` |
+| R2 plan; JSON.stringify parsed-object convention | `66e9464862887233c151e26a83cfcdddb358c5e848ad313046fb37618ed39b08` |
 | Unchanged 760-file source content | `8987e09a78724bd6152464ed59a444e860aeb6cc0d8b6c30f09e7e76f171bae2` |
 | Unchanged exact ZIP | `95b873a9e651c352ab56a7dc89e560625e1048b1e84e5274201e45ef4154f7ee` |
 
@@ -39,12 +47,12 @@ Clean merged main HEAD supplies a provenance label only; it is not the build con
 
 Explicitly accept both new rules before execution:
 
-- **EXISTING_SINGLE_LOCAL_DOCKER_CONTAINER_NODE_V1**: use only the existing running
-  desktop-linux/docker-container builder, exactly one desktop-linux node using
+- **EXISTING_SINGLE_LOCAL_DOCKER_DRIVER_ALLOWLIST_V1**: use only the existing running
+  desktop-linux builder with driver exactly docker or docker-container, exactly one desktop-linux node using
   desktop-linux endpoint, linux/amd64, with that named Docker context resolving to
   a Windows npipe endpoint. No builder creation, bootstrap, driver switch, alternate
   endpoint, replacement or cleanup. Existing local BuildKit container resource use
-  is accepted. R1's docker-driver-only approval does not cover this difference.
+  is accepted when the container driver is observed. R1's consumed approval covers neither a new run nor an expanded driver rule.
 - **EXACT_CLOSED_R1_ZERO_BUILD_UNUSED_TAG_V1**: read the exact old six-file journal,
   require the observed consumed/closure identity/times and two-read/zero-build/zero-
   registry counts, all remaining allowances zero and no build intent. Any extra
@@ -114,7 +122,7 @@ Do not invoke it before the exact approval. Never run deploy.sh for this operati
 
 ## Focused checks and separate owner wording
 
-Thirteen focused local tests pass, including the actual ZIP verifier, strict plain-
+Fifteen focused local tests pass, including the actual ZIP verifier, strict plain-
 output parser, malformed/multiple nodes, local failures before AWS/consumption,
 prior-build rejection, collision/unknown error, single build/index read, unknown
 acknowledgement and consumed-directory rejection before commands. Three botocore
@@ -124,12 +132,12 @@ not qualify actual Docker build/push, native permissions or deployed media handl
 Proposed wording — **not approval**:
 
 > Approve only R2 worker image build/push pi-worker-format-legacy-r2-20261101,
-> plan3fd443a76d3da6de7f2cad2e1ce7c08d4aecd0cdddc53a7479291ce44b40bdfc,
+> plan66e9464862887233c151e26a83cfcdddb358c5e848ad313046fb37618ed39b08,
 > source8987e09a78724bd6152464ed59a444e860aeb6cc0d8b6c30f09e7e76f171bae2,
 > ZIP95b873a9e651c352ab56a7dc89e560625e1048b1e84e5274201e45ef4154f7ee.
-> Explicitly accept EXISTING_SINGLE_LOCAL_DOCKER_CONTAINER_NODE_V1 and
+> Explicitly accept EXISTING_SINGLE_LOCAL_DOCKER_DRIVER_ALLOWLIST_V1 and
 > EXACT_CLOSED_R1_ZERO_BUILD_UNUSED_TAG_V1: the existing local desktop-linux
-> docker-container builder only, and the untouched original tag
+> builder with driver exactly docker or docker-container only, and the untouched original tag
 > pi-worker-format-legacy-r1-20261101 only after fresh exact absence. Accept
 > CLEAN_MERGED_CARRIER_HEAD_LABEL_ONLY_V1 and exclusive tag/journal/builder window.
 > AWS906446637180/us-east-1/default/root, arc-backend: maximum3 exact AWS reads,

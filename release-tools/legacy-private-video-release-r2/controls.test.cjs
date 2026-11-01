@@ -40,7 +40,8 @@ function transport(f, mode = '') {
     if (args.includes('context')) return { status: 0, stdout: '"npipe:////./pipe/dockerDesktopLinuxEngine"' };
     if (args.includes('inspect') && !args.includes('imagetools')) {
       assert.ok(!args.includes('--format'));
-      return mode === 'bad-local' ? { status: 125, stderr: 'private local failure' } : { status: 0, stdout: mode === 'remote-node' ? builder.replace('Endpoint: desktop-linux', 'Endpoint: tcp://foreign') : builder };
+      const output = mode === 'docker-driver' ? builder.replace('Driver: docker-container', 'Driver: docker') : mode === 'foreign-driver' ? builder.replace('Driver: docker-container', 'Driver: remote') : mode === 'stopped' ? builder.replace('Status: running', 'Status: stopped') : mode === 'arm-only' ? builder.replace('linux/amd64, ', '') : mode === 'nested-name' ? builder + 'Devices:\n  Name: nested-device\n' : mode === 'remote-node' ? builder.replace('Endpoint: desktop-linux', 'Endpoint: tcp://foreign') : builder;
+      return mode === 'bad-local' ? { status: 125, stderr: 'private local failure' } : { status: 0, stdout: output };
     }
     if (args.includes('login')) { assert.equal(opts.input, 'SYNTHETIC_PASSWORD_NEVER_EXPORT'); return { status: 0, stdout: '' }; }
     if (args.includes('build')) {
@@ -56,7 +57,7 @@ function transport(f, mode = '') {
   };
   return { calls, command };
 }
-const approval = () => ({ decision: 'APPROVE_EXACT_R2_BUILD_PUSH_ONLY', scopeSha256: L.hash(plan), existingLocalDockerContainerDriverAccepted: true, untouchedOriginalTagAccepted: true, cleanMergedHeadLabelOnlyAccepted: true, exclusiveTagAndJournalOwner: true, approvedAt: time });
+const approval = () => ({ decision: 'APPROVE_EXACT_R2_BUILD_PUSH_ONLY', scopeSha256: L.hash(plan), existingLocalDriverAllowlistAccepted: true, untouchedOriginalTagAccepted: true, cleanMergedHeadLabelOnlyAccepted: true, exclusiveTagAndJournalOwner: true, approvedAt: time });
 const options = (f, t) => ({ ...f, ...t, now: () => time, platform: 'win32' });
 test('exact unchanged source archive and all controller pins verify', () => { const r = L.loadPlan(); assert.equal(r.archive.sourceFiles, 760); assert.equal(r.archive.records.size, 761); assert.equal(plan.tag, 'pi-worker-format-legacy-r1-20261101'); assert.notEqual(plan.runId, plan.tag); });
 test('supported plain inspect parses root separately from node, including CRLF', () => { assert.equal(L.parseBuilder(builder.replace(/\n/g, '\r\n')).driver, 'docker-container'); assert.equal(L.parseBuilder(builder).nodeName, 'desktop-linux'); });
@@ -65,15 +66,15 @@ test('duplicate/missing fields and multi-node or incomplete output reject', () =
 });
 test('invalid approval performs no command and creates no journal', () => { const f = fixture(); try { const t = transport(f); assert.throws(() => B.build({}, options(f, t)), /APPROVAL/); assert.equal(t.calls.length, 0); assert.ok(!fs.existsSync(f.directory)); } finally { fs.rmSync(f.root, { recursive: true, force: true }); } });
 test('local Docker failure, foreign endpoint and dirty Git precede ALL provider calls and consumption', () => {
-  for (const mode of ['bad-local', 'remote-node', 'dirty']) { const f = fixture(); try { const t = transport(f, mode); assert.throws(() => B.build(approval(), options(f, t))); assert.ok(!t.calls.some(x => x.exe === 'aws')); assert.ok(!fs.existsSync(f.directory)); } finally { fs.rmSync(f.root, { recursive: true, force: true }); } }
+  for (const mode of ['bad-local', 'remote-node', 'dirty', 'foreign-driver', 'stopped', 'arm-only']) { const f = fixture(); try { const t = transport(f, mode); assert.throws(() => B.build(approval(), options(f, t))); assert.ok(!t.calls.some(x => x.exe === 'aws')); assert.ok(!fs.existsSync(f.directory)); } finally { fs.rmSync(f.root, { recursive: true, force: true }); } }
 });
 test('local-only entry makes no provider request or journal', () => { const f = fixture(); try { const t = transport(f); const r = L.localCheck(options(f, t)); assert.equal(r.providerCalls, 0); assert.ok(!t.calls.some(x => x.exe === 'aws')); assert.ok(!fs.existsSync(f.directory)); } finally { fs.rmSync(f.root, { recursive: true, force: true }); } });
 test('any prior build intent or changed prior closure forbids tag reuse', () => { const f = fixture(); try { fs.writeFileSync(path.join(f.priorDirectory, 'build-push-intent.json'), '{}'); assert.throws(() => L.priorClosure(f.priorDirectory), /PRIOR_BUILD/); fs.unlinkSync(path.join(f.priorDirectory, 'build-push-intent.json')); fs.writeFileSync(path.join(f.priorDirectory, 'authority-closed.json'), JSON.stringify({ builds: 1 })); assert.throws(() => L.priorClosure(f.priorDirectory), /MISMATCH/); } finally { fs.rmSync(f.root, { recursive: true, force: true }); } });
-for (const mode of ['', 'collision', 'unknown-tag', 'wrong-caller', 'build-unknown', 'bad-index']) test('bounded one-use result: ' + (mode || 'published'), () => {
+for (const mode of ['', 'docker-driver', 'nested-name', 'collision', 'unknown-tag', 'wrong-caller', 'build-unknown', 'bad-index']) test('bounded one-use result: ' + (mode || 'published'), () => {
   const f = fixture(); try {
     const t = transport(f, mode), r = B.build(approval(), options(f, t));
-    assert.equal(r.status, mode ? 'CLOSED_HOLD' : 'CLOSED_IMAGE_PUBLISHED_NO_DEPLOYMENT');
-    assert.equal(r.builds, ['', 'build-unknown', 'bad-index'].includes(mode) ? 1 : 0);
+    assert.equal(r.status, ['', 'docker-driver', 'nested-name'].includes(mode) ? 'CLOSED_IMAGE_PUBLISHED_NO_DEPLOYMENT' : 'CLOSED_HOLD');
+    assert.equal(r.builds, ['', 'docker-driver', 'nested-name', 'build-unknown', 'bad-index'].includes(mode) ? 1 : 0);
     assert.ok(r.reads <= 3); assert.ok(r.registryReads <= 1);
     const before = t.calls.length;
     assert.throws(() => B.build(approval(), options(f, t)), /ALREADY_CONSUMED/); assert.equal(t.calls.length, before);

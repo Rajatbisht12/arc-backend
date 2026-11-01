@@ -71,7 +71,7 @@ function localCheck({ command = spawnSync, platform = process.platform, priorDir
   const endpoint = JSON.parse(run('docker', ['--context', 'desktop-linux', 'context', 'inspect', 'desktop-linux', '--format', '{{json .Endpoints.docker.Host}}']));
   if (typeof endpoint !== 'string' || !endpoint.startsWith('npipe:')) fail('LOCAL_NAMED_PIPE_REQUIRED');
   const builder = parseBuilder(run('docker', ['--context', 'desktop-linux', 'buildx', 'inspect', 'desktop-linux']));
-  if (builder.name !== 'desktop-linux' || builder.driver !== 'docker-container' || builder.nodeName !== plan.nodeName || builder.endpoint !== plan.nodeEndpoint || builder.status !== 'running' || !builder.linuxAmd64) fail('EXACT_EXISTING_LOCAL_BUILDER_REQUIRED');
+  if (builder.name !== 'desktop-linux' || !['docker', 'docker-container'].includes(builder.driver) || !plan.allowedDrivers?.includes(builder.driver) || builder.nodeName !== plan.nodeName || builder.endpoint !== plan.nodeEndpoint || builder.status !== 'running' || !builder.linuxAmd64) fail('EXACT_EXISTING_LOCAL_BUILDER_REQUIRED');
   return { plan, archive, revision, previous, builder, at: now(), scopeSha256: hash(plan), providerCalls: 0, builds: 0 };
 }
 module.exports = { ROOT, hash, parseBuilder, loadPlan, priorClosure, localCheck };
