@@ -21,6 +21,52 @@
      }
      if (reservedPostId) publicationLease = await acquirePublication(authorId, reservedPostId);
      const rawTags = tags !== undefined ? tags : req.body['tags[]'];
+--- a/src/legacy-src/controllers/videoUploadController.js
++++ b/src/legacy-src/controllers/videoUploadController.js
+@@ -7,6 +7,7 @@
+ const User = require('../models/User');
+ const pendingPosts = require('../services/pendingVideoPostService');
+ const { resolvePostAccess } = require('../utils/privacyPolicy');
++const formatGate = require('../utils/postVideoFormatGate');
+ let manifestReader;
+ 
+ // Renewal uses CURRENT optional authentication, never the old media bearer as
+@@ -23,15 +24,15 @@
+     if (!post || req.user?._id && (!viewer || viewer.isActive === false) || !(await resolvePostAccess({ post, viewer })).allowed) return res.status(403).json({ success: false, code: 'PLAYBACK_FORBIDDEN' });
+     const now = Date.now();
+     const viewerId = viewer ? String(viewer._id) : '';
+-    const output = session.output;
++    const output = formatGate.selectOutput(session.output);
+     const root = `post-video-playback/${session.owner}/${session._id}/`;
+     if (!output?.prefix?.startsWith(root) || !/^[a-zA-Z0-9_-]+$/.test(output.prefix.slice(root.length))
+       || [output.hlsKey, output.fallbackKey, output.thumbnailKey].filter(Boolean).some(key => !normalizedPlaybackKey(key) || !key.startsWith(`${output.prefix}/`))) throw new Error('Invalid persisted playback scope');
+-    const authorization = playbackAuthorization(output.hlsKey, now);
++    const authorization = playbackAuthorization(output.hlsKey || output.fallbackKey, now);
+     if (!authorization) throw new Error('Invalid persisted playback key');
+     return res.json({ success: true, data: {
+       sessionId: String(session._id),
+-      playback: { status: 'ready', hlsUrl: resolvePlaybackKey(output.hlsKey, process.env, viewerId, now), fallbackMp4Url: resolvePlaybackKey(output.fallbackKey, process.env, viewerId, now), authorization },
++      playback: { status: 'ready', ...(output.hlsKey ? { hlsUrl: resolvePlaybackKey(output.hlsKey, process.env, viewerId, now) } : {}), fallbackMp4Url: resolvePlaybackKey(output.fallbackKey, process.env, viewerId, now), authorization },
+       thumbnailUrl: output.thumbnailKey ? resolvePlaybackKey(output.thumbnailKey, process.env, viewerId, now) : undefined,
+     } });
+   } catch (error) { return res.status(Number(error.statusCode) || 503).json({ success: false, code: error.code || 'PLAYBACK_UNAVAILABLE', message: 'Video playback is unavailable. Please try again.' }); }
+@@ -53,13 +54,14 @@
+     const key = `post-video-playback/${req.params[0] || ''}`;
+     if (!normalizedPlaybackKey(key) || !key.startsWith(grant.prefix) || !key.endsWith('.m3u8')) return res.status(403).end();
+     const sessionId = grant.prefix.split('/')[2];
+-    const session = await Session.findOne({ _id: sessionId, status: 'READY', 'output.prefix': grant.prefix.replace(/\/$/, '') }).select('_id postId claimedPostId').lean();
++    const session = await Session.findOne({ _id: sessionId, status: 'READY', 'output.prefix': grant.prefix.replace(/\/$/, '') }).select('_id postId claimedPostId output').lean();
+     if (!session) return res.status(404).end();
+     const post = await Post.findOne({ _id: session.postId || session.claimedPostId, isActive: { $ne: false }, hiddenByAdmin: { $ne: true }, 'content.media.uploadSessionId': sessionId }).select('author visibility isActive hiddenByAdmin').lean();
+     const viewer = grant.viewerId ? await User.findById(grant.viewerId).select('_id userType isActive blockedUsers').lean() : null;
+     if (!post || grant.viewerId && (!viewer || viewer.isActive === false) || !(await resolvePostAccess({ post, viewer })).allowed) return res.status(403).end();
+     const read = manifestReader || require(path.join(__dirname, '../../../dist/infrastructure/storage/s3')).readVideoManifest;
+-    const text = await read(key);
++    formatGate.assertManifestKey(key, session.output);
++    const text = formatGate.filterManifest(await read(key), key, session.output);
+     res.set('Cache-Control', 'private, no-store');
+     res.type('application/vnd.apple.mpegurl').send(rewriteManifest(text, key, token));
+   } catch (error) { res.status(Number(error.statusCode) || 503).json({ success: false, code: error.code || 'PLAYBACK_UNAVAILABLE', message: 'Video playback is unavailable. Refresh the post and try again.' }); }
 --- /dev/null
 +++ b/src/legacy-src/services/androidVideoAdmission.js
 @@ -0,0 +1,81 @@
@@ -105,6 +151,33 @@
 +  validateVerdict(payload, owner, data, config, typeof now === 'function' ? now() : now);
 +}
 +module.exports = { requestHash, configuration, decode, validateVerdict, assertAdmission };
+--- a/src/legacy-src/services/videoPostPublicationService.js
++++ b/src/legacy-src/services/videoPostPublicationService.js
+@@ -45,6 +45,7 @@
+   if (!UUID.test(String(clientPostId || ''))) throw uploadError('INVALID_CLIENT_POST_ID', 'A valid post identifier is required for video posts.');
+   return new mongoose.Types.ObjectId(createHash('sha256').update(`${owner}:${clientPostId.toLowerCase()}`).digest('hex').slice(0, 24));
+ };
++const { selectOutput } = require('../utils/postVideoFormatGate');
+ const reserveReadyVideos = async ({ owner, ids, postId, claimToken }) => {
+   if (!ids.length) return [];
+   assertDeliveryReady();
+@@ -58,6 +59,7 @@
+     if (session.status !== 'READY' || !session.output || new Date(session.expiresAt).getTime() <= Date.now()) throw uploadError('VIDEO_NOT_READY', 'Wait until every video has finished processing before publishing.', 409);
+     const expectedPrefix = `post-video-playback/${owner}/${id}/`;
+     if (![session.output.hlsKey, session.output.fallbackKey, session.output.thumbnailKey].every(key => normalizedPlaybackKey(key) && key.startsWith(expectedPrefix))) throw uploadError('INVALID_VIDEO_OUTPUT', 'This video is not ready for publication.', 409);
++    const playbackOutput = selectOutput(session.output);
+     const claim = await Session.findOneAndUpdate({ _id: id, owner, status: 'READY', postId: null, expiresAt: { $gt: new Date() }, $or: [{ claimedPostId: null }, { claimedPostId: postId }] }, { $set: { claimedPostId: postId, claimToken, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } }, { new: true });
+     if (!claim) throw uploadError('VIDEO_ALREADY_USED', 'This video is already attached to another post.', 409);
+     const metadata = session.metadata || {};
+@@ -66,7 +68,7 @@
+       duration: metadata.duration, width: metadata.width, height: metadata.height,
+       aspectRatio: metadata.width && metadata.height ? metadata.width / metadata.height : undefined,
+       coverUrl: session.output.thumbnailKey, coverPublicId: session.output.thumbnailKey,
+-      playback: { status: 'ready', version: session.output.prefix.split('/').pop(), hlsUrl: session.output.hlsKey, hlsPublicId: session.output.hlsKey, fallbackMp4Url: fallback, fallbackPublicId: fallback, duration: metadata.duration, width: metadata.width, height: metadata.height, renditions: session.output.renditions || [], attempts: session.attempts, completedAt: session.completedAt || new Date(), outputBytes: session.output.outputBytes },
++      playback: { status: 'ready', version: session.output.prefix.split('/').pop(), ...(playbackOutput.hlsKey ? { hlsUrl: playbackOutput.hlsKey, hlsPublicId: playbackOutput.hlsKey } : {}), fallbackMp4Url: fallback, fallbackPublicId: fallback, duration: metadata.duration, width: metadata.width, height: metadata.height, renditions: playbackOutput.renditions, attempts: session.attempts, completedAt: session.completedAt || new Date(), outputBytes: session.output.outputBytes },
+     });
+   }
+   return media;
 --- a/src/legacy-src/services/videoUploadService.js
 +++ b/src/legacy-src/services/videoUploadService.js
 @@ -9,6 +9,8 @@
@@ -128,16 +201,22 @@
  const owned = async (id, owner) => {
    if (!mongoose.isValidObjectId(id)) throw uploadError('UPLOAD_NOT_FOUND', 'Video upload not found.', 404);
    const session = await Session.findOne({ _id: id, owner }).select(SESSION_SELECT);
-@@ -71,6 +76,8 @@
+@@ -67,10 +72,13 @@
+ const lockSchema = new mongoose.Schema({ _id: mongoose.Schema.Types.ObjectId, token: String, expiresAt: Date }, { autoIndex: false });
+ const OwnerLock = mongoose.models.VideoUploadOwnerLock || mongoose.model('VideoUploadOwnerLock', lockSchema);
+ const createSession = async (owner, input) => {
+-  requireEnabled(owner);
++  requireAvailable();
    const data = validateVideoInput(input);
    let session = await Session.findOne({ owner, clientUploadId: data.clientUploadId }).select(SESSION_SELECT);
    if (!session) {
++    requireEnabled(owner);
 +    // New larger admission needs a request-bound verified app; accepted exact sessions retain recovery.
 +    await androidAdmission.assertAdmission(owner, data, input?.androidIntegrityToken);
      const token = randomUUID();
      let lock;
      try { lock = await OwnerLock.findOneAndUpdate({ _id: owner, $or: [{ expiresAt: { $lte: new Date() } }, { expiresAt: { $exists: false } }] }, { $set: { token, expiresAt: new Date(Date.now() + 60_000) } }, { upsert: true, new: true }); }
-@@ -88,7 +95,7 @@
+@@ -88,7 +96,7 @@
        }
      } finally { await OwnerLock.deleteOne({ _id: owner, token }); }
    }
@@ -146,6 +225,73 @@
    assertLive(session);
    if (!session.multipartUploadId && UPLOAD_STATES.includes(session.status)) {
      const token = randomUUID();
+--- /dev/null
++++ b/src/legacy-src/utils/postVideoFormatGate.js
+@@ -0,0 +1,64 @@
++'use strict';
++// Delivery selection for the existing private session worker, not source attestation.
++// Worker7 validates these generated H264/AAC assets before committing READY.
++const invalid = () => { const e = Error('Video playback is unavailable.'); e.code = 'INVALID_VIDEO_OUTPUT'; e.statusCode = 503; throw e; };
++const bounded = r => Math.max(r.width, r.height) <= 1920 && Math.min(r.width, r.height) <= 1080;
++const positive = n => Number.isSafeInteger(n) && n > 0;
++function selectOutput(output) {
++  if (!output || !/^post-video-playback\/[a-f0-9]{24}\/[a-f0-9]{24}\/[a-zA-Z0-9_-]+$/.test(output.prefix)
++    || output.hlsKey !== `${output.prefix}/master.m3u8` || output.fallbackKey !== `${output.prefix}/fallback.mp4`
++    || output.thumbnailKey !== `${output.prefix}/thumbnail.jpg` || !Array.isArray(output.renditions)
++    || output.renditions.length < 1 || output.renditions.length > 16) invalid();
++  const seen = new Set();
++  for (const r of output.renditions) {
++    if (!r || !/^[0-9]{1,6}p$/.test(r.name) || seen.has(r.name)
++      || !positive(r.width) || !positive(r.height) || r.width % 2 || r.height % 2
++      || !positive(r.bandwidth) || !positive(r.averageBandwidth)
++      || r.playlistUrl !== `${output.prefix}/${r.name}/index.m3u8`
++      || r.playlistPublicId !== r.playlistUrl) invalid();
++    seen.add(r.name);
++  }
++  const renditions = output.renditions.filter(bounded);
++  return { ...output, hlsKey: renditions.length ? output.hlsKey : undefined, renditions };
++}
++function assertManifestKey(key, output) {
++  const selected = selectOutput(output);
++  if (!selected.hlsKey || key !== selected.hlsKey && !selected.renditions.some(r => r.playlistUrl === key)) invalid();
++  return selected;
++}
++function filterManifest(text, key, output) {
++  const selected = assertManifestKey(key, output);
++  if (typeof text !== 'string' || Buffer.byteLength(text) > 524288 || /\r(?!\n)|\0/.test(text)) invalid();
++  const lines = text.replace(/\r\n/g, '\n').trimEnd().split('\n');
++  if (lines.length > 8192 || lines[0] !== '#EXTM3U') invalid();
++  if (key === output.hlsKey) {
++    // Match the complete worker-generated master before omitting oversized pairs.
++    if (lines.length !== 3 + output.renditions.length * 2 || lines[1] !== '#EXT-X-VERSION:7'
++      || lines[2] !== '#EXT-X-INDEPENDENT-SEGMENTS') invalid();
++    const result = lines.slice(0, 3), seen = new Set();
++    for (let i = 3; i < lines.length; i += 2) {
++      const r = output.renditions.find(row => lines[i + 1] === `${row.name}/index.m3u8`);
++      if (!r || seen.has(r.name) || lines[i] !== `#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},AVERAGE-BANDWIDTH=${r.averageBandwidth},RESOLUTION=${r.width}x${r.height}`) invalid();
++      seen.add(r.name);
++      if (bounded(r)) result.push(lines[i], lines[i + 1]);
++    }
++    if (seen.size !== output.renditions.length) invalid();
++    return result.join('\n') + '\n';
++  }
++  // No cross-rendition URI, nested playlist, external URI, encryption key or original.
++  let map = 0, segments = 0, durationPending = false;
++  for (const line of lines.slice(1)) {
++    if (/^#EXTINF:[0-9]+(?:\.[0-9]+)?,\s*$/.test(line)) {
++      if (durationPending || !(Number(line.slice(8).split(',')[0]) > 0)) invalid();
++      durationPending = true;
++    } else if (/^segment_[0-9]{5}\.m4s$/.test(line)) {
++      if (!durationPending) invalid();
++      durationPending = false; segments++;
++    } else if (line === '#EXT-X-MAP:URI="init.mp4"') {
++      if (++map !== 1 || durationPending) invalid();
++    } else if (!/^#EXT-X-(?:VERSION:[0-9]+|TARGETDURATION:[0-9]+|MEDIA-SEQUENCE:0|PLAYLIST-TYPE:VOD|INDEPENDENT-SEGMENTS|ENDLIST)$/.test(line)) invalid();
++  }
++  if (map !== 1 || !segments || segments > 4096 || durationPending || lines.at(-1) !== '#EXT-X-ENDLIST') invalid();
++  return text;
++}
++module.exports = { bounded, selectOutput, assertManifestKey, filterManifest };
 --- a/src/legacy-src/utils/postVideoPolicy.js
 +++ b/src/legacy-src/utils/postVideoPolicy.js
 @@ -1,4 +1,5 @@

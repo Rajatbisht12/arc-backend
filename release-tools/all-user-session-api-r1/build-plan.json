@@ -3,13 +3,13 @@
   "runId": "pi-all-user-session-api-r1-20261101",
   "repository": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend",
   "tag": "pi-all-user-session-api-r1-20261101",
-  "sourceFiles": 756,
-  "sourceContentSha256": "4b4889ee48b8aa650b48cb44edda18ad0512d8acd061cc8c84693fd82e375d96",
-  "sourceArchiveSha256": "fcc9124ca33abe28b6153d72ea5375816ad99f71fcfdd78bde7af8284d1d1a82",
+  "sourceFiles": 757,
+  "sourceContentSha256": "974adec2225d0d2f7ec75f6a7f75c2dd8221e1929ecdc0a483dddec810149300",
+  "sourceArchiveSha256": "5ceeba08a499e88730c62ac3550c41556fb50b1064bf61e9810f889c908fda4a",
   "controls": [
     {
       "path": "local.cjs",
-      "sha256": "fae82d94115209357ca489a779ac480b210a65df24f52be5d2efa05fc80d0ad3"
+      "sha256": "d2d50d1313da7bcae8e3c264d8992798c724c253261dbaef6cf6a940fa33c9a3"
     },
     {
       "path": "build-once.cjs",
@@ -17,43 +17,55 @@
     },
     {
       "path": "verify.cjs",
-      "sha256": "d4a18f713273a00c8c8859f6e1c7b76a7d061e2c87d911b8b3ad67356bc91ac8"
+      "sha256": "3892edc583d95ee9db0c2691850fd5a63aa0b9a1b31b90e882464490e48017fb"
     },
     {
       "path": "controls.test.cjs",
-      "sha256": "91b6c3a7a7411de8fb1412b210cb5842d2e703ae52cacf050172bb58a0ed5efb"
+      "sha256": "7c6be4f57fc2663e705049caf29d32be44dd093dd73944f65e0ff67d28095f5b"
     },
     {
       "path": "artifact.PROPOSED.json",
-      "sha256": "bdc19304bb03b6dbd949cfd0bf070f787a4bdce599a7e982f7dbb881ed0785a6"
+      "sha256": "3500066f89eab576aac710677e3f217db5dd913e3cf975041e8844f39c289260"
     },
     {
       "path": "release/candidate.json",
-      "sha256": "cd29192f1d3023d28c59f36dd3e7befd8569a6749b626d17ed7171e91730f164"
+      "sha256": "b6ae2d4b0d4c066f334c7e426b018cab6ad2f81c0778f781354ab22226da60a2"
     },
     {
       "path": "release/source-manifest.json",
-      "sha256": "1638aa9c729895e7b64c5505aa541087c49d61d20330c7f4b860c1561f9a12e0"
+      "sha256": "ebedfe5222fa3a6ccd23d45369ebdfeb01d50250e0533c273afd9ba6cc252bf5"
     },
     {
       "path": "release/source.zip",
-      "sha256": "fcc9124ca33abe28b6153d72ea5375816ad99f71fcfdd78bde7af8284d1d1a82"
+      "sha256": "5ceeba08a499e88730c62ac3550c41556fb50b1064bf61e9810f889c908fda4a"
     },
     {
       "path": "release/session-only-api.patch",
-      "sha256": "a8f0f80ddcdadbbc8e35f5f6355fd0b4d9582c650040bb1a457e760cc33600c6"
+      "sha256": "27e5bd7cf43f5ed3f491d76d89f8cf1c1183d2a690f7e0cd44e34360284005ee"
     },
     {
       "path": "source.test.cjs",
-      "sha256": "f9291826164ee3a39361606a1d146bc548b9ec473f62247d73fa65357708e0d6"
+      "sha256": "a8dfac50b269e1d6c4cc8478a6a328d807b61b0a177cc660fdd2c3c802327406"
     },
     {
       "path": "prepare-source.py",
-      "sha256": "046007a9c5e4796596e1f1a281fb61c1a801f4578309628a1671d385c295ba06"
+      "sha256": "72b76f1a70eaeb804b84a56fedd7ff3eecd8cc90892dfc6b2bebc514a00b77e8"
     },
     {
       "path": "offline-inputs.py",
       "sha256": "3f56c15076caad22e9e6531aa9ccbc786ca10920debde15b2ed96b4a70f6e7c6"
+    },
+    {
+      "path": "runtime/postVideoFormatGate.js",
+      "sha256": "5c547cdfef156545e8ba7060e18fee9f44632d9384e83fe9fd61d632150f365f"
+    },
+    {
+      "path": "format-gate.test.cjs",
+      "sha256": "2903afcbc5db1caed070dcc19f044b2027aaaf3344bf5dbc7e3a1fdcd9d44dc0"
+    },
+    {
+      "path": "worker7-delivery.integration.test.cjs",
+      "sha256": "a6bcb3a36e4742d66c14e6689601c8a4b70a40e86992350ccf34fe671c670ca3"
     }
   ],
   "platform": "linux/amd64",

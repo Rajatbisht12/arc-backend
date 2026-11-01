@@ -29,8 +29,8 @@ function loadPlan() {
   for (const pin of plan.controls) {
     if (V.sha(fs.readFileSync(path.resolve(__dirname, pin.path))) !== pin.sha256) fail('CONTROL_BYTES_CHANGED');
   }
-  if (plan.sourceContentSha256 !== '4b4889ee48b8aa650b48cb44edda18ad0512d8acd061cc8c84693fd82e375d96' ||
-      plan.sourceArchiveSha256 !== 'fcc9124ca33abe28b6153d72ea5375816ad99f71fcfdd78bde7af8284d1d1a82' ||
+  if (plan.sourceContentSha256 !== '974adec2225d0d2f7ec75f6a7f75c2dd8221e1929ecdc0a483dddec810149300' ||
+      plan.sourceArchiveSha256 !== '5ceeba08a499e88730c62ac3550c41556fb50b1064bf61e9810f889c908fda4a' ||
       plan.tag !== 'pi-all-user-session-api-r1-20261101' || plan.runId !== 'pi-all-user-session-api-r1-20261101') fail('EXACT_SOURCE_AND_TAG_REQUIRED');
   const archive = V.verify();
   return { plan, archive };

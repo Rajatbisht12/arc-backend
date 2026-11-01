@@ -1,0 +1,13 @@
+✔ real worker7 plus API delivery: 1080p-hevc (2694.067417ms)
+✔ real worker7 plus API delivery: 4k-hevc (4602.239ms)
+✔ real worker7 plus API delivery: ultrawide-h264 (2164.899375ms)
+✔ real worker7 plus API delivery: tall-hevc (3278.419083ms)
+✔ real worker7 plus API delivery: fallback-only (1014.280959ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13848.408958

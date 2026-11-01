@@ -29,7 +29,10 @@ edit(service, '  if (!session) {\n    const token = randomUUID();',
      '  if (!session) {\n    // New larger admission needs a request-bound verified app; accepted exact sessions retain recovery.\n    await androidAdmission.assertAdmission(owner, data, input?.androidIntegrityToken);\n    const token = randomUUID();')
 edit(service, "if (session.size !== data.size || session.mimeType !== data.mimeType)",
      "if (session.size !== data.size || session.mimeType !== data.mimeType || session.filename !== data.filename)")
-# Deliberately preserve native API219's existing admission hook and all other session lifecycle code.
+# Close NEW intake during rollback without stranding an already accepted exact session.
+edit(service, '  requireEnabled(owner);\n  const data = validateVideoInput(input);', '  requireAvailable();\n  const data = validateVideoInput(input);')
+edit(service, '  if (!session) {\n    // New larger admission', '  if (!session) {\n    requireEnabled(owner);\n    // New larger admission')
+# Deliberately preserve native API219's existing admission hook and worker lifecycle code.
 assert b"await require('../utils/jobQueue').assertVideoProcessingAdmission(owner, _id);" in records[service]
 assert b'globalAdmissionOverride' not in records[service]
 records['src/legacy-src/services/androidVideoAdmission.js'] = (root / 'src/legacy-src/services/androidVideoAdmission.js').read_bytes()
@@ -39,6 +42,21 @@ controller = 'src/legacy-src/controllers/postController.js'
 edit(controller, '    if (reservedPostId) publicationLease = await acquirePublication(authorId, reservedPostId);',
      "    // Session-only release: retain existing idempotent Posts above, never accept new raw legacy video.\n    if (mediaFiles.some(file => String(file.mimetype || '').startsWith('video/'))) {\n      return res.status(409).json({ success: false, code: 'VIDEO_UPLOAD_PATH_REQUIRED', message: 'Refresh the composer and upload this video through the reserved video upload flow.' });\n    }\n    if (reservedPostId) publicationLease = await acquirePublication(authorId, reservedPostId);")
 
+# Restrict delivered private HLS to the 1080p display box without replacing worker7.
+records['src/legacy-src/utils/postVideoFormatGate.js'] = (root / 'release-tools/all-user-session-api-r1/runtime/postVideoFormatGate.js').read_bytes()
+playback = 'src/legacy-src/controllers/videoUploadController.js'
+edit(playback, "let manifestReader;", "const formatGate = require('../utils/postVideoFormatGate');\nlet manifestReader;")
+edit(playback, '    const output = session.output;', '    const output = formatGate.selectOutput(session.output);')
+edit(playback, 'playbackAuthorization(output.hlsKey, now)', 'playbackAuthorization(output.hlsKey || output.fallbackKey, now)')
+edit(playback, "playback: { status: 'ready', hlsUrl: resolvePlaybackKey(output.hlsKey, process.env, viewerId, now),", "playback: { status: 'ready', ...(output.hlsKey ? { hlsUrl: resolvePlaybackKey(output.hlsKey, process.env, viewerId, now) } : {}),")
+edit(playback, ".select('_id postId claimedPostId').lean();", ".select('_id postId claimedPostId output').lean();")
+edit(playback, '    const text = await read(key);', '    formatGate.assertManifestKey(key, session.output);\n    const text = formatGate.filterManifest(await read(key), key, session.output);')
+publication = 'src/legacy-src/services/videoPostPublicationService.js'
+edit(publication, 'const reserveReadyVideos = async', "const { selectOutput } = require('../utils/postVideoFormatGate');\nconst reserveReadyVideos = async")
+edit(publication, '    const claim = await Session.findOneAndUpdate', '    const playbackOutput = selectOutput(session.output);\n    const claim = await Session.findOneAndUpdate')
+edit(publication, "hlsUrl: session.output.hlsKey, hlsPublicId: session.output.hlsKey,", "...(playbackOutput.hlsKey ? { hlsUrl: playbackOutput.hlsKey, hlsPublicId: playbackOutput.hlsKey } : {}),")
+edit(publication, 'renditions: session.output.renditions || []', 'renditions: playbackOutput.renditions')
+
 changes = []
 patches = []
 for name in sorted(records):
@@ -46,7 +64,7 @@ for name in sorted(records):
         continue
     changes.append({'path': name, 'beforeSha256': sha(before[name]) if name in before else None, 'sha256': sha(records[name]), 'bytes': len(records[name])})
     patches += list(difflib.unified_diff(before.get(name, b'').decode().splitlines(True), records[name].decode().splitlines(True), fromfile='a/' + name if name in before else '/dev/null', tofile='b/' + name))
-assert len(changes) == 5 and len(records) == 756
+assert len(changes) == 8 and len(records) == 757
 for name in records:
     assert not name.startswith('/') and '..' not in pathlib.PurePosixPath(name).parts and '\\' not in name
     assert not pathlib.PurePosixPath(name).name.startswith('.env') or name.endswith('.example')
@@ -62,6 +80,6 @@ with zipfile.ZipFile(out / 'source.zip', 'w', compression=zipfile.ZIP_DEFLATED, 
         info = zipfile.ZipInfo(name, (2026, 11, 1, 0, 0, 0)); info.compress_type = zipfile.ZIP_DEFLATED; info.external_attr = 0o100644 << 16
         z.writestr(info, b, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
 (out / 'session-only-api.patch').write_text(''.join(patches))
-candidate = {'kind': 'SESSION_ONLY_API_SOURCE_PREPARED_NOT_BUILT', 'nativeBaselineDefinition': 'arc-backend:219', 'nativeBaselineIndex': 'sha256:c6e1708fdc0b05a4a56105759200f517cc906611b1692a0cf37691dcd4ecc9c1', 'sourceFiles': len(files), 'sourceContentSha256': content, 'sourceArchiveSha256': sha((out / 'source.zip').read_bytes()), 'changes': changes, 'privateLegacySupported': False, 'indexChanges': 0, 'ledgerOrAdmissionHookChanges': 0, 'runtimeControlChanges': 0, 'apiImageDigest': None, 'taskDefinitionInput': None, 'providerAuthority': 0, 'blockers': ['normal source review/merge', 'exact build/push controller and fresh separate publication approval', 'native accepted-work/data coverage and capacity safety', 'current full Task/Service parent comparison before registration', 'matching worker format qualification', 'native app Integrity configuration for larger Android admission', 'non-canary gallery upload and private playback qualification']}
+candidate = {'kind': 'SESSION_ONLY_API_SOURCE_PREPARED_NOT_BUILT', 'nativeBaselineDefinition': 'arc-backend:219', 'nativeBaselineIndex': 'sha256:c6e1708fdc0b05a4a56105759200f517cc906611b1692a0cf37691dcd4ecc9c1', 'sourceFiles': len(files), 'sourceContentSha256': content, 'sourceArchiveSha256': sha((out / 'source.zip').read_bytes()), 'changes': changes, 'privateLegacySupported': False, 'indexChanges': 0, 'ledgerOrAdmissionHookChanges': 0, 'runtimeControlChanges': 0, 'apiImageDigest': None, 'taskDefinitionInput': None, 'providerAuthority': 0, 'blockers': ['normal source review/merge', 'exact build/push controller and fresh separate publication approval', 'native accepted-work/data coverage and capacity safety', 'current full Task/Service parent comparison before registration', 'native bounded private delivery and existing worker session-format qualification', 'native app Integrity configuration for larger Android admission', 'non-canary gallery upload and private playback qualification']}
 (out / 'candidate.json').write_text(json.dumps(candidate, indent=2) + '\n')
 print(json.dumps({k: candidate[k] for k in ['sourceFiles', 'sourceContentSha256', 'sourceArchiveSha256', 'indexChanges', 'providerAuthority']}))
