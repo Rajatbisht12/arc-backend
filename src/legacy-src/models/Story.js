@@ -4,8 +4,14 @@ const { STORY_FONTS, STORY_COLORS } = require('../utils/storyOverlays');
 
 const storyOverlaySchema = new mongoose.Schema({
   id: { type: String, required: true },
-  type: { type: String, enum: ['text'], required: true },
+  type: { type: String, enum: ['text', 'link'], required: true },
   text: { type: String, required: true, maxlength: 500 },
+  version: { type: Number, enum: [2] },
+  coordinateSpace: { type: String, enum: ['media'] },
+  fontSize: { type: Number, min: 15, max: 90 },
+  textAlign: { type: String, enum: ['left', 'center', 'right'] },
+  url: { type: String, maxlength: 2048 },
+  label: { type: String, maxlength: 80 },
   font: { type: String, enum: STORY_FONTS, required: true },
   color: { type: String, enum: STORY_COLORS, required: true },
   x: { type: Number, min: 0, max: 1, required: true },

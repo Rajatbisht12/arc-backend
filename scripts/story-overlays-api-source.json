@@ -1,0 +1,23 @@
+{
+  "parentArchiveSha256": "3ec0cb59c876533f995026663c3a760ca17aa01f5bd450da157b9ee3e03b8dde",
+  "parentSourceSha256": "e753a460c3b3576be6d4b1c975b6bbab806203a6664c5a958712984b67f49fb2",
+  "parentPublishedIndex": "sha256:21217d162b0bc362c35d0aab4cc0abcfadb8653129a1dbc9c8ddc0364e301d6f",
+  "changes": [
+    {
+      "path": "src/legacy-src/controllers/storyController.js",
+      "beforeSha256": "575d7fa4c8fed6ffdc410f4ab59f057eb451c33127c202e0ec62f09897083c3a",
+      "afterSha256": "410e1850a86e59e9fb07a07ac4e7f8929fbd2e9c97a6afc02fd42d82cee5cb13"
+    },
+    {
+      "path": "src/legacy-src/models/Story.js",
+      "beforeSha256": "650749579d336d3070995459d2fee483fb8242fd38081fbda2cd158ca9494898",
+      "afterSha256": "95a8483a528a3f1d2f1bde2eaaeca54267deee18c58b1fee83e965518a43b52d"
+    },
+    {
+      "path": "src/legacy-src/utils/storyOverlays.js",
+      "beforeSha256": "beda7d788dfe9a709495aeff6b46a8dea3667e2c09040543ea4264f05d740260",
+      "afterSha256": "7a4bae750a39fcbd8a2a0e67c35a8583a8826ebcedfa1182d94a8b6cd9b41277"
+    }
+  ],
+  "sourceContentSha256": "7210a79c3c4b7ed4d46ccecdfa58f8f89c2c55bf8328d08c30d6ec182cdff86f"
+}
