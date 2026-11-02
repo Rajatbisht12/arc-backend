@@ -1,0 +1,14 @@
+{
+  "kind": "ADMISSION_GUARD_API_IMAGE_CANDIDATE_NOT_BUILT",
+  "runId": "pi-all-user-admission-api-r1-20261102",
+  "repository": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend",
+  "tag": "pi-all-user-admission-api-r1-20261102",
+  "sourceFiles": 759,
+  "sourceContentSha256": "d328315d548254f7b51cff001c64e8d931fa8da2f4a4a6d30803be9864617f21",
+  "sourceArchiveSha256": "9573270f913ae2a549d21635841b77400f1707801e545bb7d4f48adc9d9ddf39",
+  "imageDigest": null,
+  "apiOnly": true,
+  "workerDeploymentAuthority": 0,
+  "ecsAuthority": 0,
+  "ledgerOpeningAuthority": 0
+}

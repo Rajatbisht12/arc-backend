@@ -1,0 +1,138 @@
+{
+  "kind": "ALL_USER_ADMISSION_API_IMAGE_PUBLICATION_UNAPPROVED",
+  "runId": "pi-all-user-admission-api-r1-20261102",
+  "repository": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend",
+  "tag": "pi-all-user-admission-api-r1-20261102",
+  "sourceFiles": 759,
+  "sourceContentSha256": "d328315d548254f7b51cff001c64e8d931fa8da2f4a4a6d30803be9864617f21",
+  "sourceArchiveSha256": "9573270f913ae2a549d21635841b77400f1707801e545bb7d4f48adc9d9ddf39",
+  "controls": [
+    {
+      "path": "local.cjs",
+      "sha256": "ddf0badf4c5b753d87d43204a82299991226609b42ddb825a4728ddbffff017c"
+    },
+    {
+      "path": "build-once.cjs",
+      "sha256": "268ce21449fa32ab3e6e91f820c8875db52f0e8b4689f429fba5282e54ea0089"
+    },
+    {
+      "path": "verify.cjs",
+      "sha256": "65f9b65cc5f6db49f91a61f20f6d4262069487b023260678425b426dc6a0f5a9"
+    },
+    {
+      "path": "controls.test.cjs",
+      "sha256": "ad2c6f079b8e30b8b0a4cdc6234f810be50024b91e2e3a0a0b0914cd478187ff"
+    },
+    {
+      "path": "artifact.PROPOSED.json",
+      "sha256": "7e2cae323032fb2d1fd4219eefc7c0d28630c8ed3b412f93c463684e7898a4af"
+    },
+    {
+      "path": "source.cjs",
+      "sha256": "98c907b1cc658c6ec8f8ee59c86522ecc2cbb58232670e3a8ee333f846eabfc7"
+    },
+    {
+      "path": "source.test.cjs",
+      "sha256": "ce2253ed2723529939111b4abfe8528cd6cc5d06b0c2b578efcd4a59f88775e0"
+    },
+    {
+      "path": "bootstrap.test.cjs",
+      "sha256": "d709c28f77ea02f47aa5841df0818ff62a20e08bd888a7da33d6379bf80fb6ba"
+    },
+    {
+      "path": "queue-metrics.integration.test.cjs",
+      "sha256": "7c4f58f30592f4d7d07034504af3ed1440e29ae335cd8e71ee1ff3931c66f642"
+    },
+    {
+      "path": "offline-inputs.py",
+      "sha256": "a8af6a45153b0b5f6cde2232a4de84b6aabfba855a3f0790cd6052f384b32f3a"
+    },
+    {
+      "path": "prepare-plan.cjs",
+      "sha256": "577830b3efc5f22747b121ebbacb754d003a4ef39172d568aa137933193381f9"
+    },
+    {
+      "path": "staged-controls.PROPOSAL_ONLY.json",
+      "sha256": "20ed3f1e5fc9fc79726133b37c0cb23bc56e7625f6bb70ce86ce501ab69746eb"
+    },
+    {
+      "path": "tests/videoGlobalAdmission.integration.test.js",
+      "sha256": "2a94baf181a1eddce119c9445bb00324c6e7bf475c01e5a97a466873527d0976"
+    },
+    {
+      "path": "tests/videoGlobalAdmission.api.integration.test.js",
+      "sha256": "2c985106332f4ed42759460810b4eff3dbcaed8570eda90a4750ba9bb9cece87"
+    },
+    {
+      "path": "release/candidate.json",
+      "sha256": "a5fce629d23995d087a258d4b063bfc834d2672c3ecbabb1f85d0ddea467e416"
+    },
+    {
+      "path": "release/source-manifest.json",
+      "sha256": "4f8fd2d0df298d834509dd41ca77efd37b638fff1c5de16a7669bd37bd69548e"
+    },
+    {
+      "path": "release/source.zip",
+      "sha256": "9573270f913ae2a549d21635841b77400f1707801e545bb7d4f48adc9d9ddf39"
+    },
+    {
+      "path": "release/guard-api.patch",
+      "sha256": "24ef7038adf2c9342122a1eb180819115f6f2b2dd871bac24797dc90a18f491d"
+    },
+    {
+      "path": "release/overrides/src/legacy-src/services/videoUploadService.js",
+      "sha256": "3bb22369891da930ea3b3cea5577b7f0ea57406019573ec59c74814386410c52"
+    },
+    {
+      "path": "release/overrides/src/legacy-src/services/videoGlobalAdmission.js",
+      "sha256": "00b90833ba0d37836048e198612613b3b80eb3b92ae9dd9d40339974be889808"
+    },
+    {
+      "path": "release/overrides/src/infrastructure/jobs/videoQueueMetrics.js",
+      "sha256": "1bb85d376bfd6c57d5c1d12edd8b7fda5b324163ea9c8957fc9972d8b58faaa3"
+    },
+    {
+      "path": "release/overrides/src/config/secrets.ts",
+      "sha256": "e0d6e0ffeedf5e251341d64ce463e206855d516bb1c9d0618b83a983ddc87ef0"
+    },
+    {
+      "path": "release/overrides/src/infrastructure/jobs/queue.ts",
+      "sha256": "1e6923bc92e51ab4f5d3865a986f7cd9a1b8e3de50bcb443ac6c230e171113a4"
+    }
+  ],
+  "buildInputs": {
+    "dockerfileSha256": "6f26ef93336be4d14f00bd23bf2353ae8e3d00b384f7dbe697dcabac3e36aeed",
+    "dockerignoreSha256": "43891cadd0f816f36013ecc20482aeeb79e6c002f532b36b116c04c398f3f019",
+    "packageJsonSha256": "601e7b187700465b226736a4366e3231977b6282c87c3c00f48c87f66d8777ab",
+    "packageLockSha256": "71939d2237a8b20704503a9a04e8dc270a5f907003c3c87ad25cb1fb698fd7b1",
+    "baseImage": "node:22.23.4-alpine3.23@sha256:9fee3a1d85a49993660c8ffc774ceafadc0b52eda69b4c981f6b6a1cfabcfe98",
+    "ffmpegPackage": "8.0.1-r1",
+    "caBundleUrl": "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+  },
+  "platform": "linux/amd64",
+  "operatorPlatform": "Windows",
+  "dockerContext": "desktop-linux",
+  "allowedDrivers": [
+    "docker",
+    "docker-container"
+  ],
+  "nodeName": "desktop-linux",
+  "nodeEndpoint": "desktop-linux",
+  "headResolver": "CLEAN_MERGED_CARRIER_HEAD_LABEL_ONLY_V1",
+  "builderResolver": "EXISTING_SINGLE_LOCAL_DOCKER_DRIVER_ALLOWLIST_V1",
+  "maximumAwsReadAttempts": 3,
+  "maximumBuildPushInvocations": 1,
+  "maximumRegistryIndexReads": 1,
+  "approvalMinutes": 30,
+  "buildCommandSeconds": 900,
+  "otherCommandSeconds": 30,
+  "responseBytes": 1048576,
+  "tagEvidenceFreshnessSeconds": 300,
+  "remainingDeploymentAuthority": 0,
+  "workerAuthority": 0,
+  "ledgerAuthority": 0,
+  "eligibilityAuthority": 0,
+  "unknownAcknowledgement": "HOLD_NO_RETRY",
+  "unapprovedCleanup": 0,
+  "hardBillingCapClaimed": false
+}
