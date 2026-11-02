@@ -660,7 +660,7 @@ const getUserStories = async (req, res) => {
     });
     return res.json({
       success: true,
-      data: { stories: normalizedStories }
+      data: { stories: normalizedStories, overlayVersion: 2 }
     });
   } catch (err) {
     return res.status(500).json({
