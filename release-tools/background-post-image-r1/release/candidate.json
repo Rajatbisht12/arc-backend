@@ -1,0 +1,17 @@
+{
+  "kind": "BACKGROUND_POST_API_BOOTSTRAP_SOURCE_NOT_BUILT",
+  "sourceContentSha256": "e753a460c3b3576be6d4b1c975b6bbab806203a6664c5a958712984b67f49fb2",
+  "parentPublishedSource": "d328315d548254f7b51cff001c64e8d931fa8da2f4a4a6d30803be9864617f21",
+  "sourceFiles": 759,
+  "changes": [
+    {
+      "path": "src/config/secrets.ts",
+      "beforeSha256": "e0d6e0ffeedf5e251341d64ce463e206855d516bb1c9d0618b83a983ddc87ef0",
+      "afterSha256": "91bca51dd64a440576d4d7b9add8318086cd42c1d645389929c7ab5f7dec2c18",
+      "onlyExplicitTaskBooleanAdded": true
+    }
+  ],
+  "apiOnly": true,
+  "workerAuthority": 0,
+  "deploymentAuthority": 0
+}

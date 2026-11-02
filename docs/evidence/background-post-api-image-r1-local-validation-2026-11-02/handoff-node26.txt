@@ -1,0 +1,401 @@
+(node:67140) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/supragyagandotra/myCodebase/ARC/artifacts/large-video-android-20261102/source/src/features/post-editor/videoUploadEngine.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/supragyagandotra/myCodebase/ARC/artifacts/large-video-android-20261102/source/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[INFO] Post media published after integrity verification {
+  uploadId: '31980352-fede-4eb2-a7a0-51db92426a25',
+  postId: '92abee1b3e9da4856c1c46d6',
+  userId: '6ae8b5741fb385aef4063844',
+  videos: []
+}
+[DEBUG] Created post: {
+  _id: new ObjectId('92abee1b3e9da4856c1c46d6'),
+  postType: 'general',
+  achievementInfo: {},
+  author: 'xyz'
+}
+[DEBUG] Notification dispatch started {
+  userId: '6ae8b5741fb385aef4063844',
+  type: 'system',
+  requestedInApp: true,
+  requestedPush: true
+}
+[DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+  userId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5741fb385aef4063889',
+  type: 'system'
+}
+[DEBUG] Notification durable row prepared {
+  userId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5741fb385aef4063889',
+  type: 'system',
+  created: true,
+  refreshed: false,
+  inApp: true,
+  push: true
+}
+[INFO] Expo push skipped before provider submission {
+  recipientId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5741fb385aef4063889',
+  type: 'system',
+  reasonCode: 'NO_ACTIVE_INSTALLATION'
+}
+[DEBUG] Notification push dispatch completed {
+  userId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5741fb385aef4063889',
+  type: 'system',
+  requestKey: 'bb98aeda1e7f118d',
+  reasonCode: 'NO_ACTIVE_INSTALLATION',
+  submitted: 0,
+  accepted: 0,
+  failed: 0,
+  skipped: 0
+}
+✔ xyz direct: durable intent survives composer abort, app restart and duplicate worker callbacks (1745.977916ms)
+[INFO] Post media published after integrity verification {
+  uploadId: '9cb5ff6d-7d01-41ac-b125-63cebe2d0adf',
+  postId: 'd1c3dde5d7ffbab3507dddb5',
+  userId: '6ae8b5741fb385aef4063844',
+  videos: []
+}
+[DEBUG] Created post: {
+  _id: new ObjectId('d1c3dde5d7ffbab3507dddb5'),
+  postType: 'general',
+  achievementInfo: {},
+  author: 'xyz'
+}
+[DEBUG] Notification dispatch started {
+  userId: '6ae8b5741fb385aef4063844',
+  type: 'system',
+  requestedInApp: true,
+  requestedPush: true
+}
+[DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+  userId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5751fb385aef40638da',
+  type: 'system'
+}
+[DEBUG] Notification durable row prepared {
+  userId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5751fb385aef40638da',
+  type: 'system',
+  created: true,
+  refreshed: false,
+  inApp: true,
+  push: true
+}
+[INFO] Expo push skipped before provider submission {
+  recipientId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5751fb385aef40638da',
+  type: 'system',
+  reasonCode: 'NO_ACTIVE_INSTALLATION'
+}
+[DEBUG] Notification push dispatch completed {
+  userId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5751fb385aef40638da',
+  type: 'system',
+  requestKey: '8982e9f6a9b54e0d',
+  reasonCode: 'NO_ACTIVE_INSTALLATION',
+  submitted: 0,
+  accepted: 0,
+  failed: 0,
+  skipped: 0
+}
+✔ xyz prepared: durable intent survives composer abort, app restart and duplicate worker callbacks (73.743125ms)
+[INFO] Post media published after integrity verification {
+  uploadId: '7cc7eb03-9912-4c08-b860-5a231ce055f8',
+  postId: 'bac31a4d593591a2ea4283b0',
+  userId: '6ae8b5741fb385aef406384a',
+  videos: []
+}
+[DEBUG] Created post: {
+  _id: new ObjectId('bac31a4d593591a2ea4283b0'),
+  postType: 'general',
+  achievementInfo: {},
+  author: 'zoro'
+}
+[DEBUG] Notification dispatch started {
+  userId: '6ae8b5741fb385aef406384a',
+  type: 'system',
+  requestedInApp: true,
+  requestedPush: true
+}
+[DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef406392b',
+  type: 'system'
+}
+[DEBUG] Notification durable row prepared {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef406392b',
+  type: 'system',
+  created: true,
+  refreshed: false,
+  inApp: true,
+  push: true
+}
+[INFO] Expo push skipped before provider submission {
+  recipientId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef406392b',
+  type: 'system',
+  reasonCode: 'NO_ACTIVE_INSTALLATION'
+}
+[DEBUG] Notification push dispatch completed {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef406392b',
+  type: 'system',
+  requestKey: '64786aded92f4018',
+  reasonCode: 'NO_ACTIVE_INSTALLATION',
+  submitted: 0,
+  accepted: 0,
+  failed: 0,
+  skipped: 0
+}
+✔ zoro direct: durable intent survives composer abort, app restart and duplicate worker callbacks (56.829875ms)
+[INFO] Post media published after integrity verification {
+  uploadId: 'f395f0b5-5cd3-449c-8f77-b115b226d4f8',
+  postId: 'a5a8d8a02b8e387fc02c256c',
+  userId: '6ae8b5741fb385aef406384a',
+  videos: []
+}
+[DEBUG] Created post: {
+  _id: new ObjectId('a5a8d8a02b8e387fc02c256c'),
+  postType: 'general',
+  achievementInfo: {},
+  author: 'zoro'
+}
+[DEBUG] Notification dispatch started {
+  userId: '6ae8b5741fb385aef406384a',
+  type: 'system',
+  requestedInApp: true,
+  requestedPush: true
+}
+[DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef406397c',
+  type: 'system'
+}
+[DEBUG] Notification durable row prepared {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef406397c',
+  type: 'system',
+  created: true,
+  refreshed: false,
+  inApp: true,
+  push: true
+}
+[INFO] Expo push skipped before provider submission {
+  recipientId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef406397c',
+  type: 'system',
+  reasonCode: 'NO_ACTIVE_INSTALLATION'
+}
+[DEBUG] Notification push dispatch completed {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef406397c',
+  type: 'system',
+  requestKey: 'dbc41dd27af09fad',
+  reasonCode: 'NO_ACTIVE_INSTALLATION',
+  submitted: 0,
+  accepted: 0,
+  failed: 0,
+  skipped: 0
+}
+✔ zoro prepared: durable intent survives composer abort, app restart and duplicate worker callbacks (58.079458ms)
+✔ 100% transport without completion ACK does not create a Pending Post or claim handoff (4.83425ms)
+[INFO] Post media published after integrity verification {
+  uploadId: '3b7d2989-a034-4f0a-9774-961f0fa23c64',
+  postId: '4c7690b9a796b240eabb8997',
+  userId: '6ae8b5741fb385aef406384a',
+  videos: []
+}
+[DEBUG] Created post: {
+  _id: new ObjectId('4c7690b9a796b240eabb8997'),
+  postType: 'general',
+  achievementInfo: {},
+  author: 'zoro'
+}
+[DEBUG] Notification dispatch started {
+  userId: '6ae8b5741fb385aef406384a',
+  type: 'system',
+  requestedInApp: true,
+  requestedPush: true
+}
+[DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef40639cd',
+  type: 'system'
+}
+[DEBUG] Notification durable row prepared {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef40639cd',
+  type: 'system',
+  created: true,
+  refreshed: false,
+  inApp: true,
+  push: true
+}
+[INFO] Expo push skipped before provider submission {
+  recipientId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef40639cd',
+  type: 'system',
+  reasonCode: 'NO_ACTIVE_INSTALLATION'
+}
+[DEBUG] Notification push dispatch completed {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef40639cd',
+  type: 'system',
+  requestKey: 'd8f33e1e4c26c41c',
+  reasonCode: 'NO_ACTIVE_INSTALLATION',
+  submitted: 0,
+  accepted: 0,
+  failed: 0,
+  skipped: 0
+}
+✔ unknown registration ACK restores the exact persisted intent after restart without a second Post (46.568625ms)
+[DEBUG] Notification dispatch started {
+  userId: '6ae8b5741fb385aef406384a',
+  type: 'system',
+  requestedInApp: true,
+  requestedPush: true
+}
+[DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef40639f0',
+  type: 'system'
+}
+[DEBUG] Notification durable row prepared {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef40639f0',
+  type: 'system',
+  created: true,
+  refreshed: false,
+  inApp: true,
+  push: true
+}
+[INFO] Expo push skipped before provider submission {
+  recipientId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef40639f0',
+  type: 'system',
+  reasonCode: 'NO_ACTIVE_INSTALLATION'
+}
+[DEBUG] Notification push dispatch completed {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef40639f0',
+  type: 'system',
+  requestKey: '926cbcd5d8e74850',
+  reasonCode: 'NO_ACTIVE_INSTALLATION',
+  submitted: 0,
+  accepted: 0,
+  failed: 0,
+  skipped: 0
+}
+[INFO] Post media published after integrity verification {
+  uploadId: 'cfa0852e-f862-4b08-ba13-a937b505306e',
+  postId: '438b6dfba6d78ed182d9f7d2',
+  userId: '6ae8b5741fb385aef406384a',
+  videos: []
+}
+[DEBUG] Created post: {
+  _id: new ObjectId('438b6dfba6d78ed182d9f7d2'),
+  postType: 'general',
+  achievementInfo: {},
+  author: 'zoro'
+}
+[DEBUG] Notification dispatch started {
+  userId: '6ae8b5741fb385aef406384a',
+  type: 'system',
+  requestedInApp: true,
+  requestedPush: true
+}
+[DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef4063a30',
+  type: 'system'
+}
+[DEBUG] Notification durable row prepared {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef4063a30',
+  type: 'system',
+  created: true,
+  refreshed: false,
+  inApp: true,
+  push: true
+}
+[INFO] Expo push skipped before provider submission {
+  recipientId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef4063a30',
+  type: 'system',
+  reasonCode: 'NO_ACTIVE_INSTALLATION'
+}
+[DEBUG] Notification push dispatch completed {
+  userId: '6ae8b5741fb385aef406384a',
+  notificationId: '6ae8b5751fb385aef4063a30',
+  type: 'system',
+  requestKey: '2e8b97d1c05c768c',
+  reasonCode: 'NO_ACTIVE_INSTALLATION',
+  submitted: 0,
+  accepted: 0,
+  failed: 0,
+  skipped: 0
+}
+✔ failure/retry visibility is owner-bound and terminal notifications follow real state only (67.315584ms)
+[INFO] Post media published after integrity verification {
+  uploadId: '51276d4f-5e71-4b78-a030-d177a55639ac',
+  postId: 'ea44eab054b4c6e76968cd0f',
+  userId: '6ae8b5741fb385aef4063844',
+  videos: []
+}
+[DEBUG] Created post: {
+  _id: new ObjectId('ea44eab054b4c6e76968cd0f'),
+  postType: 'general',
+  achievementInfo: {},
+  author: 'xyz'
+}
+[DEBUG] Notification dispatch started {
+  userId: '6ae8b5741fb385aef4063844',
+  type: 'system',
+  requestedInApp: true,
+  requestedPush: true
+}
+[DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+  userId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5751fb385aef4063a6b',
+  type: 'system'
+}
+[DEBUG] Notification durable row prepared {
+  userId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5751fb385aef4063a6b',
+  type: 'system',
+  created: true,
+  refreshed: false,
+  inApp: true,
+  push: true
+}
+[INFO] Expo push skipped before provider submission {
+  recipientId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5751fb385aef4063a6b',
+  type: 'system',
+  reasonCode: 'NO_ACTIVE_INSTALLATION'
+}
+[DEBUG] Notification push dispatch completed {
+  userId: '6ae8b5741fb385aef4063844',
+  notificationId: '6ae8b5751fb385aef4063a6b',
+  type: 'system',
+  requestKey: '6a502600243ae505',
+  reasonCode: 'NO_ACTIVE_INSTALLATION',
+  submitted: 0,
+  accepted: 0,
+  failed: 0,
+  skipped: 0
+}
+✔ disabled background flag explains foreground behavior but never strands existing accepted intents (47.662333ms)
+✔ completion commits but ACK is lost: resume uses the same accepted session, zero retransfers, then one intent (8.807166ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3094.46075

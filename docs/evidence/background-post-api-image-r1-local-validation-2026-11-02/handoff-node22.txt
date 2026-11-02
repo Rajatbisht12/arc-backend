@@ -1,0 +1,448 @@
+TAP version 13
+# (node:67141) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/supragyagandotra/myCodebase/ARC/artifacts/large-video-android-20261102/source/src/features/post-editor/videoUploadEngine.ts is not specified and it doesn't parse as CommonJS.
+# Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+# To eliminate this warning, add "type": "module" to /Users/supragyagandotra/myCodebase/ARC/artifacts/large-video-android-20261102/source/package.json.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# [INFO] Post media published after integrity verification {
+#   uploadId: '1a2af97d-e501-4b22-9ace-98d176d22635',
+#   postId: '6207d4af4329ee5ca5b5904a',
+#   userId: '6ae8b57425bf520e1ad13391',
+#   videos: []
+# }
+# [DEBUG] Created post: {
+#   _id: new ObjectId('6207d4af4329ee5ca5b5904a'),
+#   postType: 'general',
+#   achievementInfo: {},
+#   author: 'xyz'
+# }
+# [DEBUG] Notification dispatch started {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   type: 'system',
+#   requestedInApp: true,
+#   requestedPush: true
+# }
+# [DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57425bf520e1ad133d6',
+#   type: 'system'
+# }
+# [DEBUG] Notification durable row prepared {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57425bf520e1ad133d6',
+#   type: 'system',
+#   created: true,
+#   refreshed: false,
+#   inApp: true,
+#   push: true
+# }
+# [INFO] Expo push skipped before provider submission {
+#   recipientId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57425bf520e1ad133d6',
+#   type: 'system',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION'
+# }
+# [DEBUG] Notification push dispatch completed {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57425bf520e1ad133d6',
+#   type: 'system',
+#   requestKey: '1f68fe0ad4d32e1c',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION',
+#   submitted: 0,
+#   accepted: 0,
+#   failed: 0,
+#   skipped: 0
+# }
+# Subtest: xyz direct: durable intent survives composer abort, app restart and duplicate worker callbacks
+ok 1 - xyz direct: durable intent survives composer abort, app restart and duplicate worker callbacks
+  ---
+  duration_ms: 1710.915791
+  type: 'test'
+  ...
+# [INFO] Post media published after integrity verification {
+#   uploadId: 'cab64088-5a1b-4a7b-a887-09b5c9dee650',
+#   postId: '6b45daea909d5457e2db0788',
+#   userId: '6ae8b57425bf520e1ad13391',
+#   videos: []
+# }
+# [DEBUG] Created post: {
+#   _id: new ObjectId('6b45daea909d5457e2db0788'),
+#   postType: 'general',
+#   achievementInfo: {},
+#   author: 'xyz'
+# }
+# [DEBUG] Notification dispatch started {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   type: 'system',
+#   requestedInApp: true,
+#   requestedPush: true
+# }
+# [DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57525bf520e1ad13427',
+#   type: 'system'
+# }
+# [DEBUG] Notification durable row prepared {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57525bf520e1ad13427',
+#   type: 'system',
+#   created: true,
+#   refreshed: false,
+#   inApp: true,
+#   push: true
+# }
+# [INFO] Expo push skipped before provider submission {
+#   recipientId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57525bf520e1ad13427',
+#   type: 'system',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION'
+# }
+# [DEBUG] Notification push dispatch completed {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57525bf520e1ad13427',
+#   type: 'system',
+#   requestKey: '1e8e9752b7acd395',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION',
+#   submitted: 0,
+#   accepted: 0,
+#   failed: 0,
+#   skipped: 0
+# }
+# Subtest: xyz prepared: durable intent survives composer abort, app restart and duplicate worker callbacks
+ok 2 - xyz prepared: durable intent survives composer abort, app restart and duplicate worker callbacks
+  ---
+  duration_ms: 76.501083
+  type: 'test'
+  ...
+# [INFO] Post media published after integrity verification {
+#   uploadId: '863cc03a-e9db-4b8e-ad18-9bb2c1a2c0b5',
+#   postId: '8752e5fe9c1f6f9c8347becb',
+#   userId: '6ae8b57425bf520e1ad13397',
+#   videos: []
+# }
+# [DEBUG] Created post: {
+#   _id: new ObjectId('8752e5fe9c1f6f9c8347becb'),
+#   postType: 'general',
+#   achievementInfo: {},
+#   author: 'zoro'
+# }
+# [DEBUG] Notification dispatch started {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   type: 'system',
+#   requestedInApp: true,
+#   requestedPush: true
+# }
+# [DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad13478',
+#   type: 'system'
+# }
+# [DEBUG] Notification durable row prepared {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad13478',
+#   type: 'system',
+#   created: true,
+#   refreshed: false,
+#   inApp: true,
+#   push: true
+# }
+# [INFO] Expo push skipped before provider submission {
+#   recipientId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad13478',
+#   type: 'system',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION'
+# }
+# [DEBUG] Notification push dispatch completed {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad13478',
+#   type: 'system',
+#   requestKey: 'b5d39e9ed9bb1e6a',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION',
+#   submitted: 0,
+#   accepted: 0,
+#   failed: 0,
+#   skipped: 0
+# }
+# Subtest: zoro direct: durable intent survives composer abort, app restart and duplicate worker callbacks
+ok 3 - zoro direct: durable intent survives composer abort, app restart and duplicate worker callbacks
+  ---
+  duration_ms: 59.217292
+  type: 'test'
+  ...
+# [INFO] Post media published after integrity verification {
+#   uploadId: 'e06a50b7-ca23-4dcf-acd6-3ab406a07676',
+#   postId: 'f4ba9c03e6c3550220e3feb4',
+#   userId: '6ae8b57425bf520e1ad13397',
+#   videos: []
+# }
+# [DEBUG] Created post: {
+#   _id: new ObjectId('f4ba9c03e6c3550220e3feb4'),
+#   postType: 'general',
+#   achievementInfo: {},
+#   author: 'zoro'
+# }
+# [DEBUG] Notification dispatch started {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   type: 'system',
+#   requestedInApp: true,
+#   requestedPush: true
+# }
+# [DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad134c9',
+#   type: 'system'
+# }
+# [DEBUG] Notification durable row prepared {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad134c9',
+#   type: 'system',
+#   created: true,
+#   refreshed: false,
+#   inApp: true,
+#   push: true
+# }
+# [INFO] Expo push skipped before provider submission {
+#   recipientId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad134c9',
+#   type: 'system',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION'
+# }
+# [DEBUG] Notification push dispatch completed {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad134c9',
+#   type: 'system',
+#   requestKey: 'fa2e227be7497c7e',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION',
+#   submitted: 0,
+#   accepted: 0,
+#   failed: 0,
+#   skipped: 0
+# }
+# Subtest: zoro prepared: durable intent survives composer abort, app restart and duplicate worker callbacks
+ok 4 - zoro prepared: durable intent survives composer abort, app restart and duplicate worker callbacks
+  ---
+  duration_ms: 60.192708
+  type: 'test'
+  ...
+# Subtest: 100% transport without completion ACK does not create a Pending Post or claim handoff
+ok 5 - 100% transport without completion ACK does not create a Pending Post or claim handoff
+  ---
+  duration_ms: 5.220375
+  type: 'test'
+  ...
+# [INFO] Post media published after integrity verification {
+#   uploadId: '50682a88-c6da-436b-b2c1-e30aa91c6803',
+#   postId: '654fbdebea1e9e1e956d24f2',
+#   userId: '6ae8b57425bf520e1ad13397',
+#   videos: []
+# }
+# [DEBUG] Created post: {
+#   _id: new ObjectId('654fbdebea1e9e1e956d24f2'),
+#   postType: 'general',
+#   achievementInfo: {},
+#   author: 'zoro'
+# }
+# [DEBUG] Notification dispatch started {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   type: 'system',
+#   requestedInApp: true,
+#   requestedPush: true
+# }
+# [DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1351a',
+#   type: 'system'
+# }
+# [DEBUG] Notification durable row prepared {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1351a',
+#   type: 'system',
+#   created: true,
+#   refreshed: false,
+#   inApp: true,
+#   push: true
+# }
+# [INFO] Expo push skipped before provider submission {
+#   recipientId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1351a',
+#   type: 'system',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION'
+# }
+# [DEBUG] Notification push dispatch completed {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1351a',
+#   type: 'system',
+#   requestKey: '6f3f8e0045ac11e9',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION',
+#   submitted: 0,
+#   accepted: 0,
+#   failed: 0,
+#   skipped: 0
+# }
+# Subtest: unknown registration ACK restores the exact persisted intent after restart without a second Post
+ok 6 - unknown registration ACK restores the exact persisted intent after restart without a second Post
+  ---
+  duration_ms: 52.26225
+  type: 'test'
+  ...
+# [DEBUG] Notification dispatch started {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   type: 'system',
+#   requestedInApp: true,
+#   requestedPush: true
+# }
+# [DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1353d',
+#   type: 'system'
+# }
+# [DEBUG] Notification durable row prepared {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1353d',
+#   type: 'system',
+#   created: true,
+#   refreshed: false,
+#   inApp: true,
+#   push: true
+# }
+# [INFO] Expo push skipped before provider submission {
+#   recipientId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1353d',
+#   type: 'system',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION'
+# }
+# [DEBUG] Notification push dispatch completed {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1353d',
+#   type: 'system',
+#   requestKey: '1338ffdfa55d397c',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION',
+#   submitted: 0,
+#   accepted: 0,
+#   failed: 0,
+#   skipped: 0
+# }
+# [INFO] Post media published after integrity verification {
+#   uploadId: 'f3def10d-5a72-4d1e-aa24-92546c3e6c08',
+#   postId: 'be97271bc98357c5b5efd457',
+#   userId: '6ae8b57425bf520e1ad13397',
+#   videos: []
+# }
+# [DEBUG] Created post: {
+#   _id: new ObjectId('be97271bc98357c5b5efd457'),
+#   postType: 'general',
+#   achievementInfo: {},
+#   author: 'zoro'
+# }
+# [DEBUG] Notification dispatch started {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   type: 'system',
+#   requestedInApp: true,
+#   requestedPush: true
+# }
+# [DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1357d',
+#   type: 'system'
+# }
+# [DEBUG] Notification durable row prepared {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1357d',
+#   type: 'system',
+#   created: true,
+#   refreshed: false,
+#   inApp: true,
+#   push: true
+# }
+# [INFO] Expo push skipped before provider submission {
+#   recipientId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1357d',
+#   type: 'system',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION'
+# }
+# [DEBUG] Notification push dispatch completed {
+#   userId: '6ae8b57425bf520e1ad13397',
+#   notificationId: '6ae8b57525bf520e1ad1357d',
+#   type: 'system',
+#   requestKey: 'f5073dd9fa6e5809',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION',
+#   submitted: 0,
+#   accepted: 0,
+#   failed: 0,
+#   skipped: 0
+# }
+# Subtest: failure/retry visibility is owner-bound and terminal notifications follow real state only
+ok 7 - failure/retry visibility is owner-bound and terminal notifications follow real state only
+  ---
+  duration_ms: 70.201667
+  type: 'test'
+  ...
+# [INFO] Post media published after integrity verification {
+#   uploadId: '666263b7-7429-461c-b005-9119b0115855',
+#   postId: '3b294917d849fb14622b2cce',
+#   userId: '6ae8b57425bf520e1ad13391',
+#   videos: []
+# }
+# [DEBUG] Created post: {
+#   _id: new ObjectId('3b294917d849fb14622b2cce'),
+#   postType: 'general',
+#   achievementInfo: {},
+#   author: 'xyz'
+# }
+# [DEBUG] Notification dispatch started {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   type: 'system',
+#   requestedInApp: true,
+#   requestedPush: true
+# }
+# [DEBUG] Notification socket emit skipped: Socket.IO unavailable {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57525bf520e1ad135b8',
+#   type: 'system'
+# }
+# [DEBUG] Notification durable row prepared {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57525bf520e1ad135b8',
+#   type: 'system',
+#   created: true,
+#   refreshed: false,
+#   inApp: true,
+#   push: true
+# }
+# [INFO] Expo push skipped before provider submission {
+#   recipientId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57525bf520e1ad135b8',
+#   type: 'system',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION'
+# }
+# [DEBUG] Notification push dispatch completed {
+#   userId: '6ae8b57425bf520e1ad13391',
+#   notificationId: '6ae8b57525bf520e1ad135b8',
+#   type: 'system',
+#   requestKey: '133b7e1c599b73eb',
+#   reasonCode: 'NO_ACTIVE_INSTALLATION',
+#   submitted: 0,
+#   accepted: 0,
+#   failed: 0,
+#   skipped: 0
+# }
+# Subtest: disabled background flag explains foreground behavior but never strands existing accepted intents
+ok 8 - disabled background flag explains foreground behavior but never strands existing accepted intents
+  ---
+  duration_ms: 41.76525
+  type: 'test'
+  ...
+# Subtest: completion commits but ACK is lost: resume uses the same accepted session, zero retransfers, then one intent
+ok 9 - completion commits but ACK is lost: resume uses the same accepted session, zero retransfers, then one intent
+  ---
+  duration_ms: 10.340291
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3018.334375

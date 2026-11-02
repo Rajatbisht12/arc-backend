@@ -1,0 +1,14 @@
+{
+  "sourceContentSha256": "e753a460c3b3576be6d4b1c975b6bbab806203a6664c5a958712984b67f49fb2",
+  "imageControllerSourceBootstrapTestsPerNode": 22,
+  "candidateHandoffCasesPerNode": 9,
+  "nodeVersions": [
+    22,
+    26
+  ],
+  "compiledSourcePassed": true,
+  "runtimeImportCheckPassed": true,
+  "mobileApplicationChanged": false,
+  "publishedImageBuilt": false,
+  "productionBackgroundDevicePostSubmitted": false
+}

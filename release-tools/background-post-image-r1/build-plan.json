@@ -1,0 +1,107 @@
+{
+  "kind": "BACKGROUND_POST_BOOTSTRAP_IMAGE_PUBLICATION_UNAPPROVED",
+  "runId": "pi-background-post-api-r1-20261102",
+  "repository": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend",
+  "tag": "pi-background-post-api-r1-20261102",
+  "sourceFiles": 759,
+  "sourceContentSha256": "e753a460c3b3576be6d4b1c975b6bbab806203a6664c5a958712984b67f49fb2",
+  "sourceArchiveSha256": "3ec0cb59c876533f995026663c3a760ca17aa01f5bd450da157b9ee3e03b8dde",
+  "controls": [
+    {
+      "path": "local.cjs",
+      "sha256": "91cb02b7cf46a829332490654129c2268280be7ca1d150bb4fd51a32b5e093bd"
+    },
+    {
+      "path": "build-once.cjs",
+      "sha256": "24f41f51aa496d4740e76882b0e992da30d37083dbf744771f4b4025dea87752"
+    },
+    {
+      "path": "verify.cjs",
+      "sha256": "65f9b65cc5f6db49f91a61f20f6d4262069487b023260678425b426dc6a0f5a9"
+    },
+    {
+      "path": "controls.test.cjs",
+      "sha256": "872f57160ca158e1269cb2d602f58c79a5b7572083158a3e2721e6877351a904"
+    },
+    {
+      "path": "artifact.PROPOSED.json",
+      "sha256": "0d8cd286a3e0ce654e57641719810e7815def28cb8698a85351b375c041d6315"
+    },
+    {
+      "path": "source.cjs",
+      "sha256": "e5d2f5ce69dfed87e025a07f8b3ccbadc541d5723a1db700a3584e8db04df6aa"
+    },
+    {
+      "path": "source.test.cjs",
+      "sha256": "c265209a703480518a3ee9c93ebb0159760b416a186a3e11f58379700b40c9f9"
+    },
+    {
+      "path": "bootstrap.test.cjs",
+      "sha256": "dbe5cb50d3a6f20310cd3ced670a26dd143d31b23a2efe9cc92eb468ca4cf5d1"
+    },
+    {
+      "path": "prepare-plan.cjs",
+      "sha256": "0e016e0551141ab2e65c52e859e31f2aa2253e81c71808f8a211806bd19af42d"
+    },
+    {
+      "path": "release/candidate.json",
+      "sha256": "94421ebe646ad38c06896686c0c3ae6dd4432184cfa9980bb482db7cd1d819fc"
+    },
+    {
+      "path": "release/source-manifest.json",
+      "sha256": "7208657c90cfa63ee08d40dbfd4b011e434d49f8666fbb5a48d41ca044ed0bc8"
+    },
+    {
+      "path": "release/source.zip",
+      "sha256": "3ec0cb59c876533f995026663c3a760ca17aa01f5bd450da157b9ee3e03b8dde"
+    },
+    {
+      "path": "release/overrides/src/config/secrets.ts",
+      "sha256": "91bca51dd64a440576d4d7b9add8318086cd42c1d645389929c7ab5f7dec2c18"
+    },
+    {
+      "path": "overrides/src/config/secrets.ts",
+      "sha256": "91bca51dd64a440576d4d7b9add8318086cd42c1d645389929c7ab5f7dec2c18"
+    }
+  ],
+  "buildInputs": {
+    "dockerfileSha256": "6f26ef93336be4d14f00bd23bf2353ae8e3d00b384f7dbe697dcabac3e36aeed",
+    "dockerignoreSha256": "43891cadd0f816f36013ecc20482aeeb79e6c002f532b36b116c04c398f3f019",
+    "packageJsonSha256": "601e7b187700465b226736a4366e3231977b6282c87c3c00f48c87f66d8777ab",
+    "packageLockSha256": "71939d2237a8b20704503a9a04e8dc270a5f907003c3c87ad25cb1fb698fd7b1",
+    "baseImage": "node:22.23.4-alpine3.23@sha256:9fee3a1d85a49993660c8ffc774ceafadc0b52eda69b4c981f6b6a1cfabcfe98",
+    "ffmpegPackage": "8.0.1-r1",
+    "caBundleUrl": "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+  },
+  "platform": "linux/amd64",
+  "operatorPlatform": "Windows",
+  "dockerContext": "desktop-linux",
+  "allowedDrivers": [
+    "docker",
+    "docker-container"
+  ],
+  "nodeName": "desktop-linux",
+  "nodeEndpoint": "desktop-linux",
+  "headResolver": "CLEAN_MERGED_CARRIER_HEAD_LABEL_ONLY_V1",
+  "builderResolver": "EXISTING_SINGLE_LOCAL_DOCKER_DRIVER_ALLOWLIST_V1",
+  "maximumAwsReadAttempts": 3,
+  "maximumBuildPushInvocations": 1,
+  "maximumRegistryIndexReads": 1,
+  "approvalMinutes": 30,
+  "buildCommandSeconds": 900,
+  "otherCommandSeconds": 30,
+  "responseBytes": 1048576,
+  "tagEvidenceFreshnessSeconds": 300,
+  "remainingDeploymentAuthority": 0,
+  "workerAuthority": 0,
+  "ledgerAuthority": 0,
+  "eligibilityAuthority": 0,
+  "unknownAcknowledgement": "HOLD_NO_RETRY",
+  "unapprovedCleanup": 0,
+  "hardBillingCapClaimed": false,
+  "parentPublishedSource": "d328315d548254f7b51cff001c64e8d931fa8da2f4a4a6d30803be9864617f21",
+  "changedApplicationPaths": [
+    "src/config/secrets.ts"
+  ],
+  "backgroundActivationAuthority": 0
+}
