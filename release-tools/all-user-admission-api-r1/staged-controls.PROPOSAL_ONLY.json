@@ -1,0 +1,25 @@
+{
+  "kind": "GUARDED_API_ENVIRONMENT_PROPOSAL_NOT_REGISTRATION_AUTHORITY",
+  "parent": "FRESH_COMPLETE_LIVE_API220_CONFIGURATION_REQUIRED",
+  "image": null,
+  "taskDefinitionArn": null,
+  "serviceRequest": null,
+  "environment": {
+    "POST_VIDEO_ROLLOUT_MODE": "all",
+    "POST_VIDEO_CANARY_USER_IDS": "",
+    "POST_VIDEO_UPLOADS_ENABLED": "false",
+    "POST_VIDEO_GLOBAL_ADMISSION_ENABLED": "true",
+    "POST_VIDEO_ADMISSION_BOOTSTRAP_MODE": "task-bound-api-v1",
+    "POST_VIDEO_BACKGROUND_PUBLISH_ENABLED": "false",
+    "POST_VIDEO_PRIVATE_LEGACY_ENABLED": "false",
+    "POST_VIDEO_FAIR_SCHEDULING_ENABLED": "false",
+    "CLIP_HLS_WORKER_ENABLED": "false",
+    "POST_VIDEO_PRIVATE_DELIVERY_ENABLED": "true"
+  },
+  "costAdmission": "EXISTING_LEDGER_REMAINS_CLOSED_NO_UPDATE_AUTHORITY",
+  "normalTelemetryWritesRequireLaterDeploymentApproval": true,
+  "manualHoldMustRemainCharged": true,
+  "registrationAuthority": 0,
+  "serviceUpdateAuthority": 0,
+  "openingAuthority": 0
+}

@@ -1,0 +1,230 @@
+--- a/src/legacy-src/services/videoUploadService.js
++++ b/src/legacy-src/services/videoUploadService.js
+@@ -90,6 +90,7 @@
+         const active = await Session.find({ owner, postId: null, status: { $nin: ['CANCELLED', 'EXPIRED'] }, expiresAt: { $gt: new Date() } }).limit(MAX_VIDEOS + 1).select('size');
+         if (active.length >= MAX_VIDEOS || active.reduce((sum, row) => sum + row.size, data.size) > MAX_POST_VIDEO_BYTES) throw uploadError('UPLOAD_QUOTA', 'Finish or cancel existing video uploads before adding more. Videos may total up to 1 GB per post.', 429);
+         const _id = new mongoose.Types.ObjectId();
++        await require('./videoGlobalAdmission').reserve({ owner, sessionId: _id, clientUploadId: data.clientUploadId, bytes: data.size });
+         await require('../utils/jobQueue').assertVideoProcessingAdmission(owner, _id);
+         try { session = await Session.create({ _id, owner, ...data, objectKey: `post-video-sources/${owner}/${_id}/source.${data.extension}`, expiresAt: new Date(Date.now() + TTL_MS), status: 'CREATED' }); }
+         catch (error) { await require('../utils/jobQueue').assertVideoProcessingAdmission(owner, _id, true).catch(() => {}); throw error; }
+--- /dev/null
++++ b/src/legacy-src/services/videoGlobalAdmission.js
+@@ -0,0 +1,112 @@
++'use strict';
++const mongoose = require('mongoose');
++const { readVideoQueueMetrics } = require('../../infrastructure/jobs/videoQueueMetrics');
++const { uploadError, MAX_VIDEO_BYTES, MAX_POST_VIDEO_BYTES, UUID } = require('../utils/postVideoPolicy');
++const KEY = 'video-global-admission:v1';
++const LIMITS = Object.freeze({ pending: 40, bytes: 10 * 1024 ** 3, workSeconds: 14400, unknownWorkSeconds: 1800, ownerSessions: 5, ownerBytes: MAX_POST_VIDEO_BYTES, queueDepth: 40, queueAgeSeconds: 300, telemetryMs: 20000 });
++const oid = x => /^[a-f0-9]{24}$/.test(String(x));
++const stopped = () => uploadError('VIDEO_GLOBAL_ADMISSION_HELD', 'Video capacity is temporarily unavailable. Existing uploads and posts are preserved. Please try again later.', 503);
++const capacity = () => uploadError('VIDEO_GLOBAL_CAPACITY', 'Video processing is at capacity. Existing uploads are preserved. Please try again later.', 429);
++// The sole document is a bounded durable ledger. All counters and membership
++// change atomically; no TTL or Redis eviction can release accepted work.
++function initialDocument({ reviewReference, costUntil, reservations = [], now = Date.now() }) {
++  if (!/^[a-f0-9]{64}$/.test(reviewReference || '') || !Number.isFinite(costUntil) || costUntil <= now || costUntil > now + 86400000 || reservations.length) throw stopped();
++  // Empty initialization requires a separate fresh native zero-reservation
++  // audit/review. This function returns bytes only and never writes/bootstraps.
++  return { _id: KEY, version: 1, limits: LIMITS, revision: 0, reservations: [], owners: {}, count: 0, bytes: 0, workSeconds: 0,
++    admissionOpen: false, costOpen: false, costUntil: new Date(costUntil), reviewReference, telemetryValid: false, telemetryAt: new Date(0), oldestQueuedAgeSeconds: null, queueOutstanding: null };
++}
++function create({ collection = () => mongoose.connection.collection('videoglobaladmission'), now = Date.now, env = process.env, readMetrics = readVideoQueueMetrics } = {}) {
++  let telemetryHeld = false;
++  const db = () => typeof collection === 'function' ? collection() : collection;
++  const enabled = () => { if (env.POST_VIDEO_GLOBAL_ADMISSION_ENABLED !== 'true') throw stopped(); };
++  const find = query => db().findOne(query, { readPreference: 'primary', maxTimeMS: 5000 });
++  const same = (r, x) => r.sessionId === x.sessionId && r.owner === x.owner && r.clientUploadId === x.clientUploadId && r.bytes === x.bytes;
++  function validLedger(d) {
++    if (!d || d.version !== 1 || !Array.isArray(d.reservations) || d.reservations.length > LIMITS.pending || !Number.isSafeInteger(d.revision) || d.revision < 0 || !d.owners || typeof d.owners !== 'object') return false;
++    const owners = {}, ids = new Set(), clients = new Set(); let bytes = 0, work = 0;
++    for (const r of d.reservations) {
++      const client = r.owner + ':' + r.clientUploadId;
++      if ((r.manualHold !== undefined && r.manualHold !== true) || !oid(r.owner) || !oid(r.sessionId) || !UUID.test(r.clientUploadId || '') || ids.has(r.sessionId) || clients.has(client) || !Number.isSafeInteger(r.bytes) || r.bytes <= 0 || r.bytes > MAX_VIDEO_BYTES || r.workSeconds !== LIMITS.unknownWorkSeconds) return false;
++      ids.add(r.sessionId); clients.add(client); bytes += r.bytes; work += r.workSeconds;
++      const o = owners[r.owner] ||= { count: 0, bytes: 0 }; o.count++; o.bytes += r.bytes;
++    }
++    return d.count === d.reservations.length && d.bytes === bytes && d.workSeconds === work && bytes <= LIMITS.bytes && work <= LIMITS.workSeconds && Object.entries(owners).every(([id,o]) => o.count <= LIMITS.ownerSessions && o.bytes <= LIMITS.ownerBytes && d.owners[id]?.count === o.count && d.owners[id]?.bytes === o.bytes) && Object.entries(d.owners).every(([id,o]) => oid(id) && (owners[id] || o.count === 0 && o.bytes === 0));
++  }
++  async function reserve({ owner, sessionId, clientUploadId, bytes }) {
++    enabled(); owner = String(owner); sessionId = String(sessionId);
++    if (!oid(owner) || !oid(sessionId) || !UUID.test(clientUploadId || '') || !Number.isSafeInteger(bytes) || bytes <= 0 || bytes > MAX_VIDEO_BYTES) throw stopped();
++    const x = { owner, sessionId, clientUploadId, bytes, workSeconds: LIMITS.unknownWorkSeconds, reservedAt: new Date(now()) };
++    const ledger = await find({ _id: KEY });
++    if (!validLedger(ledger)) throw stopped();
++    const prior = ledger.reservations.find(r => r.sessionId === sessionId);
++    if (prior) { if (!same(prior, x)) throw uploadError('GLOBAL_RESERVATION_ID_CONFLICT', 'Video reservation identity changed.', 409); return { reserved: true, reused: true }; }
++    // A known collector failure must close this process even if persisting the
++    // shared invalidation failed or its acknowledgement is unknown. Exact
++    // accepted replay above remains available without allocating more work.
++    if (telemetryHeld) throw stopped();
++    let result;
++    try {
++      result = await db().findOneAndUpdate({ _id: KEY, version: 1, limits: LIMITS, admissionOpen: true, costOpen: true, costUntil: { $gt: new Date(now()) }, telemetryValid: true,
++        telemetryAt: { $gte: new Date(now() - LIMITS.telemetryMs), $lte: new Date(now()) }, oldestQueuedAgeSeconds: { $lt: LIMITS.queueAgeSeconds }, queueOutstanding: { $lt: LIMITS.queueDepth },
++        count: { $gte: 0, $lt: LIMITS.pending }, bytes: { $gte: 0, $lte: LIMITS.bytes - bytes }, workSeconds: { $gte: 0, $lte: LIMITS.workSeconds - x.workSeconds },
++        ['owners.' + owner + '.count']: { $not: { $gte: LIMITS.ownerSessions } }, ['owners.' + owner + '.bytes']: { $not: { $gt: LIMITS.ownerBytes - bytes } },
++        reservations: { $not: { $elemMatch: { $or: [{ sessionId }, { owner, clientUploadId }] } } },
++      }, { $push: { reservations: x }, $inc: { revision: 1, count: 1, bytes, workSeconds: x.workSeconds, ['owners.' + owner + '.count']: 1, ['owners.' + owner + '.bytes']: bytes } }, { returnDocument: 'after', maxTimeMS: 5000 });
++    } catch { throw stopped(); } // Lost ack remains reserved/unknown; never blindly compensate.
++    if (result) return { reserved: true, reused: false };
++    const current = await find({ _id: KEY });
++    const raced = current?.reservations?.find(r => r.sessionId === sessionId);
++    if (raced && same(raced, x)) return { reserved: true, reused: true };
++    if (!current || !current.admissionOpen || !current.costOpen || !current.telemetryValid || now() - new Date(current.telemetryAt).getTime() > LIMITS.telemetryMs || new Date(current.costUntil).getTime() <= now()) throw stopped();
++    throw capacity();
++  }
++  async function telemetry(queue) {
++    if (env.POST_VIDEO_GLOBAL_ADMISSION_ENABLED !== 'true') return;
++    try {
++      // Read the same typed, stable full membership used by the read-only
++      // scaling collector. Missing counts and transitional reads cannot become
++      // zero backlog. Queue construction/claim behaviour is unchanged here.
++      const metrics = await readMetrics(await queue.client, { now });
++      const observed = new Date(metrics.checkedAt).getTime();
++      if (metrics.collectorHealthy !== 1 || metrics.queuePaused !== 0 || !Number.isFinite(observed) || observed > now() || now() - observed > LIMITS.telemetryMs || !Number.isSafeInteger(metrics.outstandingJobs) || metrics.outstandingJobs < 0 || !Number.isFinite(metrics.oldestQueuedAgeSeconds) || metrics.oldestQueuedAgeSeconds < 0) throw stopped();
++      const result = await db().updateOne({ _id: KEY, version: 1 }, { $set: { telemetryAt: new Date(observed), telemetryValid: true, oldestQueuedAgeSeconds: metrics.oldestQueuedAgeSeconds, queueOutstanding: metrics.outstandingJobs }, $inc: { revision: 1 } }, { maxTimeMS: 5000 });
++      if (result?.matchedCount !== 1) throw stopped();
++      telemetryHeld = false;
++    } catch {
++      telemetryHeld = true;
++      await db().updateOne({ _id: KEY }, { $set: { telemetryValid: false }, $inc: { revision: 1 } }, { maxTimeMS: 5000 }).catch(() => {});
++      throw stopped();
++    }
++  }
++  async function reconcile({ sessions, posts, intents, queue }) {
++    if (env.POST_VIDEO_GLOBAL_ADMISSION_ENABLED !== 'true') return { released: 0 };
++    const ledger = await find({ _id: KEY }); if (!validLedger(ledger)) throw stopped();
++    let released = 0;
++    for (const r of ledger.reservations) {
++      // Imported unresolved obligations remain charged until a separate exact
++      // disposition clears the hold; ordinary terminal reconciliation cannot.
++      if (r.manualHold === true) continue;
++      const s = await sessions.findOne({ _id: r.sessionId, owner: r.owner, clientUploadId: r.clientUploadId }).read('primary').lean();
++      if (!s || s.size !== r.bytes || s.status === 'PROCESSING' || [s.leaseExpiresAt, s.completionLeaseExpiresAt].some(t => t && new Date(t).getTime() > now())) continue;
++      const pending = await intents.exists({ owner: r.owner, sessionIds: s._id, $or: [{ status: { $in: ['PENDING', 'PUBLISHING'] } }, { leaseExpiresAt: { $gt: new Date(now()) } }] }); if (pending) continue;
++      const publicationIds = [s.postId, s.claimedPostId].filter(Boolean);
++      if (publicationIds.length && await mongoose.connection.collection('videopostpublications').findOne({ _id: { $in: publicationIds }, expiresAt: { $gt: new Date(now()) } }, { readPreference: 'primary' })) continue;
++      const published = s.status === 'READY' && s.postId && await posts.exists({ _id: s.postId, author: r.owner, 'content.media.uploadSessionId': s._id });
++      const cleaned = ['CANCELLED', 'EXPIRED'].includes(s.status) && s.cleanedAt && s.sourceCleanedAt && !s.postId && !s.claimedPostId;
++      if (!published && !cleaned) continue;
++      let unsafe = false;
++      for (let n = 0; n <= 3; n++) { const job = await queue.getJob('video-upload-' + r.sessionId + '-' + n); if (job && !['completed', 'failed'].includes(await job.getState())) unsafe = true; }
++      // Fair-scheduler tickets are an independent potential owner of work.
++      if (await mongoose.connection.collection('videoprocessingtickets').findOne({ _id: s._id, state: { $in: ['UPLOADING', 'PROBING', 'WAITING', 'DISPATCHED'] } }, { readPreference: 'primary' })) unsafe = true;
++      if (unsafe) continue;
++      const out = await db().updateOne({ _id: KEY, reservations: { $elemMatch: { sessionId: r.sessionId, owner: r.owner, clientUploadId: r.clientUploadId, bytes: r.bytes } } },
++        { $pull: { reservations: { sessionId: r.sessionId } }, $inc: { revision: 1, count: -1, bytes: -r.bytes, workSeconds: -r.workSeconds, ['owners.' + r.owner + '.count']: -1, ['owners.' + r.owner + '.bytes']: -r.bytes } }, { maxTimeMS: 5000 });
++      released += out.modifiedCount;
++    }
++    return { released };
++  }
++  return { reserve, telemetry, reconcile };
++}
++const service = create();
++module.exports = { KEY, LIMITS, initialDocument, create, ...service };
+--- /dev/null
++++ b/src/infrastructure/jobs/videoQueueMetrics.js
+@@ -0,0 +1,21 @@
++'use strict';
++// Dedicated read-only collector. Do not import BullMQ Queue/Worker or scheduler.
++const { createHash } = require('node:crypto');
++const PREFIX='bull:clip-video:',STATES=Object.freeze({wait:'list',paused:'list',active:'list',delayed:'zset',prioritized:'zset','waiting-children':'zset'});
++const check=(v,code)=>{if(!v)throw Object.assign(new Error(code),{code});};
++const signature=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
++function response(rows){check(Array.isArray(rows)&&rows.every(r=>Array.isArray(r)&&r.length===2&&!r[0]),'METRICS_READ_FAILED');return rows.map(r=>r[1]);}
++async function membership(redis,limit){
++ const batch=redis.multi();for(const[state,type]of Object.entries(STATES)){batch.type(PREFIX+state);if(type==='list')batch.lrange(PREFIX+state,0,limit);else batch.zrange(PREFIX+state,0,limit);}batch.type(PREFIX+'meta');batch.hget(PREFIX+'meta','paused');
++ const r=response(await batch.exec()),out={};let n=0;for(const[state,type]of Object.entries(STATES)){const observedType=r[n++],ids=r[n++];check(observedType==='none'||observedType===type,'METRICS_QUEUE_KEY_TYPE');check(Array.isArray(ids)&&ids.length<=limit&&ids.every(id=>typeof id==='string'&&id.length>0&&id.length<=512),'METRICS_INVENTORY_BOUND');out[state]=ids;}
++ check(['none','hash'].includes(r[n++]),'METRICS_META_KEY_TYPE');const flag=r[n];check(flag===null||flag==='1','METRICS_PAUSE_STATE');out.queuePaused=flag==='1';check(out.queuePaused?out.wait.length===0:out.paused.length===0,'METRICS_PAUSE_MEMBERSHIP_INCONSISTENT');
++ const all=Object.keys(STATES).flatMap(k=>out[k]);check(new Set(all).size===all.length,'METRICS_DUPLICATE_MEMBERSHIP');return out;
++}
++async function readVideoQueueMetrics(redis,{now=Date.now,maximumJobsPerState=1000,maximumReadMs=2000}={}){
++ check(Number.isInteger(maximumJobsPerState)&&maximumJobsPerState>=1&&maximumJobsPerState<=1000,'METRICS_READER_BOUND');const started=now(),first=await membership(redis,maximumJobsPerState);
++ const waiting=['wait','paused','delayed','prioritized','waiting-children'].flatMap(k=>first[k]);let times=[];
++ if(waiting.length){const batch=redis.multi();for(const id of waiting){batch.type(PREFIX+id);batch.hget(PREFIX+id,'timestamp');}const rows=response(await batch.exec());for(let i=0;i<rows.length;i+=2){check(rows[i]==='hash','METRICS_JOB_HASH_MISSING');const t=Number(rows[i+1]);check(rows[i+1]!==null&&Number.isFinite(t)&&t>0&&t<=now()+1000,'METRICS_JOB_TIMESTAMP_INVALID');times.push(t);}}
++ const last=await membership(redis,maximumJobsPerState),checkedAt=now();check(checkedAt>=started&&checkedAt-started<=maximumReadMs,'METRICS_READ_TOO_SLOW');check(signature(first)===signature(last),'METRICS_MEMBERSHIP_CHANGED');
++ const waitingJobs=waiting.length,activeJobs=last.active.length,oldestQueuedAgeSeconds=times.length?Math.floor(Math.max(0,checkedAt-Math.min(...times))/1000):0;return{event:'video_queue_metrics_v1',checkedAt:new Date(checkedAt).toISOString(),readDurationMs:checkedAt-started,queue:'clip-video',waitingJobs,activeJobs,delayedRetryJobs:last.delayed.length,prioritizedJobs:last.prioritized.length,waitingChildrenJobs:last['waiting-children'].length,outstandingJobs:waitingJobs+activeJobs,oldestQueuedAgeSeconds,queuePaused:last.queuePaused?1:0,collectorHealthy:1,...(!last.queuePaused?{scaleOutOutstandingJobs:waitingJobs+activeJobs,scaleOutOldestQueuedAgeSeconds:oldestQueuedAgeSeconds}:{}),source:'DIRECT_REDIS_READONLY_NO_QUEUE_CONSTRUCTOR',nativeReadOnly:true,applicationWrites:0,queueWrites:0};
++}
++module.exports={readVideoQueueMetrics};
+--- a/src/config/secrets.ts
++++ b/src/config/secrets.ts
+@@ -11,6 +11,17 @@
+ export const loadSecretsManagerEnv = async (): Promise<void> => {
+   const target = runtimeSecretTarget(process.env);
+   if (!target.load) { assertRuntimeIsolation(process.env); return; }
++  const admissionBootstrap = process.env.POST_VIDEO_ADMISSION_BOOTSTRAP_MODE;
++  const taskBoundAdmission = admissionBootstrap === 'task-bound-api-v1';
++  if (admissionBootstrap !== undefined && (!taskBoundAdmission || target.deployment !== 'production'
++      || process.env.NODE_ENV !== 'production' || process.env.VIDEO_DEPLOYMENT_MODE === 'compatibility'
++      || process.env.CLIP_HLS_WORKER_ENABLED !== 'false' || process.env.POST_VIDEO_GLOBAL_ADMISSION_ENABLED !== 'true'
++      || process.env.POST_VIDEO_FAIR_SCHEDULING_ENABLED !== 'false' || process.env.POST_VIDEO_PRIVATE_DELIVERY_ENABLED !== 'true'
++      || process.env.POST_VIDEO_ROLLOUT_MODE !== 'all' || process.env.POST_VIDEO_CANARY_USER_IDS !== ''
++      || !['true', 'false'].includes(process.env.POST_VIDEO_UPLOADS_ENABLED || '')
++      || process.env.POST_VIDEO_BACKGROUND_PUBLISH_ENABLED !== 'false' || process.env.POST_VIDEO_PRIVATE_LEGACY_ENABLED !== 'false')) {
++    throw new RuntimeIsolationError('Invalid task-bound API admission policy; startup refused');
++  }
+   // These must be chosen by the task definition, never by a secret response.
+   const bootstrapControls = Object.fromEntries(Object.entries(process.env).filter(([name]) => isIsolationControl(name)));
+ 
+@@ -34,6 +45,12 @@
+     }
+     let injected = 0;
+     for (const [key, value] of Object.entries(secrets)) {
++      if (key === 'POST_VIDEO_ADMISSION_BOOTSTRAP_MODE') {
++        if (String(value) !== admissionBootstrap) throw new RuntimeIsolationError('Secret may not choose API admission bootstrap mode');
++        continue;
++      }
++      // Only these two policy fields are selected by the explicit reviewed API task.
++      if (taskBoundAdmission && ['POST_VIDEO_ROLLOUT_MODE', 'POST_VIDEO_CANARY_USER_IDS'].includes(key)) continue;
+       if (isIsolationControl(key)) {
+         if (String(value) !== bootstrapControls[key]) throw new RuntimeIsolationError(`Runtime secret may not override bootstrap control ${key}`);
+         continue;
+@@ -47,7 +64,7 @@
+     console.log(`[secrets] Loaded ${injected} vars from Secrets Manager (${target.secretId})`);
+   } catch (err) {
+     console.error("[secrets] Failed to load from Secrets Manager:", (err as Error).message);
+-    if (target.deployment === 'staging' || err instanceof RuntimeIsolationError) throw new Error('Runtime secret loading/isolation failed; startup refused');
++    if (taskBoundAdmission || target.deployment === 'staging' || err instanceof RuntimeIsolationError) throw new Error('Runtime secret loading/isolation failed; startup refused');
+     // Preserve the established production task-env fallback.
+   }
+ };
+--- a/src/infrastructure/jobs/queue.ts
++++ b/src/infrastructure/jobs/queue.ts
+@@ -432,6 +432,7 @@
+ ) as VideoUploadService;
+ let uploadRecoveryInFlight = false;
+ let uploadRecoveryTimer: NodeJS.Timeout | null = null;
++let globalAdmissionTimer: NodeJS.Timeout | null = null;
+ export const startVideoUploadScheduler = (): void => {
+   // Compatibility releases have no upload-session content (release preflight
+   // verifies that) and must not run new-pipeline maintenance or enqueue jobs
+@@ -439,6 +440,20 @@
+   // already accepted sessions after new session creation has been disabled.
+   if (!env.POST_VIDEO_UPLOADS_ENABLED && env.CLIP_HLS_WORKER_ENABLED) return;
+   if (uploadRecoveryTimer) return;
++  if (process.env.POST_VIDEO_GLOBAL_ADMISSION_ENABLED === 'true') {
++    const globalAdmission = require(path.join(backendRootPath, 'services', 'videoGlobalAdmission.js'));
++    let refreshing = false;
++    const refresh = async () => {
++      if (refreshing) return; refreshing = true;
++      try {
++        await globalAdmission.telemetry(clipVideoQueue);
++        await globalAdmission.reconcile({ sessions: require(path.join(backendRootPath, 'models', 'VideoUploadSession.js')),
++          posts: require(path.join(backendRootPath, 'models', 'Post.js')), intents: require(path.join(backendRootPath, 'models', 'PendingVideoPost.js')), queue: clipVideoQueue });
++      } catch { logger.warn('Global video admission held; accepted work retained'); }
++      finally { refreshing = false; }
++    };
++    void refresh(); globalAdmissionTimer = setInterval(() => void refresh(), 10000); globalAdmissionTimer.unref();
++  }
+   const recover = async () => {
+     if (uploadRecoveryInFlight) return;
+     uploadRecoveryInFlight = true;
+@@ -455,6 +470,7 @@
+   uploadRecoveryTimer.unref();
+ };
+ export const stopVideoUploadScheduler = (): void => {
++  if (globalAdmissionTimer) clearInterval(globalAdmissionTimer); globalAdmissionTimer = null;
+   if (uploadRecoveryTimer) clearInterval(uploadRecoveryTimer);
+   uploadRecoveryTimer = null;
+ };

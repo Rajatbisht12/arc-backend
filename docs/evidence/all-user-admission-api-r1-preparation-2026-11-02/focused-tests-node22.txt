@@ -1,0 +1,149 @@
+TAP version 13
+# Subtest: published loader reproduces all/empty-canary conflict without an actual secret read
+ok 1 - published loader reproduces all/empty-canary conflict without an actual secret read
+  ---
+  duration_ms: 99.554167
+  type: 'test'
+  ...
+# Subtest: explicit new API policy keeps all/empty-canary and hydrates other configuration without changing shared secret
+ok 2 - explicit new API policy keeps all/empty-canary and hydrates other configuration without changing shared secret
+  ---
+  duration_ms: 107.086291
+  type: 'test'
+  ...
+# Subtest: task-bound opt-in fails before fetch for worker/staging/compatibility or unsafe/missing policy values
+ok 3 - task-bound opt-in fails before fetch for worker/staging/compatibility or unsafe/missing policy values
+  ---
+  duration_ms: 563.232708
+  type: 'test'
+  ...
+# Subtest: a secret cannot opt a legacy API/worker into the new policy
+ok 4 - a secret cannot opt a legacy API/worker into the new policy
+  ---
+  duration_ms: 37.78825
+  type: 'test'
+  ...
+# Subtest: other isolation controls still reject mismatch and secret transport failure closes the opted-in API
+ok 5 - other isolation controls still reject mismatch and secret transport failure closes the opted-in API
+  ---
+  duration_ms: 99.396541
+  type: 'test'
+  ...
+# Subtest: no opt-in preserves worker/legacy environment and original production fallback
+ok 6 - no opt-in preserves worker/legacy environment and original production fallback
+  ---
+  duration_ms: 172.24525
+  type: 'test'
+  ...
+# Subtest: exact unchanged source archive and all controller pins verify
+ok 7 - exact unchanged source archive and all controller pins verify
+  ---
+  duration_ms: 37.908625
+  type: 'test'
+  ...
+# Subtest: supported plain inspect parses root separately from node, including CRLF
+ok 8 - supported plain inspect parses root separately from node, including CRLF
+  ---
+  duration_ms: 0.531125
+  type: 'test'
+  ...
+# Subtest: duplicate/missing fields and multi-node or incomplete output reject
+ok 9 - duplicate/missing fields and multi-node or incomplete output reject
+  ---
+  duration_ms: 0.153791
+  type: 'test'
+  ...
+# Subtest: invalid approval performs no command and creates no journal
+ok 10 - invalid approval performs no command and creates no journal
+  ---
+  duration_ms: 44.9495
+  type: 'test'
+  ...
+# Subtest: local Docker failure, foreign endpoint and dirty Git precede ALL provider calls and consumption
+ok 11 - local Docker failure, foreign endpoint and dirty Git precede ALL provider calls and consumption
+  ---
+  duration_ms: 362.336708
+  type: 'test'
+  ...
+# Subtest: local-only entry makes no provider request or journal
+ok 12 - local-only entry makes no provider request or journal
+  ---
+  duration_ms: 31.883417
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: published
+ok 13 - bounded one-use result: published
+  ---
+  duration_ms: 1050.687042
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: docker-driver
+ok 14 - bounded one-use result: docker-driver
+  ---
+  duration_ms: 737.281125
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: nested-name
+ok 15 - bounded one-use result: nested-name
+  ---
+  duration_ms: 704.738208
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: collision
+ok 16 - bounded one-use result: collision
+  ---
+  duration_ms: 662.14
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: unknown-tag
+ok 17 - bounded one-use result: unknown-tag
+  ---
+  duration_ms: 688.16525
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: wrong-caller
+ok 18 - bounded one-use result: wrong-caller
+  ---
+  duration_ms: 727.453625
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: build-unknown
+ok 19 - bounded one-use result: build-unknown
+  ---
+  duration_ms: 751.912541
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: bad-index
+ok 20 - bounded one-use result: bad-index
+  ---
+  duration_ms: 440.228166
+  type: 'test'
+  ...
+# Subtest: actual isolated Redis telemetry uses readonly commands and fails on pause, unknown state and outage
+ok 21 - actual isolated Redis telemetry uses readonly commands and fails on pause, unknown state and outage
+  ---
+  duration_ms: 120.79675
+  type: 'test'
+  ...
+# Exact ZIP: TypeScript compile and34isolated Mongo/HTTP cases passed;0production calls
+# Subtest: guard archive derives only five reviewed paths from the published API220 source and matches committed overlays
+ok 22 - guard archive derives only five reviewed paths from the published API220 source and matches committed overlays
+  ---
+  duration_ms: 86.717791
+  type: 'test'
+  ...
+# Subtest: the exact archived guard compiles and passes34 isolated Mongo/HTTP cases
+ok 23 - the exact archived guard compiles and passes34 isolated Mongo/HTTP cases
+  ---
+  duration_ms: 22278.299167
+  type: 'test'
+  ...
+1..23
+# tests 23
+# suites 0
+# pass 23
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 22445.793833

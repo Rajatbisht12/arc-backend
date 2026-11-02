@@ -9,3 +9,12 @@ release-tools/all-user-session-api-r1/** text eol=lf
 release-tools/all-user-session-api-r1/**/*.zip -text
 docs/ALL_USER_SESSION_API_R1_BUILD_REVIEW.md text eol=lf
 release-tools/all-user-session-api-r1/release/session-only-api.patch whitespace=-blank-at-eol
+
+# Admission guard: controls use LF; frozen release payload bytes are exact.
+release-tools/all-user-admission-api-r1/** text eol=lf
+release-tools/all-user-admission-api-r1/release/** -text
+release-tools/all-user-admission-api-r1/release/source.zip binary
+release-tools/all-user-admission-api-r1/release/guard-api.patch whitespace=-blank-at-eol,cr-at-eol
+release-tools/all-user-admission-api-r1/release/overrides/** whitespace=cr-at-eol
+docs/ALL_USER_ADMISSION_API_R1_BUILD_REVIEW.md text eol=lf
+docs/ALL_USER_ADMISSION_GUARD_R1_SOURCE_REVIEW.md text eol=lf

@@ -1,0 +1,32 @@
+✔ published loader reproduces all/empty-canary conflict without an actual secret read (95.537583ms)
+✔ explicit new API policy keeps all/empty-canary and hydrates other configuration without changing shared secret (88.274417ms)
+✔ task-bound opt-in fails before fetch for worker/staging/compatibility or unsafe/missing policy values (523.973584ms)
+✔ a secret cannot opt a legacy API/worker into the new policy (34.800125ms)
+✔ other isolation controls still reject mismatch and secret transport failure closes the opted-in API (79.999084ms)
+✔ no opt-in preserves worker/legacy environment and original production fallback (149.656583ms)
+✔ exact unchanged source archive and all controller pins verify (33.521208ms)
+✔ supported plain inspect parses root separately from node, including CRLF (0.517542ms)
+✔ duplicate/missing fields and multi-node or incomplete output reject (0.164542ms)
+✔ invalid approval performs no command and creates no journal (28.358041ms)
+✔ local Docker failure, foreign endpoint and dirty Git precede ALL provider calls and consumption (333.671208ms)
+✔ local-only entry makes no provider request or journal (22.884084ms)
+✔ bounded one-use result: published (882.297208ms)
+✔ bounded one-use result: docker-driver (722.363125ms)
+✔ bounded one-use result: nested-name (566.199667ms)
+✔ bounded one-use result: collision (587.638958ms)
+✔ bounded one-use result: unknown-tag (597.386625ms)
+✔ bounded one-use result: wrong-caller (573.921875ms)
+✔ bounded one-use result: build-unknown (761.900833ms)
+✔ bounded one-use result: bad-index (591.779084ms)
+✔ actual isolated Redis telemetry uses readonly commands and fails on pause, unknown state and outage (125.804875ms)
+Exact ZIP: TypeScript compile and34isolated Mongo/HTTP cases passed;0production calls
+✔ guard archive derives only five reviewed paths from the published API220 source and matches committed overlays (67.166125ms)
+✔ the exact archived guard compiles and passes34 isolated Mongo/HTTP cases (19974.372917ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20154.9595
