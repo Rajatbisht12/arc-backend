@@ -1,0 +1,14 @@
+{
+  "kind": "BACKGROUND_POST_API_IMAGE_NOT_BUILT",
+  "runId": "pi-background-post-api-r1-20261102",
+  "repository": "906446637180.dkr.ecr.us-east-1.amazonaws.com/arc-backend",
+  "tag": "pi-background-post-api-r1-20261102",
+  "sourceFiles": 759,
+  "sourceContentSha256": "e753a460c3b3576be6d4b1c975b6bbab806203a6664c5a958712984b67f49fb2",
+  "sourceArchiveSha256": "3ec0cb59c876533f995026663c3a760ca17aa01f5bd450da157b9ee3e03b8dde",
+  "imageDigest": null,
+  "apiOnly": true,
+  "workerDeploymentAuthority": 0,
+  "ecsAuthority": 0,
+  "ledgerOpeningAuthority": 0
+}

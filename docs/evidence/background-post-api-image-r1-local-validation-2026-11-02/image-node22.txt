@@ -1,0 +1,142 @@
+TAP version 13
+# Subtest: published loader refuses backgroundtrue before secret fetch
+ok 1 - published loader refuses backgroundtrue before secret fetch
+  ---
+  duration_ms: 46.366458
+  type: 'test'
+  ...
+# Subtest: corrected exact archive bootstraps explicit true and preserves task settings over shared secret
+ok 2 - corrected exact archive bootstraps explicit true and preserves task settings over shared secret
+  ---
+  duration_ms: 17.296375
+  type: 'test'
+  ...
+# Subtest: corrected exact archive bootstraps explicit false and preserves task settings over shared secret
+ok 3 - corrected exact archive bootstraps explicit false and preserves task settings over shared secret
+  ---
+  duration_ms: 12.083042
+  type: 'test'
+  ...
+# Subtest: all other isolation restrictions and missing/malformed background controls still fail before fetch
+ok 4 - all other isolation restrictions and missing/malformed background controls still fail before fetch
+  ---
+  duration_ms: 95.514667
+  type: 'test'
+  ...
+# Subtest: shared secret cannot select task-bound mode
+ok 5 - shared secret cannot select task-bound mode
+  ---
+  duration_ms: 4.975917
+  type: 'test'
+  ...
+# Subtest: exact unchanged source archive and all controller pins verify
+ok 6 - exact unchanged source archive and all controller pins verify
+  ---
+  duration_ms: 26.796167
+  type: 'test'
+  ...
+# Subtest: supported plain inspect parses root separately from node, including CRLF
+ok 7 - supported plain inspect parses root separately from node, including CRLF
+  ---
+  duration_ms: 0.782083
+  type: 'test'
+  ...
+# Subtest: duplicate/missing fields and multi-node or incomplete output reject
+ok 8 - duplicate/missing fields and multi-node or incomplete output reject
+  ---
+  duration_ms: 0.151958
+  type: 'test'
+  ...
+# Subtest: invalid approval performs no command and creates no journal
+ok 9 - invalid approval performs no command and creates no journal
+  ---
+  duration_ms: 25.18625
+  type: 'test'
+  ...
+# Subtest: local Docker failure, foreign endpoint and dirty Git precede ALL provider calls and consumption
+ok 10 - local Docker failure, foreign endpoint and dirty Git precede ALL provider calls and consumption
+  ---
+  duration_ms: 258.974875
+  type: 'test'
+  ...
+# Subtest: local-only entry makes no provider request or journal
+ok 11 - local-only entry makes no provider request or journal
+  ---
+  duration_ms: 19.417584
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: published
+ok 12 - bounded one-use result: published
+  ---
+  duration_ms: 366.281708
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: docker-driver
+ok 13 - bounded one-use result: docker-driver
+  ---
+  duration_ms: 492.810958
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: nested-name
+ok 14 - bounded one-use result: nested-name
+  ---
+  duration_ms: 360.784667
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: collision
+ok 15 - bounded one-use result: collision
+  ---
+  duration_ms: 326.714583
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: unknown-tag
+ok 16 - bounded one-use result: unknown-tag
+  ---
+  duration_ms: 337.48175
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: wrong-caller
+ok 17 - bounded one-use result: wrong-caller
+  ---
+  duration_ms: 322.376583
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: build-unknown
+ok 18 - bounded one-use result: build-unknown
+  ---
+  duration_ms: 347.333166
+  type: 'test'
+  ...
+# Subtest: bounded one-use result: bad-index
+ok 19 - bounded one-use result: bad-index
+  ---
+  duration_ms: 344.08
+  type: 'test'
+  ...
+# Subtest: 759 reviewed source files change only the explicit bootstrap background predicate
+ok 20 - 759 reviewed source files change only the explicit bootstrap background predicate
+  ---
+  duration_ms: 49.326
+  type: 'test'
+  ...
+# Subtest: Dockerfile/dependencies/worker/admission/publication source remain unchanged
+ok 21 - Dockerfile/dependencies/worker/admission/publication source remain unchanged
+  ---
+  duration_ms: 43.025459
+  type: 'test'
+  ...
+# Subtest: sealed archive candidate matches release override and standalone source resolver
+ok 22 - sealed archive candidate matches release override and standalone source resolver
+  ---
+  duration_ms: 60.632583
+  type: 'test'
+  ...
+1..22
+# tests 22
+# suites 0
+# pass 22
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3302.3805

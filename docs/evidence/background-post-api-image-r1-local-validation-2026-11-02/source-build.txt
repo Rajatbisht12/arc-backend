@@ -1,0 +1,22 @@
+
+> arc-modular-backend@1.0.0 prebuild
+> npm run check:official-copy
+
+
+> arc-modular-backend@1.0.0 check:official-copy
+> node scripts/check-official-copy.cjs
+
+Official copy check passed.
+
+> arc-modular-backend@1.0.0 build
+> tsc -p tsconfig.json
+
+
+> arc-modular-backend@1.0.0 postbuild
+> npm run verify:runtime-imports
+
+
+> arc-modular-backend@1.0.0 verify:runtime-imports
+> node scripts/verify-runtime-imports.js
+
+Compiled HTTP runtime imports passed: one canonical legacy model tree, no network access.

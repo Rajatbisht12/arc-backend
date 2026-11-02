@@ -1,0 +1,30 @@
+✔ published loader refuses backgroundtrue before secret fetch (43.142125ms)
+✔ corrected exact archive bootstraps explicit true and preserves task settings over shared secret (10.516625ms)
+✔ corrected exact archive bootstraps explicit false and preserves task settings over shared secret (7.215459ms)
+✔ all other isolation restrictions and missing/malformed background controls still fail before fetch (78.790042ms)
+✔ shared secret cannot select task-bound mode (4.306416ms)
+✔ exact unchanged source archive and all controller pins verify (23.079584ms)
+✔ supported plain inspect parses root separately from node, including CRLF (0.752875ms)
+✔ duplicate/missing fields and multi-node or incomplete output reject (0.180708ms)
+✔ invalid approval performs no command and creates no journal (22.37225ms)
+✔ local Docker failure, foreign endpoint and dirty Git precede ALL provider calls and consumption (244.991042ms)
+✔ local-only entry makes no provider request or journal (17.746916ms)
+✔ bounded one-use result: published (336.814417ms)
+✔ bounded one-use result: docker-driver (316.8935ms)
+✔ bounded one-use result: nested-name (352.43025ms)
+✔ bounded one-use result: collision (335.06575ms)
+✔ bounded one-use result: unknown-tag (284.865084ms)
+✔ bounded one-use result: wrong-caller (291.106291ms)
+✔ bounded one-use result: build-unknown (336.434ms)
+✔ bounded one-use result: bad-index (310.132417ms)
+✔ 759 reviewed source files change only the explicit bootstrap background predicate (45.703042ms)
+✔ Dockerfile/dependencies/worker/admission/publication source remain unchanged (39.787125ms)
+✔ sealed archive candidate matches release override and standalone source resolver (56.244458ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2973.611417
