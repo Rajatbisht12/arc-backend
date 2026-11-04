@@ -1,0 +1,117 @@
+{
+  "at": 1793833198253,
+  "StartTime": "2026-11-04T22:44:00.000Z",
+  "EndTime": "2026-11-04T22:59:00.000Z",
+  "ScanBy": "TimestampAscending",
+  "MaxDatapoints": 100,
+  "MetricDataQueries": [
+    {
+      "Id": "memoryused",
+      "ReturnData": true,
+      "MetricStat": {
+        "Metric": {
+          "Namespace": "ECS/ContainerInsights",
+          "MetricName": "MemoryUtilized",
+          "Dimensions": [
+            {
+              "Name": "ClusterName",
+              "Value": "arc-cluster"
+            },
+            {
+              "Name": "ServiceName",
+              "Value": "squadhunt-prod-video-worker-Service-5bK8EbU7Uwmj"
+            },
+            {
+              "Name": "TaskId",
+              "Value": "4fd72ef9ca7443fd8fd2e287a3ff7462"
+            }
+          ]
+        },
+        "Period": 60,
+        "Stat": "Maximum",
+        "Unit": "Megabytes"
+      }
+    },
+    {
+      "Id": "memoryreserved",
+      "ReturnData": true,
+      "MetricStat": {
+        "Metric": {
+          "Namespace": "ECS/ContainerInsights",
+          "MetricName": "MemoryReserved",
+          "Dimensions": [
+            {
+              "Name": "ClusterName",
+              "Value": "arc-cluster"
+            },
+            {
+              "Name": "ServiceName",
+              "Value": "squadhunt-prod-video-worker-Service-5bK8EbU7Uwmj"
+            },
+            {
+              "Name": "TaskId",
+              "Value": "4fd72ef9ca7443fd8fd2e287a3ff7462"
+            }
+          ]
+        },
+        "Period": 60,
+        "Stat": "Maximum",
+        "Unit": "Megabytes"
+      }
+    },
+    {
+      "Id": "diskused",
+      "ReturnData": true,
+      "MetricStat": {
+        "Metric": {
+          "Namespace": "ECS/ContainerInsights",
+          "MetricName": "EphemeralStorageUtilized",
+          "Dimensions": [
+            {
+              "Name": "ClusterName",
+              "Value": "arc-cluster"
+            },
+            {
+              "Name": "ServiceName",
+              "Value": "squadhunt-prod-video-worker-Service-5bK8EbU7Uwmj"
+            },
+            {
+              "Name": "TaskId",
+              "Value": "4fd72ef9ca7443fd8fd2e287a3ff7462"
+            }
+          ]
+        },
+        "Period": 60,
+        "Stat": "Maximum",
+        "Unit": "Gigabytes"
+      }
+    },
+    {
+      "Id": "diskreserved",
+      "ReturnData": true,
+      "MetricStat": {
+        "Metric": {
+          "Namespace": "ECS/ContainerInsights",
+          "MetricName": "EphemeralStorageReserved",
+          "Dimensions": [
+            {
+              "Name": "ClusterName",
+              "Value": "arc-cluster"
+            },
+            {
+              "Name": "ServiceName",
+              "Value": "squadhunt-prod-video-worker-Service-5bK8EbU7Uwmj"
+            },
+            {
+              "Name": "TaskId",
+              "Value": "4fd72ef9ca7443fd8fd2e287a3ff7462"
+            }
+          ]
+        },
+        "Period": 60,
+        "Stat": "Maximum",
+        "Unit": "Gigabytes"
+      }
+    }
+  ]
+}
