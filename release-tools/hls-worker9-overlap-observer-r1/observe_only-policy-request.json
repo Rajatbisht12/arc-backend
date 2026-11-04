@@ -1,5 +1,0 @@
-{
-  "RoleName": "hls-worker-observe-relay-r1-20261104",
-  "PolicyName": "OnlyWorker9OverlapObserverR120261105",
-  "PolicyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"OnlyExactRunCommandPresence\",\"Effect\":\"Allow\",\"Action\":\"s3:ListBucket\",\"Resource\":\"arn:aws:s3:::squadhunt-control-906446637180-us-east-1-20261104-r1\",\"Condition\":{\"StringLike\":{\"s3:prefix\":\"protected-worker-control/hls-worker9-overlap-observer-r1-20261105/commands/*.json\"},\"NumericLessThanEquals\":{\"s3:max-keys\":1}}},{\"Sid\":\"OnlyExactRunCommandRead\",\"Effect\":\"Allow\",\"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::squadhunt-control-906446637180-us-east-1-20261104-r1/protected-worker-control/hls-worker9-overlap-observer-r1-20261105/commands/*.json\"},{\"Sid\":\"OnlyEncryptedFreshRunRequests\",\"Effect\":\"Allow\",\"Action\":\"s3:PutObject\",\"Resource\":\"arn:aws:s3:::squadhunt-control-906446637180-us-east-1-20261104-r1/protected-worker-control/hls-worker9-overlap-observer-r1-20261105/requests/*.json\",\"Condition\":{\"StringEquals\":{\"s3:x-amz-server-side-encryption\":\"AES256\"}}}]}"
-}
