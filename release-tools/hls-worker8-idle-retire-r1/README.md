@@ -8,6 +8,6 @@ Only the exact old worker8 task/process can be signed: operational OBSERVE, one 
 
 AWS access is limited by code to STS plus the one new dedicated challenge object and three conditional AES256 command-object puts. Commands are published reconcile, drain, then observe; observe is the last commit marker. Commands and envelopes stay in protected Windows files and private S3. Paste only the final safe JSON receipt into chat. Do not paste command-body files or key material.
 
-One-use new Windows journal: hls-worker8-idle-retire-r1-20261105-windows-consumed. Keep prior journals and consumed OBSERVE objects unchanged. An existing journal or any HOLD/unknown result forbids rerun, deletion, alternate prefix or automatic cleanup.
+One-use new Windows journal: hls-worker8-idle-retire-r1-20261105-signer-consumed. Keep prior journals and consumed OBSERVE objects unchanged. An existing journal or any HOLD/unknown result forbids rerun, deletion, alternate prefix or automatic cleanup.
 
 The source-defined idle/consumer-close proof is separate from independent operating-system FFmpeg or Redis/Mongo lease absence: worker8's known missing hooks cannot establish these. This retirement is not loaded-DRAIN, two-encode overlap or autoscaling qualification. No service update, manual stop, protection-clear API, queue change, new job or media operation is performed by Windows.
