@@ -1,0 +1,100 @@
+{
+  "files": [
+    {
+      "path": "admission.cjs",
+      "sha256": "690fced9cbfaeec52de7fbc0af594fa1dccb4231cb6ccf00020989a987fe58e6"
+    },
+    {
+      "path": "bootstrap.test.cjs",
+      "sha256": "5a0dda970ff59b75cbbc6b32d8a8bd8b27afabe672e2f663b5cc391fcc1455d7"
+    },
+    {
+      "path": "clock-proof.cjs",
+      "sha256": "364ec7128071bb5a4471b2f509767043acf2b2827e9afa9dbb796eca62b925e8"
+    },
+    {
+      "path": "clock-proof.test.cjs",
+      "sha256": "8f9f7c813595006baabe43c5cb9fd7983cdbc84d303cb2d17dfb5710b6cddcd3"
+    },
+    {
+      "path": "collector.cjs",
+      "sha256": "74df6b4d2223b42871486cedb656deb56ac86b39c9e975bd8a70c7dfc70a7b4d"
+    },
+    {
+      "path": "completion.cjs",
+      "sha256": "b6df9985a1d8e27cac1b47f88165484040a38b1af1bd1e986db834ea1b871488"
+    },
+    {
+      "path": "completion.test.cjs",
+      "sha256": "2fa8ec34fd4409ec4d2735cb26b5eb4d5cd83c2dc7b0e723aad7f9bcce39e581"
+    },
+    {
+      "path": "control-contract.cjs",
+      "sha256": "a0b529748e08748d80d1e6b3b4c3eaee289d125d00e64a9c4ebd481e6728e8ea"
+    },
+    {
+      "path": "database.cjs",
+      "sha256": "40288d8a870c54446100f2215a68f7255a2a75518ef125b9e538af3283b36cd5"
+    },
+    {
+      "path": "eligibility.cjs",
+      "sha256": "2e69be0711a6f6c40881578b6c142ed4dc67dbe5db9310908cb26818e7693be2"
+    },
+    {
+      "path": "eligibility.test.cjs",
+      "sha256": "80adf5f4e3c8c50d9f2786aa2e332d096bbfdc23df02d62eeac5e9ec2454b7fc"
+    },
+    {
+      "path": "fixtures.cjs",
+      "sha256": "c503f64d146e9303c233262049eb81e3c56f916939b41b38a361d94f3286f53f"
+    },
+    {
+      "path": "handshake.cjs",
+      "sha256": "880fd9e04b05c50e43375523cc6fc9c30299584e56251a30bbfc6e102c4822dc"
+    },
+    {
+      "path": "native-entry.cjs",
+      "sha256": "1f69d5f81b31ce4f4c4433b6bd4b33d6d6f4619141a82d18f564ea3dd8ac0d2a"
+    },
+    {
+      "path": "owner-quota.cjs",
+      "sha256": "c8ed89dca4c8d4896f417799c00eadd78390e78f423601a4693983ce6cd35311"
+    },
+    {
+      "path": "package.cjs",
+      "sha256": "928abe2a62d9df5c9d698b472321ed28af4fc24d15b5cc24009b216dca39ea78"
+    },
+    {
+      "path": "progress-proof.cjs",
+      "sha256": "05c9fadb3b49af18a820501cc20636b9a5dce2970d6dc7a35732c78248d563e9"
+    },
+    {
+      "path": "proof.cjs",
+      "sha256": "6b1445b9692f0d08900a7231777652e2543356268ff56813e05db494bd442c18"
+    },
+    {
+      "path": "protocol.cjs",
+      "sha256": "884f2d5f465d4b661c326821ee02acf337d7d4c92a0537c0a7e86101dcad34fb"
+    },
+    {
+      "path": "serialized.test.cjs",
+      "sha256": "c3ee9c8df948c04edafd3821d0877e43f15e026be2656dae11062032058fd218"
+    },
+    {
+      "path": "source-check.cjs",
+      "sha256": "ac4d4b4d0eb625013f4f01087da28a8901f018a4c29568898c07acf68d7b8f1f"
+    },
+    {
+      "path": "windows-bootstrap.cjs",
+      "sha256": "77840ab64aba767a9e3d8568c0e70947780a451beab802a27284c97b7fcfb980"
+    },
+    {
+      "path": "windows-local.cjs",
+      "sha256": "9d97876e772938a0d2c12477cd8e24f029f96251ea92f5e40bb05c6b145f8828"
+    },
+    {
+      "path": "windows-signer.cjs",
+      "sha256": "196ca12cf18a34aacdf14b1986b07a6d3c225728727e76581b6b48663335b603"
+    }
+  ]
+}
