@@ -1,0 +1,72 @@
+{
+  "files": [
+    {
+      "path": "admission.cjs",
+      "sha256": "690fced9cbfaeec52de7fbc0af594fa1dccb4231cb6ccf00020989a987fe58e6"
+    },
+    {
+      "path": "bootstrap.test.cjs",
+      "sha256": "2091048830e6eb632e6e1e91eaaf9bc2768ba257be784b58c4054990fe9527dc"
+    },
+    {
+      "path": "collector.cjs",
+      "sha256": "e0190ac523bc90b73b76b8c9dc07855113f3654963ed77f88da0bc6e709c22a0"
+    },
+    {
+      "path": "control-contract.cjs",
+      "sha256": "a0b529748e08748d80d1e6b3b4c3eaee289d125d00e64a9c4ebd481e6728e8ea"
+    },
+    {
+      "path": "database.cjs",
+      "sha256": "d974354164283c6a58eabe44b8e38e4e0db748e9e57090461bb5a442b6084959"
+    },
+    {
+      "path": "fixtures.cjs",
+      "sha256": "30ffb98dfcae1a5dd4db566823789d055ccdd06adb855ede811b47e855fc8773"
+    },
+    {
+      "path": "handshake.cjs",
+      "sha256": "b56be46ae497dd3522808118265d06063e1eaffa53c08cd37894530077c62b70"
+    },
+    {
+      "path": "native-entry.cjs",
+      "sha256": "4f8749ff48ca265b46fc4a3c0130790640a03b4ee779b783d47571af9101eb0b"
+    },
+    {
+      "path": "package.cjs",
+      "sha256": "0c6cfb21376fb1f49262f073a6a522a4ce428b6f73a838a659016f29e7b265bc"
+    },
+    {
+      "path": "progress-proof.cjs",
+      "sha256": "05c9fadb3b49af18a820501cc20636b9a5dce2970d6dc7a35732c78248d563e9"
+    },
+    {
+      "path": "proof.cjs",
+      "sha256": "fc4e6a69be88850e940fdc9351f8d3baf9af8fc38d7a36df1c9550316d6ead66"
+    },
+    {
+      "path": "protocol.cjs",
+      "sha256": "884f2d5f465d4b661c326821ee02acf337d7d4c92a0537c0a7e86101dcad34fb"
+    },
+    {
+      "path": "serialized.test.cjs",
+      "sha256": "773d29fc3bec886936a94f34e8a8953b94fd8c794c096dc3f76801c174750c76"
+    },
+    {
+      "path": "source-check.cjs",
+      "sha256": "ac4d4b4d0eb625013f4f01087da28a8901f018a4c29568898c07acf68d7b8f1f"
+    },
+    {
+      "path": "windows-bootstrap.cjs",
+      "sha256": "b692d0bba71e6a14a240678426b43640d7e39670f200afb6d441be7fbda69188"
+    },
+    {
+      "path": "windows-local.cjs",
+      "sha256": "9d97876e772938a0d2c12477cd8e24f029f96251ea92f5e40bb05c6b145f8828"
+    },
+    {
+      "path": "windows-signer.cjs",
+      "sha256": "4ed9825821b7323777692f91c39647c99458e2c62181e11414dbeb1c6272d332"
+    }
+  ]
+}
