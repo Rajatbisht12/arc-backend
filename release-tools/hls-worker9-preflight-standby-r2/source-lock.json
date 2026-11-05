@@ -1,0 +1,20 @@
+{
+  "files": [
+    {
+      "path": "protocol.cjs",
+      "sha256": "65b4080c43b1fd6e869b05a9dfb050af59151a08facd8dc02920f2a46840fa17"
+    },
+    {
+      "path": "windows-local.cjs",
+      "sha256": "0f73d6476378489e54e8fc61ec65eb12683a5bebb1d61b47119188946769a124"
+    },
+    {
+      "path": "windows-signer.cjs",
+      "sha256": "5af81ffc757baa862fcd3cdd2b8cf4bb100626f91f5ea1eb179f87975ff69439"
+    },
+    {
+      "path": "windows-standby.cjs",
+      "sha256": "4a943b0f7da84282707d905877654d23861f156404d6bc2e76ae693f7ad9b32c"
+    }
+  ]
+}
